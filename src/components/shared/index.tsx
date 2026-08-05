@@ -426,3 +426,61 @@ export function Select({
     </div>
   );
 }
+
+/* ── Confirm Modal ── */
+interface ConfirmModalProps {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isDestructive?: boolean;
+}
+export function ConfirmModal({ 
+  isOpen, 
+  title, 
+  message, 
+  confirmText = 'Confirm', 
+  cancelText = 'Cancel', 
+  onConfirm, 
+  onCancel,
+  isDestructive = false
+}: ConfirmModalProps) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={onCancel}
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: 'spring', duration: 0.4, bounce: 0.15 }}
+            className="relative w-full max-w-md overflow-hidden rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-2xl"
+          >
+            <div className="p-5">
+              <h3 className="text-[15px] font-semibold text-[var(--text-primary)] mb-2">{title}</h3>
+              <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed">{message}</p>
+            </div>
+            <div className="flex justify-end gap-2 p-4 bg-[var(--bg-tertiary)] border-t border-[var(--border)]">
+              <Button variant="secondary" onClick={onCancel}>{cancelText}</Button>
+              <Button variant={isDestructive ? 'danger' : 'primary'} onClick={() => {
+                onConfirm();
+              }}>
+                {confirmText}
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}

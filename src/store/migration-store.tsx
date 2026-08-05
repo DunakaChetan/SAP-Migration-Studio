@@ -24,6 +24,7 @@ export interface ValidationEntry {
 }
 
 export interface MigrationState {
+  projectId: string | null;
   src: string;
   obj: string;
   cc: string;
@@ -49,6 +50,7 @@ export interface MigrationState {
 }
 
 const initialState: MigrationState = {
+  projectId: null,
   src: 'SAP_ECC',
   obj: 'CUSTOMER',
   cc: '1000',

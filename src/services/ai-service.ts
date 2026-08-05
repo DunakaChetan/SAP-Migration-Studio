@@ -1,34 +1,84 @@
 // ═══════════════════════════════════════════════════════
-// AI SERVICE — Claude API integration
-// Ported from original sap-migration-studio-v3.html
+// AI SERVICE — Connects to our FastAPI Backend
 // ═══════════════════════════════════════════════════════
 
-import type { MigrationState } from '../store/migration-store';
-
-export async function ai(
-  prompt: string,
-  aiLog: MigrationState['aiLog'],
-  maxTok = 1000
-): Promise<string> {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: maxTok,
-      system: 'You are a senior SAP S/4HANA data migration consultant with 20 years of hands-on experience.',
-      messages: [{ role: 'user', content: prompt }],
-    }),
+export async function getSAPSchema(objectName: string): Promise<any> {
+  const token = localStorage.getItem('access_token');
+  const res = await fetch(`/api/sap/schema?object_name=${objectName}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    }
   });
-  const d = await r.json();
-  if (d.error) throw new Error(d.error.message);
-  const t = (d.content || []).map((b: { text?: string }) => b.text || '').join('');
+  
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Failed to fetch SAP schema');
+  }
+  
+  return res.json();
+}
+
+export async function generateMapping(sourceSystem: string, targetObject: string, sourceFields: string[]): Promise<any> {
+  const token = localStorage.getItem('access_token');
+  const res = await fetch('/api/sap/map', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ sourceSystem, targetObject, sourceFields })
+  });
+  
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Mapping generation failed');
+  }
+  
+  return res.json();
+}
+
+export async function correctMapping(sourceSystem: string, sourceFieldName: string, sapFieldId: string, transformRule: string): Promise<any> {
+  const token = localStorage.getItem('access_token');
+  const res = await fetch('/api/sap/map/correct', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ sourceSystem, sourceFieldName, sapFieldId, transformRule })
+  });
+  
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Correction failed');
+  }
+  
+  return res.json();
+}
+
+export async function ai(prompt: string, aiLog: any[], maxTok = 1000): Promise<string> {
+  const token = localStorage.getItem('access_token');
+  const res = await fetch('/api/sap/prompt', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ prompt })
+  });
+  
+  if (!res.ok) throw new Error('AI prompt failed');
+  const data = await res.json();
+  const text = data.content || '';
+  
   aiLog.push({
     ts: new Date().toISOString(),
     p: prompt.slice(0, 120) + '…',
-    r: t.slice(0, 250) + '…',
+    r: text.slice(0, 250) + '…',
   });
-  return t;
+  return text;
 }
 
 export function parseAI(t: string): Record<string, unknown> | Record<string, unknown>[] | null {

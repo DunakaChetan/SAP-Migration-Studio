@@ -1,6 +1,5 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
 import { MigrationProvider, useMigration } from '@/store/migration-store';
 import { ToastProvider } from '@/components/ui/toast';
 import { LoadingProvider } from '@/components/ui/loading-overlay';
@@ -15,24 +14,37 @@ import { Step6Cleanse } from '@/pages/Step6_Cleanse';
 import { Step7Transform } from '@/pages/Step7_Transform';
 import { Step8DMCExport } from '@/pages/Step8_DMCExport';
 import { Step9TechDocs } from '@/pages/Step9_TechDocs';
+import { Auth } from '@/pages/Auth';
+
+function ProtectedLayout({ children }: { children: React.ReactNode }) {
+  const token = localStorage.getItem('access_token');
+  if (!token) return <Navigate to="/auth" replace />;
+
+  return (
+    <div className="h-full flex overflow-hidden" style={{ background: 'var(--bg)' }}>
+      <StepNavigation />
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        <Header />
+        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
 
 function AppContent() {
   const { state } = useMigration();
-  const location = useLocation();
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', state.theme === 'dark');
   }, [state.theme]);
 
   return (
-    <div className="h-full flex overflow-hidden" style={{ background: 'var(--bg)' }}>
-      {/* Left Vertical Sidebar */}
-      <StepNavigation />
-
-      {/* Right Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        <Header />
-        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+    <Routes>
+      <Route path="/auth" element={<Auth />} />
+      <Route path="*" element={
+        <ProtectedLayout>
           <Routes>
             <Route path="/" element={<Step1SourceData />} />
             <Route path="/mapping" element={<Step2AIMapping />} />
@@ -45,9 +57,9 @@ function AppContent() {
             <Route path="/docs" element={<Step9TechDocs />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-        </main>
-      </div>
-    </div>
+        </ProtectedLayout>
+      } />
+    </Routes>
   );
 }
 

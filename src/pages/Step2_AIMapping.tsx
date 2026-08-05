@@ -5,11 +5,11 @@ import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
 import { OBJS } from '@/data/sap-schemas';
 import { TRANSFORMS } from '@/data/lookup-maps';
-import { ai, parseAI } from '@/services/ai-service';
+import { generateMapping, correctMapping, getSAPSchema } from '@/services/ai-service';
 import { dl, expCSV } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, Badge, StatBox, StatsGrid, PageHeader, Divider, EmptyState, AIResponse, Select } from '@/components/shared';
-import { ArrowLeft, ArrowRight, Bot, Download, X } from 'lucide-react';
+import { ArrowRight, Download, Bot, ArrowLeft, RefreshCw, Edit3, Save, X } from 'lucide-react';
 import type { MappingEntry } from '@/store/migration-store';
 
 export function Step2AIMapping() {
@@ -18,41 +18,185 @@ export function Step2AIMapping() {
   const { toast } = useToast();
   const { showLoad, tick, hideLoad } = useLoading();
   const [aiOutput, setAiOutput] = useState('');
+  const [sourceSearch, setSourceSearch] = useState('');
+  const [targetSearch, setTargetSearch] = useState('');
+  const [mappingSearch, setMappingSearch] = useState('');
+  const [editingMapSrc, setEditingMapSrc] = useState<{index: number, value: string} | null>(null);
+
+  const [sapFields, setSapFields] = useState<any[]>([]);
+  const [isLoadingSchema, setIsLoadingSchema] = useState(true);
+
+  React.useEffect(() => {
+    async function fetchSchema() {
+      setIsLoadingSchema(true);
+      try {
+        // Map frontend key to backend DB name
+        const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+        const res = await getSAPSchema(objName);
+        const fields = (res.fields || []).map((f: any) => ({
+          ...f,
+          field_name: `${f.sap_structure}.${f.field_name}`
+        }));
+        setSapFields(fields);
+
+        // Auto-populate Source Fields based on Source System
+        if (state.src === 'SAP_ECC') {
+          // If SAP ECC, the source fields are identical to SAP target fields
+          const targetFieldNames = fields.map((f: any) => f.field_name);
+          dispatch({ type: 'SET_FIELD', field: 'headers', value: targetFieldNames });
+        } else if (state.src === 'ORACLE_EBS') {
+          // If Oracle EBS, show zero source fields
+          dispatch({ type: 'SET_FIELD', field: 'headers', value: [] });
+        }
+      } catch (err) {
+        setSapFields([]);
+      } finally {
+        setIsLoadingSchema(false);
+      }
+    }
+    fetchSchema();
+  }, [state.obj, state.src]);
+
+  const handleSaveMapSrcEdit = (index: number, oldName: string) => {
+    if (!editingMapSrc || !editingMapSrc.value.trim() || editingMapSrc.value === oldName) {
+      setEditingMapSrc(null);
+      return;
+    }
+    const newName = editingMapSrc.value.trim();
+    
+    // Update all mappings that used the old name
+    const newMappings = state.mapping.map(m => 
+      m.src === oldName ? { ...m, src: newName } : m
+    );
+    dispatch({ type: 'SET_FIELD', field: 'mapping', value: newMappings });
+
+    // Synchronize with the Source Fields list on the left
+    const newHeaders = state.headers.map(h => h === oldName ? newName : h);
+    dispatch({ type: 'SET_FIELD', field: 'headers', value: newHeaders });
+
+    setEditingMapSrc(null);
+  };
+
+  const removeMap = (sap: string) => {
+    dispatch({ type: 'SET_FIELD', field: 'mapping', value: state.mapping.filter((m) => m.sap !== sap) });
+  };
+
+  const saveMappings = async () => {
+    if (!state.projectId) {
+      toast('You must select a project in Step 1 to save mappings.', 'err');
+      return;
+    }
+    
+    showLoad('Saving Mappings...', 'Persisting mapping rules to database', ['Connecting to backend...', 'Upserting mapping history...']);
+    setTimeout(() => tick(0, 'Connected'), 300);
+    
+    try {
+      const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+      const res = await fetch('/api/sap/map/save_all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: state.projectId,
+          sourceSystem: state.src,
+          targetObject: objName,
+          mappings: state.mapping
+        })
+      });
+      if (!res.ok) throw new Error('Failed to save mappings');
+      
+      const data = await res.json();
+      hideLoad();
+      toast(`Successfully saved ${data.inserted} mapped fields!`, 'ok');
+    } catch (err: any) {
+      hideLoad();
+      toast(err.message, 'err');
+    }
+  };
+
+  const loadMappings = async () => {
+    if (!state.projectId) {
+      toast('You must select a project in Step 1 to load mappings.', 'err');
+      return;
+    }
+    
+    showLoad('Loading Mappings...', 'Retrieving your mapping history', ['Connecting to backend...', 'Fetching user corrected mappings...']);
+    setTimeout(() => tick(0, 'Connected'), 300);
+    
+    try {
+      const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+      const res = await fetch(`/api/sap/map/history?project_id=${state.projectId}&source_system=${state.src}&target_object=${objName}`);
+      if (!res.ok) throw new Error('Failed to fetch history');
+      
+      const data = await res.json();
+      hideLoad();
+      
+      if (!data.mappings || data.mappings.length === 0) {
+        toast('No previous mappings found for this system and object.', 'ok');
+        return;
+      }
+      
+      // Enrich the loaded mappings with req and sapLabel from the current sapFields schema
+      const enrichedMappings = data.mappings.map((m: any) => {
+        const sapDef = sapFields.find(f => f.field_name === m.sap);
+        return {
+          ...m,
+          req: sapDef ? sapDef.is_mandatory : false,
+          sapLabel: sapDef ? sapDef.field_description : ''
+        };
+      });
+      
+      // Ensure all loaded source fields are added to headers if they don't exist
+      const newHeaders = new Set(state.headers);
+      enrichedMappings.forEach((m: any) => {
+        if (m.src) newHeaders.add(m.src);
+      });
+      
+      dispatch({ type: 'SET_FIELD', field: 'headers', value: Array.from(newHeaders) });
+      dispatch({ type: 'SET_FIELD', field: 'mapping', value: enrichedMappings });
+      
+      toast(`Loaded ${enrichedMappings.length} mappings from history!`, 'ok');
+    } catch (err: any) {
+      hideLoad();
+      toast(err.message, 'err');
+    }
+  };
 
   const obj = OBJS[state.obj];
   const hi = state.mapping.filter((m) => m.conf >= 80).length;
   const med = state.mapping.filter((m) => m.conf >= 60 && m.conf < 80).length;
-  const unmap = (obj?.fields || []).filter((f) => f.req && !state.mapping.find((m) => m.sap === f.n && m.conf >= 50)).length;
+
+  // Calculate unmapped using dynamic fields
+  const unmap = sapFields.filter((f) => f.is_mandatory && !state.mapping.find((m) => m.sap === f.field_name && m.conf >= 50)).length;
 
   // -- Auto map fallback (same as original)
   function autoMap(): MappingEntry[] {
     const sem: Record<string, string[]> = {
-      'KUNNR':['KUNNR','PARTY_NUMBER','CUST_ID','ID','CUSTOMER_NO','ACCOUNTNUM'],
-      'LIFNR':['LIFNR','PARTY_NUMBER','VENDOR_ID','SUPPLIER_ID'],
-      'NAME1':['NAME1','PARTY_NAME','CUSTOMER_NAME','VENDOR_NAME','NAME','DESCRIPTION','MAKTX'],
-      'LAND1':['LAND1','COUNTRY_CODE','COUNTRY','LAND'],
-      'ORT01':['ORT01','CITY','TOWN'],
-      'PSTLZ':['PSTLZ','POSTAL_CODE','ZIP','POSTCODE'],
-      'REGIO':['REGIO','STATE','PROVINCE','REGION'],
-      'STRAS':['STRAS','ADDRESS1','ADDRESS','STREET'],
-      'TELF1':['TELF1','PHONE','TELEPHONE'],
-      'SMTP_ADDR':['SMTP_ADDR','EMAIL','MAIL'],
-      'WAERS':['WAERS','CURRENCY_CODE','CURRENCY','CURR'],
-      'ZTERM':['ZTERM','PAYMENT_TERMS','PAY_TERMS'],
-      'STCD1':['STCD1','TAX_NUMBER','TAX_ID','TAXNUMBER'],
-      'BUKRS':['BUKRS','COMPANY_CODE'],
-      'VKORG':['VKORG','SALES_ORG'],
-      'EKORG':['EKORG','PURCH_ORG'],
-      'MATNR':['MATNR','ID','MATERIAL_NUMBER','ITEM_CODE','PART_NO'],
-      'MAKTX':['MAKTX','DESCRIPTION','NAME','MATERIAL_DESC'],
-      'MEINS':['MEINS','BASE_UOM','UNIT','UOM'],
-      'MTART':['MTART','MATERIAL_TYPE'],
-      'MBRSH':['MBRSH','INDUSTRY'],
-      'WERKS':['WERKS','PLANT'],
-      'LGORT':['LGORT','STORAGE_LOC','STORAGE_LOCATION'],
-      'BRGEW':['BRGEW','GROSS_WEIGHT'],
-      'NTGEW':['NTGEW','NET_WEIGHT'],
-      'GEWEI':['GEWEI','WEIGHT_UNIT'],
+      'KUNNR': ['KUNNR', 'PARTY_NUMBER', 'CUST_ID', 'ID', 'CUSTOMER_NO', 'ACCOUNTNUM'],
+      'LIFNR': ['LIFNR', 'PARTY_NUMBER', 'VENDOR_ID', 'SUPPLIER_ID'],
+      'NAME1': ['NAME1', 'PARTY_NAME', 'CUSTOMER_NAME', 'VENDOR_NAME', 'NAME', 'DESCRIPTION', 'MAKTX'],
+      'LAND1': ['LAND1', 'COUNTRY_CODE', 'COUNTRY', 'LAND'],
+      'ORT01': ['ORT01', 'CITY', 'TOWN'],
+      'PSTLZ': ['PSTLZ', 'POSTAL_CODE', 'ZIP', 'POSTCODE'],
+      'REGIO': ['REGIO', 'STATE', 'PROVINCE', 'REGION'],
+      'STRAS': ['STRAS', 'ADDRESS1', 'ADDRESS', 'STREET'],
+      'TELF1': ['TELF1', 'PHONE', 'TELEPHONE'],
+      'SMTP_ADDR': ['SMTP_ADDR', 'EMAIL', 'MAIL'],
+      'WAERS': ['WAERS', 'CURRENCY_CODE', 'CURRENCY', 'CURR'],
+      'ZTERM': ['ZTERM', 'PAYMENT_TERMS', 'PAY_TERMS'],
+      'STCD1': ['STCD1', 'TAX_NUMBER', 'TAX_ID', 'TAXNUMBER'],
+      'BUKRS': ['BUKRS', 'COMPANY_CODE'],
+      'VKORG': ['VKORG', 'SALES_ORG'],
+      'EKORG': ['EKORG', 'PURCH_ORG'],
+      'MATNR': ['MATNR', 'ID', 'MATERIAL_NUMBER', 'ITEM_CODE', 'PART_NO'],
+      'MAKTX': ['MAKTX', 'DESCRIPTION', 'NAME', 'MATERIAL_DESC'],
+      'MEINS': ['MEINS', 'BASE_UOM', 'UNIT', 'UOM'],
+      'MTART': ['MTART', 'MATERIAL_TYPE'],
+      'MBRSH': ['MBRSH', 'INDUSTRY'],
+      'WERKS': ['WERKS', 'PLANT'],
+      'LGORT': ['LGORT', 'STORAGE_LOC', 'STORAGE_LOCATION'],
+      'BRGEW': ['BRGEW', 'GROSS_WEIGHT'],
+      'NTGEW': ['NTGEW', 'NET_WEIGHT'],
+      'GEWEI': ['GEWEI', 'WEIGHT_UNIT'],
     };
     const res: MappingEntry[] = [];
     OBJS[state.obj].fields.forEach((f) => {
@@ -85,49 +229,53 @@ export function Step2AIMapping() {
   }
 
   async function doAIMap() {
-    if (!state.headers.length) { toast('Load data first', 'err'); return; }
+    if (state.src === 'SAP_ECC') {
+      const mapping = sapFields.map((f: any) => ({
+        src: f.field_name,
+        sap: f.field_name,
+        sapLabel: f.field_description || f.sap_structure,
+        conf: 100,
+        tr: inferTr(f.field_name, f.field_name, f.type || 'CHAR'),
+        req: f.is_mandatory,
+        note: 'Auto-mapped 1:1 for SAP ECC'
+      }));
+      dispatch({ type: 'SET_FIELD', field: 'mapping', value: mapping });
+      setAiOutput("Bypassed LLM check for SAP ECC. Instant 1:1 mapping applied.");
+      toast(`Mapped ${mapping.length} fields · 100% confidence`, 'ok');
+      return;
+    }
+
     showLoad('AI Field Mapping…', 'AI analyzing semantic field relationships', [
-      `Connecting to AI Engine…`,
-      `Analyzing ${state.headers.length} source fields…`,
-      `Retrieving ${obj?.label} schema…`,
-      `Computing semantic matches…`,
-      `Generating confidence scores…`,
+      `Connecting to Backend API…`,
+      `Fetching SAP Schema from Database…`,
+      `Applying Known Source Matches…`,
+      `Checking LLM Cache & User Overrides…`,
+      `Generating missing mappings via AI…`,
     ]);
-    setTimeout(() => tick(0, 'AI connected'), 400);
-    setTimeout(() => tick(1, 'Fields analyzed'), 900);
+    setTimeout(() => tick(0, 'Backend connected'), 400);
+    setTimeout(() => tick(1, 'SAP schema fetched'), 900);
+    setTimeout(() => tick(3, 'Cache & Overrides applied'), 1600);
     try {
-      const sapList = obj.fields.map((f) => `${f.n}(${f.l},${f.t},len:${f.len},${f.req ? 'REQUIRED' : 'opt'})`).join(', ');
-      const prompt = `Map these source fields from ${state.src} to SAP S/4HANA ${state.obj} fields.\n\nSource fields: ${state.headers.join(', ')}\nSAP fields: ${sapList}\n\nRules:\n- Match by name, semantics, patterns\n- KUNNR/LIFNR: suggest pad10 transform if source is numeric ID\n- LAND1/COUNTRY: suggest country transform\n- WAERS/CURRENCY: suggest currency transform\n- ZTERM/PAYMENT: suggest payterm transform\n- MTART: suggest mattype transform\n- confidence 0-100 (exact=100, semantic=70-90, guess=40-65)\n- Only include confidence>=40\n\nReturn ONLY a JSON array, no explanation:\n[{"src":"SOURCE_FIELD","sap":"SAP_FIELD","conf":85,"tr":"none","note":"reason"}]`;
-      const raw = await ai(prompt, state.aiLog);
-      setTimeout(() => tick(2, 'SAP schema matched'), 1400);
-      setTimeout(() => tick(3, 'Confidence scored'), 1800);
-      const parsed = parseAI(raw);
-      let mapping: MappingEntry[];
-      if (parsed && Array.isArray(parsed) && parsed.length) {
-        mapping = (parsed as Record<string, unknown>[]).map((m) => {
-          const fd = obj.fields.find((f) => f.n === m.sap);
-          return {
-            src: String(m.src || ''), sap: String(m.sap || ''), sapLabel: fd?.l || '',
-            conf: Number(m.conf) || 50, tr: String(m.tr || 'none'), note: String(m.note || ''), req: fd?.req || false,
-          };
-        });
-      } else {
-        mapping = autoMap();
+      const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+      const data = await generateMapping(state.src, objName, state.headers);
+      const mapping = data.mappings || [];
+
+      // If Step 1 was skipped, infer the source headers directly from the AI's generated mapping
+      if (state.headers.length === 0) {
+        const inferredHeaders = Array.from(new Set(mapping.map((m: any) => m.src).filter(Boolean)));
+        dispatch({ type: 'SET_FIELD', field: 'headers', value: inferredHeaders });
       }
+
       setTimeout(() => tick(4, 'Transforms assigned'), 2200);
       setTimeout(() => {
         hideLoad();
         dispatch({ type: 'SET_FIELD', field: 'mapping', value: mapping });
-        setAiOutput(`AI Mapping Complete — ${mapping.length} fields mapped\n\nHigh confidence (≥80%): ${mapping.filter((m) => m.conf >= 80).map((m) => m.sap).join(', ')}\n\nTransforms assigned: ${mapping.filter((m) => m.tr && m.tr !== 'none').map((m) => m.sap + '=' + m.tr).join(', ')}`);
-        toast(`Mapped ${mapping.length} fields · ${mapping.filter((m) => m.conf >= 80).length} high confidence`, 'ok');
+        setAiOutput(`Hybrid Mapping Complete — ${mapping.length} fields mapped\n\nHigh confidence (≥80%): ${mapping.filter((m: any) => m.conf >= 80).map((m: any) => m.sap).join(', ')}\n\nTransforms assigned: ${mapping.filter((m: any) => m.tr && m.tr !== 'none').map((m: any) => m.sap + '=' + m.tr).join(', ')}`);
+        toast(`Mapped ${mapping.length} fields · ${mapping.filter((m: any) => m.conf >= 80).length} high confidence`, 'ok');
       }, 2600);
-    } catch {
-      const mapping = autoMap();
-      setTimeout(() => {
-        hideLoad();
-        dispatch({ type: 'SET_FIELD', field: 'mapping', value: mapping });
-        toast('AI mapping done (fallback mode)', 'info');
-      }, 1500);
+    } catch (err: any) {
+      hideLoad();
+      toast(`AI mapping failed: ${err.message}`, 'err');
     }
   }
 
@@ -145,149 +293,224 @@ export function Step2AIMapping() {
     dispatch({ type: 'SET_FIELD', field: 'mapping', value: newMapping });
   }
 
-  function updateTransform(src: string, tr: string) {
+  async function updateTransform(src: string, sap: string, tr: string) {
     const newMapping = state.mapping.map(m => m.src === src ? { ...m, tr } : m);
     dispatch({ type: 'SET_FIELD', field: 'mapping', value: newMapping });
+
+    try {
+      await correctMapping(state.src, src, sap, tr);
+      toast('Correction saved to user profile', 'ok');
+    } catch (err: any) {
+      toast(`Failed to save correction: ${err.message}`, 'err');
+    }
   }
 
   return (
     <PageLayout>
       <PageGrid>
 
-      {/* Left Column */}
-      <GridCol span={3}>
-        <Card>
-          <CardHeader title={`Source Fields (${state.headers.length})`} subtitle={state.src} />
-          <CardBody className="p-3 space-y-3">
-        {state.headers.map((f) => (
-          <div key={f} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] text-[10px] font-mono text-[var(--text-secondary)]">
-            <span>{f}</span>
-            {state.mapping.find((m) => m.src === f) && <Badge variant="green" className="text-[8px]">mapped</Badge>}
-          </div>
-        ))}
-        <Divider />
-        <div className="text-[10.5px] font-semibold text-[var(--text-secondary)] mb-1.5 px-1">SAP Target ({obj?.fields.length} fields)</div>
-        {(obj?.fields || []).map((f) => (
-          <div key={f.n} className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)]/50 border border-[var(--border-light)]">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-[10px] text-teal-600 dark:text-teal-400">{f.n}</span>
-              {f.req ? <Badge variant="red" className="text-[8px]">REQ</Badge> :
-                state.mapping.find((m) => m.sap === f.n) ? <Badge variant="green" className="text-[8px]">✓</Badge> : null}
+        {/* Left Column */}
+        <GridCol span={3} className="flex flex-col gap-4 h-[calc(100vh-40px)]">
+          {/* Source Fields Card */}
+          <Card className="flex flex-col flex-1 min-h-0">
+            <CardHeader title={`Source Fields (${state.headers.length})`} subtitle={state.src} />
+            <div className="px-3 pt-2">
+              <input
+                type="text"
+                placeholder="Search source fields..."
+                value={sourceSearch}
+                onChange={(e) => setSourceSearch(e.target.value)}
+                className="w-full rounded-md border border-[var(--border-light)] bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[10.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors"
+              />
             </div>
-            <div className="text-[9.5px] text-[var(--text-tertiary)]">{f.l}</div>
-          </div>
-        ))}
-          </CardBody>
-        </Card>
-      </GridCol>
-
-      {/* Middle Column */}
-      <GridCol span={6}>
-        <PageHeader title="Step 2 — AI-Powered Field Mapping" subtitle="AI Engine semantically maps source fields to SAP S/4HANA fields with confidence scoring">
-          <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/')}>Back</Button>
-          <Button variant="cyan" icon={<Bot className="w-3.5 h-3.5" />} onClick={doAIMap}>Generate AI Mapping</Button>
-          <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={exportMap} disabled={!state.mapping.length}>Export CSV</Button>
-          <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/extract')} disabled={!state.mapping.length}>Next: Extract</Button>
-        </PageHeader>
-
-        {state.mapping.length > 0 && (
-          <StatsGrid>
-            <StatBox value={state.mapping.length} label="Fields Mapped" color="var(--color-primary-500)" />
-            <StatBox value={hi} label="High Conf ≥80%" color="var(--color-success)" />
-            <StatBox value={med} label="Medium 60-79%" color="var(--color-warning)" />
-            <StatBox value={unmap} label="Unmapped Required" color="var(--color-danger)" />
-          </StatsGrid>
-        )}
-
-        <Card>
-          <CardHeader title="Field Mapping Table" subtitle="AI-generated · edit transforms inline">
-            {state.mapping.length > 0 && (
-              <div className="flex gap-1.5 ml-auto">
-                <Badge variant="green">≥80%</Badge>
-                <Badge variant="amber">60-79%</Badge>
-                <Badge variant="red">&lt;60%</Badge>
-              </div>
-            )}
-          </CardHeader>
-          <CardBody>
-            {state.mapping.length > 0 ? (
-              <>
-                {/* Header */}
-                <div className="grid grid-cols-[1fr_30px_1fr_70px_140px_28px] gap-2 px-2 pb-2 mb-2 border-b border-[var(--border)] font-mono text-[9px] uppercase tracking-wider text-[var(--text-tertiary)]">
-                  <span>Source</span><span></span><span>SAP Field</span><span>Conf</span><span>Transform</span><span></span>
+            <CardBody className="p-3 space-y-2 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-[var(--border-light)] scrollbar-track-transparent">
+              {state.headers.filter(f => f.toLowerCase().includes(sourceSearch.toLowerCase())).map((f, i) => (
+                <div key={`${f}-${i}`} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] text-[10px] font-mono text-[var(--text-secondary)]">
+                  <span>{f}</span>
+                  {state.mapping.find((m) => m.src === f) && <Badge variant="green" className="text-[8px]">mapped</Badge>}
                 </div>
-                {/* Rows */}
-                <div className="space-y-1.5">
-                  {state.mapping.map((m, i) => {
-                    const c = m.conf || 0;
-                    const cc = c >= 80 ? 'var(--color-success)' : c >= 60 ? 'var(--color-warning)' : 'var(--color-danger)';
-                    const borderCls = c >= 80 ? 'border-emerald-200 dark:border-emerald-800/30' : c >= 60 ? 'border-amber-200 dark:border-amber-800/30' : 'border-red-200 dark:border-red-800/30';
-                    return (
-                      <div key={i} className={cn('grid grid-cols-[1fr_30px_1fr_70px_140px_28px] gap-2 items-center px-3 py-2 rounded-xl border bg-[var(--bg-tertiary)]/30', borderCls)}>
-                        <div>
-                          <div className="font-mono text-[11px] text-primary-600 dark:text-primary-400">{m.src || <i className="text-[var(--text-tertiary)]">—</i>}</div>
-                          <div className="text-[9.5px] text-[var(--text-tertiary)]">{m.srcType || 'source'}</div>
-                        </div>
-                        <div className="text-center text-[var(--text-tertiary)]">→</div>
-                        <div>
-                          <div className="font-mono text-[11px] text-teal-600 dark:text-teal-400">{m.sap}</div>
-                          <div className="text-[9.5px] text-[var(--text-tertiary)]">{m.sapLabel} {m.req && <Badge variant="red" className="text-[7px] ml-1">REQ</Badge>}</div>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <div className="flex-1 h-1 rounded-full bg-[var(--bg)] overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${c}%`, background: cc }} />
-                            </div>
-                            <span className="font-mono text-[9px]" style={{ color: cc }}>{c}%</span>
-                          </div>
-                        </div>
-                        <Select
-                          size="sm"
-                          value={m.tr || 'none'}
-                          onChange={(val) => updateTransform(m.src, val)}
-                          className="w-[110px]"
-                          options={Object.entries(TRANSFORMS).map(([k, v]) => ({ value: k, label: v.label }))}
-                        />
-                        <button
-                          onClick={() => removeMapping(i)}
-                          className="w-6 h-6 flex items-center justify-center rounded-lg border border-[var(--border)] hover:border-red-300 text-[var(--text-tertiary)] hover:text-red-500 transition-colors cursor-pointer"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <EmptyState icon={<Bot className="w-10 h-10" />} message={`Click Generate AI Mapping — The AI Engine will semantically match your ${state.headers.length} source fields to SAP ${obj?.label} field definitions`} />
-            )}
-          </CardBody>
-        </Card>
-
-        {aiOutput && (
-          <Card>
-            <CardHeader icon={<Bot className="w-4 h-4" />} title="AI Analysis Output" />
-            <CardBody><AIResponse>{aiOutput}</AIResponse></CardBody>
+              ))}
+              {state.headers.length === 0 && (
+                <div className="text-[10px] text-[var(--text-tertiary)] text-center py-4">No source fields loaded.</div>
+              )}
+            </CardBody>
           </Card>
-        )}
-      </GridCol>
 
-      {/* Right Column */}
-      <GridCol span={3}>
-        <Card>
-          <CardBody className="p-3 space-y-4">
-        <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-1">Transform Rules</div>
-        {Object.entries(TRANSFORMS).map(([k, v]) => (
-          <div key={k} className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
-            <div className="font-mono text-[10px] text-teal-600 dark:text-teal-400">{k}</div>
-            <div className="text-[10px] text-[var(--text-tertiary)]">{v.label}</div>
-          </div>
-        ))}
-          </CardBody>
-        </Card>
-      </GridCol>
-          
+          {/* Target Fields Card */}
+          <Card className="flex flex-col flex-1 min-h-0">
+            <CardHeader title={`SAP Target (${sapFields.length})`} subtitle={obj?.label || state.obj} />
+            <div className="px-3 pt-2">
+              <input
+                type="text"
+                placeholder="Search SAP fields..."
+                value={targetSearch}
+                onChange={(e) => setTargetSearch(e.target.value)}
+                className="w-full rounded-md border border-[var(--border-light)] bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[10.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors"
+              />
+            </div>
+            <CardBody className="p-3 space-y-2 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-[var(--border-light)] scrollbar-track-transparent">
+              {isLoadingSchema ? (
+                <div className="px-2.5 py-1.5 rounded-lg text-[10px] text-[var(--text-tertiary)]">Loading schema from DB...</div>
+              ) : sapFields.length === 0 ? (
+                <div className="px-2.5 py-1.5 rounded-lg text-[10px] text-[var(--text-tertiary)]">No fields found for this object in DB.</div>
+              ) : (
+                sapFields.filter(f => f.field_name.toLowerCase().includes(targetSearch.toLowerCase()) || (f.field_description && f.field_description.toLowerCase().includes(targetSearch.toLowerCase()))).map((f, i) => (
+                  <div key={`${f.field_name}-${i}`} className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)]/50 border border-[var(--border-light)]">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[10px] text-teal-600 dark:text-teal-400">{f.field_name}</span>
+                      {f.is_mandatory ? <Badge variant="red" className="text-[8px]">REQ</Badge> :
+                        state.mapping.find((m) => m.sap === f.field_name) ? <Badge variant="green" className="text-[8px]">✓</Badge> : null}
+                    </div>
+                    <div className="text-[9.5px] text-[var(--text-tertiary)]">{f.field_description || f.sap_structure}</div>
+                  </div>
+                ))
+              )}
+            </CardBody>
+          </Card>
+        </GridCol>
+
+        {/* Middle Column */}
+        <GridCol span={6}>
+          <PageHeader title="Step 2 — AI-Powered Field Mapping" subtitle="AI Engine semantically maps source fields to SAP S/4HANA fields with confidence scoring">
+            <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/')}>Back</Button>
+            <Button variant="cyan" icon={<Bot className="w-3.5 h-3.5" />} onClick={doAIMap}>Generate AI Mapping</Button>
+            <Button variant="secondary" icon={<Save className="w-3.5 h-3.5" />} onClick={saveMappings} disabled={!state.mapping.length}>Save Mappings</Button>
+            <Button variant="secondary" icon={<Download className="w-3.5 h-3.5" />} onClick={loadMappings}>Load Mappings</Button>
+            <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/extract')} disabled={!state.mapping.length}>Next: Extract</Button>
+          </PageHeader>
+
+          {state.mapping.length > 0 && (
+            <StatsGrid>
+              <StatBox value={state.mapping.length} label="Fields Mapped" color="var(--color-primary-500)" />
+              <StatBox value={hi} label="High Conf ≥80%" color="var(--color-success)" />
+              <StatBox value={med} label="Medium 60-79%" color="var(--color-warning)" />
+              <StatBox value={unmap} label="Unmapped Required" color="var(--color-danger)" />
+            </StatsGrid>
+          )}
+
+          <Card>
+            <CardHeader title="Field Mapping Table" subtitle="AI-generated · edit transforms inline">
+              {state.mapping.length > 0 && (
+                <div className="flex gap-1.5 ml-auto">
+                  <Badge variant="green">≥80%</Badge>
+                  <Badge variant="amber">60-79%</Badge>
+                  <Badge variant="red">&lt;60%</Badge>
+                </div>
+              )}
+            </CardHeader>
+            <div className="px-3 pt-2">
+              <input
+                type="text"
+                placeholder="Search mapped fields (Source or SAP)..."
+                value={mappingSearch}
+                onChange={(e) => setMappingSearch(e.target.value)}
+                className="w-full rounded-md border border-[var(--border-light)] bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[10.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors"
+              />
+            </div>
+            <CardBody>
+              {state.mapping.length > 0 ? (
+                <>
+                  {/* Header */}
+                  <div className="grid grid-cols-[1fr_30px_1fr_70px_140px_28px] gap-2 px-2 pb-2 mb-2 border-b border-[var(--border)] font-mono text-[9px] uppercase tracking-wider text-[var(--text-tertiary)]">
+                    <span>Source</span><span></span><span>SAP Field</span><span>Conf</span><span>Transform</span><span></span>
+                  </div>
+                  {/* Rows */}
+                  <div className="space-y-1.5 max-h-[calc(100vh-250px)] overflow-y-auto scrollbar-thin scrollbar-thumb-[var(--border-light)] scrollbar-track-transparent pr-2">
+                    {[...state.mapping]
+                      .filter(m => (m.src && m.src.toLowerCase().includes(mappingSearch.toLowerCase())) || (m.sap && m.sap.toLowerCase().includes(mappingSearch.toLowerCase())) || (m.sapLabel && m.sapLabel.toLowerCase().includes(mappingSearch.toLowerCase())))
+                      .sort((a, b) => {
+                        if (a.req === b.req) return 0;
+                        return a.req ? -1 : 1;
+                      }).map((m, i) => {
+                        const c = m.conf || 0;
+                        const cc = c >= 80 ? '#10b981' : c >= 60 ? '#f59e0b' : '#ef4444'; // emerald-500, amber-500, red-500
+                        const borderCls = c >= 80 ? 'border-emerald-200 dark:border-emerald-800/30' : c >= 60 ? 'border-amber-200 dark:border-amber-800/30' : 'border-red-200 dark:border-red-800/30';
+                        return (
+                          <div key={i} className={cn('grid grid-cols-[1fr_30px_1fr_70px_140px_28px] gap-2 items-center px-3 py-2 rounded-xl border bg-[var(--bg-tertiary)]/30 group', borderCls)}>
+                            <div className="min-w-0">
+                              {editingMapSrc?.index === state.mapping.indexOf(m) ? (
+                                <input 
+                                  type="text"
+                                  autoFocus
+                                  value={editingMapSrc.value}
+                                  onChange={e => setEditingMapSrc({ ...editingMapSrc, value: e.target.value })}
+                                  onBlur={() => handleSaveMapSrcEdit(state.mapping.indexOf(m), m.src)}
+                                  onKeyDown={e => { if (e.key === 'Enter') handleSaveMapSrcEdit(state.mapping.indexOf(m), m.src); if (e.key === 'Escape') setEditingMapSrc(null); }}
+                                  className="bg-[var(--bg)] border border-primary-500 rounded px-1 py-0.5 outline-none w-full text-[11px] font-mono text-[var(--text-primary)]"
+                                />
+                              ) : (
+                                <div className="flex items-center min-w-0">
+                                  <div className="font-mono text-[11px] text-primary-600 dark:text-primary-400 truncate">{m.src || <i className="text-[var(--text-tertiary)]">—</i>}</div>
+                                  <button onClick={() => setEditingMapSrc({ index: state.mapping.indexOf(m), value: m.src })} className="opacity-0 group-hover:opacity-100 ml-1 p-1 shrink-0 text-[var(--text-tertiary)] hover:text-primary-500 transition-opacity">
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                              <div className="text-[9.5px] text-[var(--text-tertiary)] truncate">{m.srcType || 'source'}</div>
+                            </div>
+                            <div className="text-center text-[var(--text-tertiary)]">→</div>
+                            <div>
+                              <div className="font-mono text-[11px] text-teal-600 dark:text-teal-400 flex items-center gap-1.5">
+                                {m.sap}
+                                {m.req && <Badge variant="red" className="text-[8px] px-1 font-bold">M</Badge>}
+                              </div>
+                              <div className="text-[9.5px] text-[var(--text-tertiary)]">{m.sapLabel}</div>
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <div className="flex-1 h-1 rounded-full bg-[var(--border)] overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${c}%`, background: cc }} />
+                                </div>
+                                <span className="font-mono text-[10px] font-bold" style={{ color: cc }}>{c}%</span>
+                              </div>
+                            </div>
+                            <Select
+                              size="sm"
+                              value={m.tr || 'none'}
+                              onChange={(val) => updateTransform(m.src, m.sap, val)}
+                              className="w-[110px]"
+                              options={Object.entries(TRANSFORMS).map(([k, v]) => ({ value: k, label: v.label }))}
+                            />
+                            <button
+                              onClick={() => removeMapping(i)}
+                              className="w-6 h-6 flex items-center justify-center rounded-lg border border-[var(--border)] hover:border-red-300 text-[var(--text-tertiary)] hover:text-red-500 transition-colors cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              ) : (
+                <EmptyState icon={<Bot className="w-10 h-10" />} message={`Click Generate AI Mapping — The AI Engine will semantically match your ${state.headers.length} source fields to SAP ${obj?.label} field definitions`} />
+              )}
+            </CardBody>
+          </Card>
+
+          {aiOutput && (
+            <Card>
+              <CardHeader icon={<Bot className="w-4 h-4" />} title="AI Analysis Output" />
+              <CardBody><AIResponse>{aiOutput}</AIResponse></CardBody>
+            </Card>
+          )}
+        </GridCol>
+
+        {/* Right Column */}
+        <GridCol span={3}>
+          <Card>
+            <CardBody className="p-3 space-y-4">
+              <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-1">Transform Rules</div>
+              {Object.entries(TRANSFORMS).map(([k, v]) => (
+                <div key={k} className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
+                  <div className="font-mono text-[10px] text-teal-600 dark:text-teal-400">{k}</div>
+                  <div className="text-[10px] text-[var(--text-tertiary)]">{v.label}</div>
+                </div>
+              ))}
+            </CardBody>
+          </Card>
+        </GridCol>
+
       </PageGrid>
     </PageLayout>
   );
