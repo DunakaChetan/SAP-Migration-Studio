@@ -9,6 +9,15 @@ import { dl, expCSV } from '@/lib/utils';
 import { PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, StatBox, StatsGrid, DataTable, InfoBox, PageHeader, EmptyState, AIResponse } from '@/components/shared';
 import { ArrowLeft, ArrowRight, Sparkles, Download, Bot } from 'lucide-react';
 
+interface StandaloneCleanserSummary {
+  rows_loaded?: number;
+  rows_exported?: number;
+  rows_modified_count?: number;
+  validation_fixes?: { count?: number };
+  cleanser_fixes?: { count?: number };
+  warnings?: string[];
+}
+
 export function Step6Cleanse() {
   const { state, dispatch } = useMigration();
   const navigate = useNavigate();
@@ -16,6 +25,47 @@ export function Step6Cleanse() {
   const { showLoad, tick, hideLoad } = useLoading();
   const has = state.cleaned.length > 0;
   const [fixLogText, setFixLogText] = React.useState('');
+  const [standaloneCsv, setStandaloneCsv] = React.useState<File | null>(null);
+  const [standaloneValidationJson, setStandaloneValidationJson] = React.useState<File | null>(null);
+  const [standaloneSummary, setStandaloneSummary] = React.useState<StandaloneCleanserSummary | null>(null);
+  const [standaloneCleanedCsv, setStandaloneCleanedCsv] = React.useState('');
+  const [standaloneRunning, setStandaloneRunning] = React.useState(false);
+
+  async function runStandaloneCleanser() {
+    if (!standaloneCsv) {
+      toast('Upload harmonization CSV first', 'err');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('harmonization_csv', standaloneCsv);
+    if (standaloneValidationJson) formData.append('validation_report_json', standaloneValidationJson);
+
+    setStandaloneRunning(true);
+    setStandaloneSummary(null);
+    setStandaloneCleanedCsv('');
+
+    try {
+      const res = await fetch('/api/sap/cleanser/run', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || 'Cleanser failed');
+      setStandaloneSummary(data.summary || null);
+      setStandaloneCleanedCsv(data.cleaned_csv || '');
+      toast('Standalone cleanser completed', 'ok');
+    } catch (err: any) {
+      toast(err.message || 'Standalone cleanser failed', 'err');
+    } finally {
+      setStandaloneRunning(false);
+    }
+  }
+
+  function downloadStandaloneCsv() {
+    if (!standaloneCleanedCsv) return;
+    dl(standaloneCleanedCsv, 'standalone_cleaned.csv', 'text/csv');
+  }
 
   function doCleanse() {
     if (!state.validated.length) { toast('Run validation first', 'err'); return; }
@@ -121,6 +171,70 @@ export function Step6Cleanse() {
           <Button variant="cyan" icon={<Bot className="w-3.5 h-3.5" />} onClick={doCleanse}>Auto-Fix with AI</Button>
           <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/transform')} disabled={!has}>Next: Transform</Button>
         </PageHeader>
+
+        <Card>
+          <CardHeader title="Standalone Cleanser Test" subtitle="Backend agent test only" />
+          <CardBody className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <label className="block">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5 block">Upload Harmonization CSV</span>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => setStandaloneCsv(e.target.files?.[0] || null)}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12px] text-[var(--text-primary)] file:mr-3 file:rounded-md file:border-0 file:bg-primary-600 file:px-3 file:py-1.5 file:text-[11px] file:font-semibold file:text-white"
+                />
+              </label>
+              <label className="block">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5 block">Upload Validation JSON</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(e) => setStandaloneValidationJson(e.target.files?.[0] || null)}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12px] text-[var(--text-primary)] file:mr-3 file:rounded-md file:border-0 file:bg-[var(--bg-secondary)] file:px-3 file:py-1.5 file:text-[11px] file:font-semibold file:text-[var(--text-primary)]"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="cyan" icon={<Sparkles className="w-3.5 h-3.5" />} onClick={runStandaloneCleanser} disabled={standaloneRunning || !standaloneCsv}>
+                {standaloneRunning ? 'Running...' : 'Run Cleanser'}
+              </Button>
+              {standaloneCleanedCsv && (
+                <Button variant="success" icon={<Download className="w-3.5 h-3.5" />} onClick={downloadStandaloneCsv}>
+                  Download Cleaned CSV
+                </Button>
+              )}
+            </div>
+          </CardBody>
+        </Card>
+
+        {standaloneSummary && (
+          <Card>
+            <CardHeader title="Cleaning Summary" />
+            <CardBody className="space-y-4">
+              <StatsGrid>
+                <StatBox value={standaloneSummary.rows_loaded ?? 0} label="Rows Loaded" color="var(--color-primary-500)" />
+                <StatBox value={standaloneSummary.rows_modified_count ?? 0} label="Rows Modified" color="var(--color-warning)" />
+                <StatBox value={standaloneSummary.validation_fixes?.count ?? 0} label="Validation Fixes" color="var(--color-teal)" />
+                <StatBox value={standaloneSummary.cleanser_fixes?.count ?? 0} label="Cleanser Fixes" color="var(--color-success)" />
+              </StatsGrid>
+              <div>
+                <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-2">Warnings ({standaloneSummary.warnings?.length ?? 0})</div>
+                {standaloneSummary.warnings?.length ? (
+                  <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] p-3 space-y-1.5 max-h-44 overflow-y-auto">
+                    {standaloneSummary.warnings.map((warning, i) => (
+                      <div key={i} className="text-[11px] text-amber-600 dark:text-amber-400">
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <InfoBox variant="success">No warnings returned by the standalone cleanser.</InfoBox>
+                )}
+              </div>
+            </CardBody>
+          </Card>
+        )}
 
         {has && (
           <StatsGrid>
