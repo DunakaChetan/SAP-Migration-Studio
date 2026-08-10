@@ -25,12 +25,20 @@ def health_check():
 from routers.mapping import router as mapping_router
 from routers.auth import router as auth_router
 from routers.project import router as project_router
+from routers.connection import router as connection_router
+from routers.extract import router as extract_router
+from routers.harmonization import router as harmonize_router
+from routers.validate import router as validate_router
 from routers.cleanser import router as cleanser_router
 
 app.include_router(mapping_router, prefix="/api/sap")
 app.include_router(project_router, prefix="/api/sap/projects")
-app.include_router(auth_router, prefix="/api/auth")
+app.include_router(connection_router)
+app.include_router(extract_router)
+app.include_router(harmonize_router, prefix="/api/sap")
+app.include_router(validate_router, prefix="/api")
 app.include_router(cleanser_router, prefix="/api/sap/cleanser")
+app.include_router(auth_router, prefix="/api/auth")
 
 if __name__ == "__main__":
     import uvicorn

@@ -14,7 +14,7 @@ export function StepNavigation() {
   const currentStepIndex = STEPS.findIndex(s => s.path === location.pathname);
   const activeStep = currentStepIndex === -1 ? 0 : currentStepIndex;
   const progress = (activeStep / 8) * 100;
-  
+
   const [isCollapsed, setIsCollapsed] = React.useState(false);
 
   return (
@@ -24,8 +24,8 @@ export function StepNavigation() {
     )}>
       {/* Logo Area */}
       <div className="h-16 flex items-center px-6 gap-3 border-b border-[var(--border)] overflow-hidden shrink-0">
-        <div className="w-8 h-8 shrink-0 rounded-lg bg-primary-600 flex items-center justify-center shadow-sm">
-          <Cpu className="w-4 h-4 text-white" />
+        <div className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center shadow-sm overflow-hidden bg-white">
+          <img src="/Yash.png" alt="Yash Logo" className="w-full h-full object-contain" />
         </div>
         {!isCollapsed && (
           <div className="leading-tight whitespace-nowrap opacity-100 transition-opacity duration-300">
@@ -106,9 +106,9 @@ export function StepNavigation() {
           </div>
         </div>
       )}
-      
+
       {/* Collapse Toggle */}
-      <button 
+      <button
         onClick={() => setIsCollapsed(!isCollapsed)}
         className="absolute -right-3 top-20 w-6 h-6 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-full flex items-center justify-center shadow-md text-[var(--text-secondary)] hover:text-primary-500 transition-colors z-30"
       >

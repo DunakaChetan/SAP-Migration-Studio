@@ -2,7 +2,7 @@
 // MIGRATION STORE — Global state (ported from S{})
 // ═══════════════════════════════════════════════════════
 
-import React, { createContext, useContext, useReducer, type ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 
 export interface MappingEntry {
   src: string;
@@ -18,13 +18,17 @@ export interface MappingEntry {
 export interface ValidationEntry {
   row: Record<string, unknown>;
   idx: number;
-  errs: { f: string; m: string; sev: string }[];
-  warns: { f: string; m: string; sev: string }[];
+  errs: { f: string; m: string; sev: string; rule: string }[];
+  warns: { f: string; m: string; sev: string; rule: string }[];
   st: 'ERROR' | 'WARN' | 'PASS';
 }
 
 export interface MigrationState {
   projectId: string | null;
+  connUrl: string;
+  connClient: string;
+  connUser: string;
+  connPass: string;
   src: string;
   obj: string;
   cc: string;
@@ -35,6 +39,7 @@ export interface MigrationState {
   distch: string;
   spart: string;
   rawData: Record<string, string>[];
+  uploadedData: Record<string, any>[];
   headers: string[];
   mapping: MappingEntry[];
   extracted: Record<string, string>[];
@@ -47,20 +52,33 @@ export interface MigrationState {
   fixLog: string[];
   stats: { fixes: number; errors: number; warns: number; passed: number };
   theme: 'light' | 'dark';
+  isMappingSaved: boolean;
+  isDataSaved: boolean;
+  aiReport: any;
+  isHarmonizedSaved: boolean;
+  harmonizationResult: any;
+  isValidatedSaved: boolean;
+  validationReport: any[];
+  isCleansedSaved: boolean;
 }
 
-const initialState: MigrationState = {
+const defaultState: MigrationState = {
   projectId: null,
+  connUrl: '',
+  connClient: '100',
+  connUser: '',
+  connPass: '',
   src: 'SAP_ECC',
   obj: 'CUSTOMER',
   cc: '1000',
   so: '1000',
   po: '1000',
   plant: '1000',
-  curr: 'INR',
+  curr: 'USD',
   distch: '10',
   spart: '00',
   rawData: [],
+  uploadedData: [],
   headers: [],
   mapping: [],
   extracted: [],
@@ -72,7 +90,29 @@ const initialState: MigrationState = {
   aiLog: [],
   fixLog: [],
   stats: { fixes: 0, errors: 0, warns: 0, passed: 0 },
-  theme: (typeof window !== 'undefined' && localStorage.getItem('theme') as 'light' | 'dark') || 'light',
+  theme: 'light',
+  isMappingSaved: false,
+  isDataSaved: false,
+  aiReport: null,
+  isHarmonizedSaved: false,
+  harmonizationResult: null,
+  isValidatedSaved: false,
+  validationReport: [],
+  isCleansedSaved: false,
+};
+
+const getInitialState = (): MigrationState => {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = sessionStorage.getItem('migration_state');
+      if (saved) {
+        return { ...defaultState, ...JSON.parse(saved) };
+      }
+    } catch (e) {
+      console.warn('Failed to load state from session storage', e);
+    }
+  }
+  return defaultState;
 };
 
 type Action =
@@ -100,7 +140,16 @@ const MigrationContext = createContext<{
 } | null>(null);
 
 export function MigrationProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, defaultState, getInitialState);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('migration_state', JSON.stringify(state));
+    } catch (e) {
+      console.warn('Failed to save state to session storage. It might be too large.', e);
+    }
+  }, [state]);
+
   return (
     <MigrationContext.Provider value={{ state, dispatch }}>
       {children}

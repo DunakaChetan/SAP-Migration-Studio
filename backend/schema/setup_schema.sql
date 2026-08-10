@@ -1,6 +1,8 @@
 -- ==========================================
 -- Drop existing tables to allow clean re-runs
 -- ==========================================
+DROP TABLE IF EXISTS cleansed_data CASCADE;
+DROP TABLE IF EXISTS validation_report CASCADE;
 DROP TABLE IF EXISTS user_corrected_mappings CASCADE;
 DROP TABLE IF EXISTS ai_mapping_cache CASCADE;
 DROP TABLE IF EXISTS source_fields CASCADE;
@@ -64,11 +66,13 @@ CREATE TABLE source_systems (
 CREATE TABLE source_fields (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     source_system_id UUID NOT NULL REFERENCES source_systems(id) ON DELETE CASCADE,
-    object_name TEXT NOT NULL,
-    field_name TEXT NOT NULL,
+    object_id UUID NOT NULL REFERENCES sap_objects(id) ON DELETE CASCADE,
+    sap_field_id UUID REFERENCES sap_fields(id) ON DELETE SET NULL,
+    oracle_ebs_table TEXT,
+    oracle_ebs_field_name TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE (source_system_id, object_name, field_name)
+    UNIQUE (source_system_id, object_id, oracle_ebs_table, oracle_ebs_field_name)
 );
 
 -- Table: ai_mapping_cache
@@ -97,6 +101,16 @@ CREATE TABLE user_corrected_mappings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Table: extracted_data
+CREATE TABLE extracted_data (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    object_id UUID NOT NULL REFERENCES sap_objects(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 
 -- ==========================================
 -- Enable RLS and Setup Policies
@@ -110,6 +124,7 @@ ALTER TABLE source_systems ENABLE ROW LEVEL SECURITY;
 ALTER TABLE source_fields ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_mapping_cache ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_corrected_mappings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE extracted_data ENABLE ROW LEVEL SECURITY;
 
 -- Policies for public read access to foundational schema data
 CREATE POLICY "Public Read Access for sap_objects" ON sap_objects FOR SELECT USING (true);
@@ -124,4 +139,56 @@ CREATE POLICY "Public Access for projects" ON projects
 
 -- Policy for user_corrected_mappings
 CREATE POLICY "Public Access for mappings" ON user_corrected_mappings
+    FOR ALL USING (true) WITH CHECK (true);
+
+-- Policy for extracted_data
+CREATE POLICY "Public Access for extracted_data" ON extracted_data
+    FOR ALL USING (true) WITH CHECK (true);
+
+-- ==========================================
+-- STEP 6: Harmonized Data Storage
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS harmonized_data (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    object_id UUID REFERENCES sap_objects(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE harmonized_data ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access for harmonized_data" ON harmonized_data
+    FOR ALL USING (true) WITH CHECK (true);
+
+-- ==========================================
+-- STEP 7: Validation Report Storage
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS validation_report (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    object_id UUID REFERENCES sap_objects(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE validation_report ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access for validation_report" ON validation_report
+    FOR ALL USING (true) WITH CHECK (true);
+
+-- ==========================================
+-- STEP 8: Cleansed Data Storage
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS cleansed_data (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    object_id UUID REFERENCES sap_objects(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE cleansed_data ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access for cleansed_data" ON cleansed_data
     FOR ALL USING (true) WITH CHECK (true);
