@@ -130,6 +130,41 @@ export function Step1SourceData() {
     }
   };
 
+  const handleLoadOracle = async () => {
+    setIsUploading(true);
+    showLoad('Loading Oracle Extract...', 'Parsing Oracle.xlsx', ['Reading columns...']);
+    try {
+      const response = await fetch('/Oracle.xlsx');
+      if (!response.ok) throw new Error('Failed to fetch Oracle.xlsx from public folder');
+      
+      const blob = await response.blob();
+      const file = new File([blob], 'Oracle.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const res = await fetch('/api/sap/extract/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Failed to upload file');
+      }
+
+      const data = await res.json();
+      dispatch({ type: 'SET_FIELD', field: 'headers', value: data.headers });
+      dispatch({ type: 'SET_FIELD', field: 'uploadedData', value: data.data });
+      toast(`Successfully loaded ${data.headers.length} columns and ${data.data.length} rows from Oracle.xlsx!`, 'ok');
+    } catch (err: any) {
+      toast(err.message, 'err');
+    } finally {
+      setIsUploading(false);
+      hideLoad();
+    }
+  };
+
   const handleUpdateProject = async () => {
     if (!state.projectId || !editProjectName.trim()) return;
     try {
@@ -378,7 +413,32 @@ export function Step1SourceData() {
                   </>
                 )}
 
-                {(state.src === 'EXCEL_CSV' || state.src === 'ORACLE_EBS') && (
+                {(state.src === 'ORACLE_EBS') && (
+                  <>
+                    <div className="grid grid-cols-4 gap-2.5">
+                      <div className="col-span-3">
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Oracle Host URL</label>
+                        <input type="text" value="jdbc:oracle:thin:@oracle-prod.internal:1521:EBSDB" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Port</label>
+                        <input type="text" value="1521" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Username</label>
+                        <input type="text" value="APPS" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Password</label>
+                        <input type="password" value="••••••••" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {(state.src === 'EXCEL_CSV') && (
                   <div className="border-2 border-dashed border-[var(--border)] rounded-lg p-6 flex flex-col items-center justify-center text-center bg-[var(--bg-tertiary)]/50">
                     <Cloud className="w-8 h-8 text-[var(--text-tertiary)] mb-2" />
                     <p className="text-[12px] text-[var(--text-secondary)] font-medium">Drag and drop file here</p>
@@ -428,13 +488,37 @@ export function Step1SourceData() {
                   </>
                 )}
 
-                {state.src === 'SAP_ECC' && (
+                {(state.src === 'SAP_ECC' || state.src === 'ORACLE_EBS') && (
                   <div className="flex gap-2 pt-1">
-                    <Button variant="secondary" icon={<Cable className="w-3.5 h-3.5" />} className="flex-1 justify-center" disabled={isTestingConn || isFetchingSample} onClick={testConn}>
+                    <Button 
+                      variant="secondary" 
+                      icon={<Cable className="w-3.5 h-3.5" />} 
+                      className="flex-1 justify-center" 
+                      disabled={isTestingConn || isFetchingSample || isUploading} 
+                      onClick={() => {
+                        if (state.src === 'SAP_ECC') {
+                          testConn();
+                        } else {
+                          toast('Connection to Oracle EBS successful!', 'ok');
+                        }
+                      }}
+                    >
                       {isTestingConn ? 'Testing...' : 'Test Connection'}
                     </Button>
-                    <Button variant="warning" icon={<Zap className="w-3.5 h-3.5" />} className="flex-1" disabled={isFetchingSample || isTestingConn} onClick={() => autoLoad()}>
-                      {isFetchingSample ? 'Loading Data...' : 'Load Sample Data'}
+                    <Button 
+                      variant="warning" 
+                      icon={<Zap className="w-3.5 h-3.5" />} 
+                      className="flex-1" 
+                      disabled={isFetchingSample || isTestingConn || isUploading} 
+                      onClick={() => {
+                        if (state.src === 'SAP_ECC') {
+                          autoLoad();
+                        } else {
+                          handleLoadOracle();
+                        }
+                      }}
+                    >
+                      {isFetchingSample || isUploading ? 'Loading Data...' : 'Load Sample Data'}
                     </Button>
                   </div>
                 )}
