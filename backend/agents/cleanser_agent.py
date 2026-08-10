@@ -12,6 +12,7 @@ Cleanser rule set, and exports a cleaned CSV.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from dataclasses import dataclass, field
@@ -219,6 +220,201 @@ UNSAFE_DEFAULT_FIELDS = {
     "AEDAT",
 }
 
+# Configuration
+# =============================================================================
+
+COUNTRY_MAP: dict[str, str] = {
+    "INDIA": "IN",
+    "IN": "IN",
+    "UNITED STATES": "US",
+    "USA": "US",
+    "US": "US",
+    "UNITED KINGDOM": "GB",
+    "UK": "GB",
+    "GB": "GB",
+    "GERMANY": "DE",
+    "DE": "DE",
+    "FRANCE": "FR",
+    "FR": "FR",
+    "AUSTRALIA": "AU",
+    "AU": "AU",
+    "CANADA": "CA",
+    "CA": "CA",
+    "JAPAN": "JP",
+    "JP": "JP",
+    "CHINA": "CN",
+    "CN": "CN",
+    "SINGAPORE": "SG",
+    "SG": "SG",
+    "UAE": "AE",
+    "UNITED ARAB EMIRATES": "AE",
+    "AE": "AE",
+    "NETHERLANDS": "NL",
+    "NL": "NL",
+    "SWEDEN": "SE",
+    "SE": "SE",
+    "SWITZERLAND": "CH",
+    "CH": "CH",
+    "ITALY": "IT",
+    "IT": "IT",
+    "SPAIN": "ES",
+    "ES": "ES",
+    "BRAZIL": "BR",
+    "BR": "BR",
+    "SOUTH KOREA": "KR",
+    "KR": "KR",
+}
+
+CURR_MAP: dict[str, str] = {
+    "INDIAN RUPEE": "INR",
+    "RUPEE": "INR",
+    "RUPEES": "INR",
+    "RS": "INR",
+    "INR": "INR",
+    "US DOLLAR": "USD",
+    "DOLLAR": "USD",
+    "USD": "USD",
+    "EURO": "EUR",
+    "EUROS": "EUR",
+    "EUR": "EUR",
+    "POUND": "GBP",
+    "STERLING": "GBP",
+    "GBP": "GBP",
+    "YEN": "JPY",
+    "JPY": "JPY",
+    "YUAN": "CNY",
+    "RMB": "CNY",
+    "CNY": "CNY",
+    "DIRHAM": "AED",
+    "AED": "AED",
+    "RIYAL": "SAR",
+    "SAR": "SAR",
+    "FRANC": "CHF",
+    "CHF": "CHF",
+    "AUS DOLLAR": "AUD",
+    "AUD": "AUD",
+    "CANADIAN DOLLAR": "CAD",
+    "CAD": "CAD",
+    "SGD": "SGD",
+}
+
+PAYMENT_TERM_MAP: dict[str, str] = {
+    "NT30": "NT30",
+    "NET30": "NT30",
+    "NET 30": "NT30",
+    "NT45": "NT45",
+}
+
+MATERIAL_TYPE_MAP: dict[str, str] = {
+    "ROH": "ROH",
+    "RAW MATERIAL": "ROH",
+    "RAW": "ROH",
+    "HALB": "HALB",
+    "SEMI-FINISHED": "HALB",
+    "SEMI FINISHED": "HALB",
+    "FERT": "FERT",
+    "FINISHED GOODS": "FERT",
+    "FINISHED": "FERT",
+    "HAWA": "HAWA",
+    "TRADING GOODS": "HAWA",
+    "TRADING": "HAWA",
+}
+
+FIELD_LENGTHS: dict[str, int] = {
+    "KUNNR": 10,
+    "LIFNR": 10,
+    "KTOKD": 4,
+    "KTOKK": 4,
+    "NAME1": 35,
+    "NAME2": 35,
+    "LAND1": 3,
+    "ORT01": 35,
+    "PSTLZ": 10,
+    "REGIO": 3,
+    "STRAS": 35,
+    "TELF1": 16,
+    "SMTP_ADDR": 241,
+    "BUKRS": 4,
+    "VKORG": 4,
+    "EKORG": 4,
+    "VTWEG": 2,
+    "SPART": 2,
+    "WAERS": 5,
+    "ZTERM": 4,
+    "STCD1": 16,
+    "STCD2": 16,
+    "TAXKD": 1,
+    "ERDAT": 8,
+    "MATNR": 40,
+    "MBRSH": 1,
+    "MTART": 4,
+    "MAKTX": 40,
+    "MEINS": 3,
+    "MATKL": 9,
+    "WERKS": 4,
+    "LGORT": 4,
+    "GEWEI": 3,
+    "EKGRP": 3,
+    "BKLAS": 4,
+}
+
+IDENTIFIER_LENGTHS: dict[str, int] = {
+    "KUNNR": 10,
+    "LIFNR": 10,
+}
+
+FIELD_DEFAULTS: dict[str, str] = {}
+
+COUNTRY_FIELD_NAMES = {"LAND1", "COUNTRY", "COUNTRY_CODE", "BANKS"}
+CURRENCY_FIELD_NAMES = {"WAERS", "CURRENCY", "CURRENCY_CODE", "CURR"}
+PAYMENT_TERM_FIELD_NAMES = {"ZTERM", "PAYMENT_TERMS", "PAY_TERMS"}
+MATERIAL_TYPE_FIELD_NAMES = {"MTART", "MATERIAL_TYPE", "MAT_TYPE"}
+CODE_FIELD_NAMES = {
+    "KTOKD",
+    "KTOKK",
+    "LAND1",
+    "REGIO",
+    "BUKRS",
+    "VKORG",
+    "EKORG",
+    "WERKS",
+    "VTWEG",
+    "SPART",
+    "WAERS",
+    "ZTERM",
+    "TAXKD",
+    "MBRSH",
+    "MTART",
+    "MEINS",
+    "MATKL",
+    "LGORT",
+    "GEWEI",
+    "EKGRP",
+    "BKLAS",
+}
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+EMAIL_DOMAINS = {
+    "gmail": "gmail.com",
+    "yahoo": "yahoo.com",
+    "outlook": "outlook.com",
+    "hotmail": "hotmail.com",
+    "icloud": "icloud.com",
+    "rediffmail": "rediffmail.com",
+}
+UNSAFE_DEFAULT_FIELDS = {
+    "KUNNR",
+    "LIFNR",
+    "BUKRS",
+    "VKORG",
+    "EKORG",
+    "WERKS",
+    "KTOKD",
+    "KTOKK",
+    "ERDAT",
+    "AEDAT",
+}
+
 
 # =============================================================================
 # Cleaning Summary Helpers
@@ -230,8 +426,11 @@ class CleaningSummary:
     validation_report_csv_path: str | None
     output_csv_path: str
     execution_plan: dict[str, Any] = field(default_factory=dict)
+    dynamic_fixer_generation: dict[str, Any] = field(default_factory=dict)
+    dynamic_fixer_execution: dict[str, Any] = field(default_factory=dict)
     validation_issues: list[dict[str, Any]] = field(default_factory=list)
     dynamic_issues: list[dict[str, Any]] = field(default_factory=list)
+    dynamic_fixes: list[dict[str, Any]] = field(default_factory=list)
     validation_fixes: list[dict[str, Any]] = field(default_factory=list)
     cleanser_fixes: list[dict[str, Any]] = field(default_factory=list)
     rows_modified: set[int] = field(default_factory=set)
@@ -258,6 +457,8 @@ class CleaningSummary:
         }
         if phase == "validation":
             self.validation_fixes.append(item)
+        elif phase == "dynamic":
+            self.dynamic_fixes.append(item)
         else:
             self.cleanser_fixes.append(item)
         self.rows_modified.add(row_number)
@@ -267,6 +468,14 @@ class CleaningSummary:
             self.rules_applied.append(rule_code)
 
     def to_dict(self) -> dict[str, Any]:
+        sanitized_gen = dict(self.dynamic_fixer_generation)
+        if "generated_fixers" in sanitized_gen:
+            sanitized_gen["generated_fixers"] = [
+                {k: v for k, v in item.items() if k != "code"}
+                for item in sanitized_gen.get("generated_fixers", [])
+                if isinstance(item, dict)
+            ]
+
         return {
             "input_csv_path": self.input_csv_path,
             "validation_report_csv_path": self.validation_report_csv_path,
@@ -274,6 +483,8 @@ class CleaningSummary:
             "rows_loaded": self.rows_loaded,
             "rows_exported": self.rows_exported,
             "execution_plan": self.execution_plan,
+            "dynamic_fixer_generation": sanitized_gen,
+            "dynamic_fixer_execution": self.dynamic_fixer_execution,
             "validation_issues": {
                 "count": len(self.validation_issues),
                 "items": self.validation_issues,
@@ -281,6 +492,10 @@ class CleaningSummary:
             "dynamic_issues": {
                 "count": len(self.dynamic_issues),
                 "items": self.dynamic_issues,
+            },
+            "dynamic_fixes": {
+                "count": len(self.dynamic_fixes),
+                "items": self.dynamic_fixes,
             },
             "validation_fixes": {
                 "count": len(self.validation_fixes),
@@ -1049,6 +1264,533 @@ def build_cleanser_execution_plan(
 
 
 # =============================================================================
+# Dynamic Fixer Generation
+# =============================================================================
+
+LLMGenerator = Callable[[str, str], str]
+
+FORBIDDEN_DYNAMIC_FIXER_CALLS = {
+    "__import__",
+    "breakpoint",
+    "compile",
+    "delattr",
+    "dir",
+    "eval",
+    "exec",
+    "getattr",
+    "globals",
+    "help",
+    "input",
+    "locals",
+    "open",
+    "setattr",
+    "vars",
+}
+
+FORBIDDEN_DYNAMIC_FIXER_METHODS = {
+    "connect",
+    "delete",
+    "dump",
+    "dumps",
+    "execute",
+    "mkdir",
+    "makedirs",
+    "open",
+    "popen",
+    "post",
+    "put",
+    "read_csv",
+    "remove",
+    "rename",
+    "replace",
+    "request",
+    "rmdir",
+    "system",
+    "to_clipboard",
+    "to_csv",
+    "to_excel",
+    "to_feather",
+    "to_json",
+    "to_parquet",
+    "to_pickle",
+    "to_sql",
+    "unlink",
+}
+
+FORBIDDEN_DYNAMIC_FIXER_NAMES = {
+    "__builtins__",
+    "builtins",
+    "db",
+    "httpx",
+    "json",
+    "openai",
+    "os",
+    "pathlib",
+    "requests",
+    "shutil",
+    "socket",
+    "subprocess",
+    "supabase",
+    "sys",
+}
+
+
+def _default_dynamic_fixer_generation() -> dict[str, Any]:
+    return {
+        "generated_fixers": [],
+        "skipped_satisfied_rules": [],
+        "failed_generations": [],
+        "llm_calls": 0,
+    }
+
+
+def _safe_issue_for_prompt(issue: dict[str, Any]) -> dict[str, Any]:
+    allowed_keys = (
+        "rule_code",
+        "rule_type",
+        "row_number",
+        "row",
+        "field_name",
+        "field",
+        "severity",
+        "reason",
+        "invalid_value",
+    )
+    return {
+        key: issue[key]
+        for key in allowed_keys
+        if key in issue and issue[key] not in (None, "")
+    }
+
+
+def _dynamic_rule_description(rule: dict[str, Any]) -> str:
+    return _stringify(
+        rule.get("description")
+        or rule.get("rule_text")
+        or rule.get("error_message")
+        or rule.get("label")
+        or "Dynamic rule"
+    )
+
+
+def _extract_dynamic_fixer_code(raw_response: str) -> str:
+    raw = _stringify(raw_response).strip()
+    if not raw:
+        raise ValueError("LLM returned an empty response.")
+
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            code = parsed.get("code") or parsed.get("python_code") or parsed.get("fixer_code")
+            if isinstance(code, str):
+                return code.strip()
+        raise ValueError("LLM JSON did not contain code/python_code/fixer_code.")
+    except json.JSONDecodeError:
+        fenced = re.search(r"```(?:python)?\s*(.*?)```", raw, re.DOTALL | re.IGNORECASE)
+        return (fenced.group(1) if fenced else raw).strip()
+
+
+def validate_dynamic_fixer_code(code: str) -> tuple[bool, str]:
+    """
+    Validate generated Python without executing it.
+
+    The only accepted contract is:
+        def fix_dynamic_rule(df, issue_rows):
+            ...
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return False, f"Python syntax error: {exc}"
+
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+    if len(functions) != 1 or functions[0].name != "fix_dynamic_rule":
+        return False, "Code must define exactly one function named fix_dynamic_rule."
+
+    function = functions[0]
+    arg_names = [arg.arg for arg in function.args.args]
+    if arg_names != ["df", "issue_rows"]:
+        return False, "fix_dynamic_rule must accept exactly df and issue_rows."
+    if function.decorator_list:
+        return False, "Decorators are not allowed."
+    if not any(isinstance(node, ast.Return) for node in ast.walk(function)):
+        return False, "fix_dynamic_rule must return a dataframe/result."
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return False, "Imports are not allowed in dynamic fixer code."
+        if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.Global, ast.Nonlocal, ast.Delete, ast.With, ast.AsyncWith)):
+            return False, f"{type(node).__name__} is not allowed in dynamic fixer code."
+        if isinstance(node, ast.Name):
+            if node.id.startswith("__") or node.id in FORBIDDEN_DYNAMIC_FIXER_NAMES:
+                return False, f"Forbidden name used: {node.id}"
+        if isinstance(node, ast.Attribute):
+            if node.attr.startswith("__"):
+                return False, f"Forbidden attribute used: {node.attr}"
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_DYNAMIC_FIXER_CALLS:
+                return False, f"Forbidden call used: {node.func.id}"
+            if isinstance(node.func, ast.Attribute) and node.func.attr in FORBIDDEN_DYNAMIC_FIXER_METHODS:
+                return False, f"Forbidden method call used: {node.func.attr}"
+
+    return True, "ok"
+
+
+def _build_dynamic_fixer_prompts(rule_item: dict[str, Any], issue_group: dict[str, Any]) -> tuple[str, str]:
+    rule = rule_item.get("rule") if isinstance(rule_item.get("rule"), dict) else {}
+    issues = [
+        _safe_issue_for_prompt(issue)
+        for issue in issue_group.get("issues", [])
+        if isinstance(issue, dict)
+    ]
+    invalid_values = sorted({
+        _stringify(issue.get("invalid_value")).strip()
+        for issue in issues
+        if _stringify(issue.get("invalid_value")).strip()
+    })
+    payload = {
+        "dynamic_rule": {
+            "id": rule_item.get("rule_code") or rule.get("id"),
+            "field": rule_item.get("field_name") or rule.get("field") or issue_group.get("field_name"),
+            "label": rule.get("label"),
+            "description": _dynamic_rule_description(rule),
+            "severity": rule.get("severity"),
+            "error_message": rule.get("error_message"),
+            "source": rule.get("source"),
+            "priority": rule.get("priority"),
+        },
+        "issue_group": {
+            "group_id": issue_group.get("group_id"),
+            "rule_code": issue_group.get("rule_code"),
+            "field_name": issue_group.get("field_name"),
+            "issue_count": issue_group.get("issue_count", len(issues)),
+            "invalid_values": invalid_values[:20],
+            "issues": issues,
+        },
+    }
+
+    system_prompt = """You generate safe runtime Python fixers for SAP migration cleansing.
+Return ONLY a JSON object with a string field named "code".
+The code must define exactly:
+def fix_dynamic_rule(df, issue_rows):
+The function must modify only issue_rows and the relevant field, preserve unrelated rows/columns, and return df.
+Do not import modules, access files, call shell commands, access network/database, or persist anything."""
+    user_prompt = json.dumps(payload, indent=2, sort_keys=True)
+    return system_prompt, user_prompt
+
+
+def generate_dynamic_fixers_from_plan(
+    execution_plan: dict[str, Any] | None,
+    *,
+    llm_generator: LLMGenerator | None = None,
+) -> dict[str, Any]:
+    """
+    Generate one in-memory fixer per dynamic issue group.
+
+    This does not execute generated code and does not persist it anywhere.
+    """
+    result = _default_dynamic_fixer_generation()
+    plan = execution_plan or {}
+    dynamic_items = plan.get("dynamic_rules", {}).get("items", [])
+
+    generated_group_ids: set[str] = set()
+    for rule_item in dynamic_items:
+        if not isinstance(rule_item, dict):
+            continue
+
+        if rule_item.get("status") == "satisfied":
+            result["skipped_satisfied_rules"].append({
+                "dynamic_rule_id": rule_item.get("rule_code"),
+                "field": rule_item.get("field_name"),
+                "status": "satisfied",
+                "reason": "No validation issues for this dynamic rule.",
+            })
+
+        for issue_group in rule_item.get("issue_groups", []):
+            if not isinstance(issue_group, dict):
+                continue
+            group_id = _stringify(issue_group.get("group_id"))
+            if group_id in generated_group_ids:
+                continue
+            generated_group_ids.add(group_id)
+
+            fixer_base = {
+                "dynamic_rule_id": rule_item.get("rule_code"),
+                "rule_code": issue_group.get("rule_code") or rule_item.get("rule_code"),
+                "field": issue_group.get("field_name") or rule_item.get("field_name"),
+                "issue_count": issue_group.get("issue_count", len(issue_group.get("issues", []))),
+                "group_id": group_id,
+            }
+            try:
+                system_prompt, user_prompt = _build_dynamic_fixer_prompts(rule_item, issue_group)
+                result["llm_calls"] += 1
+                if llm_generator is None:
+                    from services.llm_orchestrator import llm_orchestrator
+                    llm_generator = llm_orchestrator.generate_generic
+                raw_response = llm_generator(system_prompt, user_prompt)
+                code = _extract_dynamic_fixer_code(raw_response)
+                is_valid, validation_message = validate_dynamic_fixer_code(code)
+                if not is_valid:
+                    result["failed_generations"].append({
+                        **fixer_base,
+                        "status": "rejected",
+                        "reason": validation_message,
+                    })
+                    continue
+                result["generated_fixers"].append({
+                    **fixer_base,
+                    "status": "generated",
+                    "code": code,
+                })
+            except Exception as exc:
+                result["failed_generations"].append({
+                    **fixer_base,
+                    "status": "failed",
+                    "reason": str(exc),
+                })
+
+    # Process any dynamic issue groups that were not tied to a pre-stored rule
+    for issue_group in plan.get("issue_groups", []):
+        if not isinstance(issue_group, dict) or issue_group.get("scope") != "dynamic":
+            continue
+        group_id = _stringify(issue_group.get("group_id"))
+        if group_id in generated_group_ids:
+            continue
+        generated_group_ids.add(group_id)
+
+        rule_item = {"rule": {}, "rule_code": issue_group.get("rule_code"), "field_name": issue_group.get("field_name")}
+        fixer_base = {
+            "dynamic_rule_id": issue_group.get("rule_code"),
+            "rule_code": issue_group.get("rule_code"),
+            "field": issue_group.get("field_name"),
+            "issue_count": issue_group.get("issue_count", len(issue_group.get("issues", []))),
+            "group_id": group_id,
+        }
+        try:
+            system_prompt, user_prompt = _build_dynamic_fixer_prompts(rule_item, issue_group)
+            result["llm_calls"] += 1
+            if llm_generator is None:
+                from services.llm_orchestrator import llm_orchestrator
+                llm_generator = llm_orchestrator.generate_generic
+            raw_response = llm_generator(system_prompt, user_prompt)
+            code = _extract_dynamic_fixer_code(raw_response)
+            is_valid, validation_message = validate_dynamic_fixer_code(code)
+            if not is_valid:
+                result["failed_generations"].append({
+                    **fixer_base,
+                    "status": "rejected",
+                    "reason": validation_message,
+                })
+                continue
+            result["generated_fixers"].append({
+                **fixer_base,
+                "status": "generated",
+                "code": code,
+            })
+        except Exception as exc:
+            result["failed_generations"].append({
+                **fixer_base,
+                "status": "failed",
+                "reason": str(exc),
+            })
+
+    return result
+
+
+# =============================================================================
+# Dynamic Fixer Execution
+# =============================================================================
+
+SAFE_DYNAMIC_BUILTINS = {
+    "abs": abs,
+    "all": all,
+    "any": any,
+    "bool": bool,
+    "dict": dict,
+    "enumerate": enumerate,
+    "float": float,
+    "int": int,
+    "isinstance": isinstance,
+    "len": len,
+    "list": list,
+    "max": max,
+    "min": min,
+    "range": range,
+    "set": set,
+    "str": str,
+    "sum": sum,
+    "tuple": tuple,
+    "zip": zip,
+    "print": print,
+    "Exception": Exception,
+    "ValueError": ValueError,
+    "TypeError": TypeError,
+    "KeyError": KeyError,
+    "IndexError": IndexError,
+    "AttributeError": AttributeError,
+}
+
+
+def execute_dynamic_fixers(
+    df: pd.DataFrame,
+    dynamic_fixer_generation: dict[str, Any],
+    execution_plan: dict[str, Any],
+    summary: CleaningSummary,
+) -> pd.DataFrame:
+    """
+    Execute Phase 4 generated dynamic fixers against the dataset in restricted scope.
+
+    Enforces dynamic fixer execution FIRST before standard validation fixes and
+    standard cleanser rules.
+    """
+    executed_list = []
+    skipped_list = []
+    failed_list = []
+    total_fixes = 0
+    applied_dynamic_rules = []
+
+    # 1. Log skipped satisfied rules from generation step
+    for item in dynamic_fixer_generation.get("skipped_satisfied_rules", []):
+        if isinstance(item, dict):
+            skipped_list.append({
+                "rule_code": item.get("dynamic_rule_id"),
+                "field": item.get("field"),
+                "reason": item.get("reason", "Satisfied dynamic rule with 0 issues."),
+            })
+
+    # 2. Log failed generation items
+    for item in dynamic_fixer_generation.get("failed_generations", []):
+        if isinstance(item, dict):
+            failed_list.append({
+                "group_id": item.get("group_id"),
+                "rule_code": item.get("rule_code") or item.get("dynamic_rule_id"),
+                "field": item.get("field"),
+                "reason": f"Generation/safety validation failed: {item.get('reason')}",
+            })
+
+    # Build group_id lookup map for issue rows from execution plan
+    groups_map = {
+        _stringify(g.get("group_id")): g.get("issues", [])
+        for g in execution_plan.get("issue_groups", [])
+        if isinstance(g, dict) and g.get("group_id")
+    }
+
+    # 3. Execute each generated fixer that passed Phase 4 AST validation
+    for fixer_info in dynamic_fixer_generation.get("generated_fixers", []):
+        if not isinstance(fixer_info, dict):
+            continue
+
+        code = fixer_info.get("code", "")
+        group_id = _stringify(fixer_info.get("group_id"))
+        rule_code = fixer_info.get("rule_code") or fixer_info.get("dynamic_rule_id") or "DYNAMIC_RULE"
+        field_name = fixer_info.get("field", "")
+
+        # Safety re-validation
+        is_valid, val_msg = validate_dynamic_fixer_code(code)
+        if not is_valid:
+            failed_list.append({
+                "group_id": group_id,
+                "rule_code": rule_code,
+                "field": field_name,
+                "reason": f"Safety re-validation failed: {val_msg}",
+            })
+            continue
+
+        # Get issue rows specifically for this dynamic group
+        issue_rows = groups_map.get(group_id, [])
+
+        # Restricted execution namespace
+        safe_globals = {"__builtins__": SAFE_DYNAMIC_BUILTINS, "pd": pd}
+        local_scope: dict[str, Any] = {}
+
+        try:
+            exec(code, safe_globals, local_scope)
+            fix_func = local_scope.get("fix_dynamic_rule")
+            if not callable(fix_func):
+                raise ValueError("Defined fix_dynamic_rule is not callable.")
+        except Exception as exc:
+            failed_list.append({
+                "group_id": group_id,
+                "rule_code": rule_code,
+                "field": field_name,
+                "reason": f"Compilation failed: {exc}",
+            })
+            continue
+
+        # Capture copy before execution
+        before_df = df.copy(deep=True)
+        df_for_func = df.copy(deep=True)
+
+        # Execute dynamic fixer function
+        try:
+            result_df = fix_func(df_for_func, issue_rows)
+        except Exception as exc:
+            failed_list.append({
+                "group_id": group_id,
+                "rule_code": rule_code,
+                "field": field_name,
+                "reason": f"Runtime exception during execution: {exc}",
+            })
+            continue
+
+        # Handle return value (support in-place mutation returning None or returning a DataFrame)
+        if result_df is None:
+            after_df = df_for_func
+        elif isinstance(result_df, pd.DataFrame):
+            after_df = result_df
+        else:
+            failed_list.append({
+                "group_id": group_id,
+                "rule_code": rule_code,
+                "field": field_name,
+                "reason": f"Returned invalid result type: {type(result_df).__name__}",
+            })
+            continue
+
+        # Structural validation on return result
+        if len(after_df) != len(df) or list(after_df.columns) != list(df.columns):
+            failed_list.append({
+                "group_id": group_id,
+                "rule_code": rule_code,
+                "field": field_name,
+                "reason": "Structural validation failed: columns or row count altered by fixer.",
+            })
+            continue
+
+        # Cell-by-cell diff tracking (before vs after)
+        group_fixes = 0
+        for row_idx in range(len(df)):
+            for col in df.columns:
+                old_val = _stringify(before_df.at[row_idx, col])
+                new_val = _stringify(after_df.at[row_idx, col])
+                if old_val != new_val:
+                    df.at[row_idx, col] = new_val
+                    summary.add_fix("dynamic", rule_code, row_idx + 1, col, old_val, new_val)
+                    group_fixes += 1
+
+        executed_list.append({
+            "group_id": group_id,
+            "rule_code": rule_code,
+            "field": field_name,
+            "fixes_applied": group_fixes,
+        })
+        total_fixes += group_fixes
+        if rule_code not in applied_dynamic_rules:
+            applied_dynamic_rules.append(rule_code)
+            summary.add_rule(rule_code)
+
+    summary.dynamic_fixer_execution = {
+        "executed": executed_list,
+        "skipped": skipped_list,
+        "failed": failed_list,
+        "fixes_count": total_fixes,
+        "rules_applied": applied_dynamic_rules,
+    }
+
+    return df
+
+
+# =============================================================================
 # Main Agent
 # =============================================================================
 
@@ -1056,7 +1798,12 @@ def apply_validation_fixes(
     df: pd.DataFrame,
     validation_report: dict[str, Any],
     summary: CleaningSummary,
+    execution_plan: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
+    overridden_rules = []
+    if execution_plan:
+        overridden_rules = execution_plan.get("overridden_rules", [])
+
     for issue in validation_report.get("issues", []):
         rule_code = issue.get("rule_code")
         row_number = issue.get("row")
@@ -1066,12 +1813,25 @@ def apply_validation_fixes(
         rule_type = _stringify(issue.get("rule_type")).upper()
         if isinstance(rule_code, str) and (rule_code.startswith("DYNAMIC_") or "DYNAMIC" in rule_type):
             summary.dynamic_issues.append(dict(issue))
-            summary.warnings.append(f"Dynamic validation issue {rule_code} observed for row {row_number}; dynamic fixes are not executed in Phase 2.")
             continue
 
         if not isinstance(rule_code, str) or not rule_code or not isinstance(row_number, int) or not isinstance(field_name, str) or not field_name:
             summary.warnings.append(f"Skipped malformed validation issue: {issue}")
             continue
+
+        # Skip standard validation rules overridden by dynamic rules
+        clean_rule = _clean_key(rule_code)
+        clean_field = _field_key(field_name)
+        is_overridden = any(
+            _clean_key(ov.get("rule_code")) == clean_rule and
+            (ov.get("field_name") == "MULTIPLE" or _field_key(ov.get("field_name", "")) in (clean_field, "GENERAL"))
+            for ov in overridden_rules
+            if ov.get("rule_type") == "standard_validation"
+        )
+        if is_overridden:
+            summary.warnings.append(f"Skipped standard validation rule {rule_code} for field {field_name} (overridden by dynamic rule).")
+            continue
+
         if row_number < 1 or row_number > len(df.index):
             summary.warnings.append(f"Skipped issue for out-of-range row {row_number}: {issue}")
             continue
@@ -1087,8 +1847,21 @@ def apply_validation_fixes(
     return df
 
 
-def apply_cleanser_rules(df: pd.DataFrame, summary: CleaningSummary) -> pd.DataFrame:
+def apply_cleanser_rules(
+    df: pd.DataFrame,
+    summary: CleaningSummary,
+    execution_plan: dict[str, Any] | None = None,
+) -> pd.DataFrame:
+    suppressed_rules = set()
+    if execution_plan:
+        for item in execution_plan.get("standard_cleanser_rules", {}).get("items", []):
+            if item.get("status") == "suppressed":
+                suppressed_rules.add(item.get("rule_code"))
+
     for rule_code, rule_func in CLEANSER_RULES:
+        if rule_code in suppressed_rules:
+            summary.warnings.append(f"Skipped generic cleanser rule {rule_code} (suppressed by active dynamic rule).")
+            continue
         summary.add_rule(rule_code)
         rule_func(df, summary, rule_code)
     return df
@@ -1126,17 +1899,23 @@ def run_cleanser(
         target_object=target_object,
         dynamic_rule_store_path=dynamic_rule_store_path,
     )
-    apply_validation_fixes(df, validation_report, summary)
-    apply_cleanser_rules(df, summary)
+    summary.dynamic_fixer_generation = generate_dynamic_fixers_from_plan(summary.execution_plan)
+
+    # Phase 5 Execution Order:
+    # 1. Execute dynamic fixers FIRST
+    df = execute_dynamic_fixers(df, summary.dynamic_fixer_generation, summary.execution_plan, summary)
+
+    # 2. Standard validation fixes (skipping overridden rules)
+    apply_validation_fixes(df, validation_report, summary, summary.execution_plan)
+
+    # 3. Standard cleanser rules (skipping suppressed rules)
+    apply_cleanser_rules(df, summary, summary.execution_plan)
+
     export_cleaned_csv(df, output_csv_path)
 
     summary.rows_exported = len(df.index)
     return summary.to_dict()
 
-
-# =============================================================================
-# CSV Export
-# =============================================================================
 
 def export_cleaned_csv(df: pd.DataFrame, output_csv_path: str | Path) -> None:
     output_path = Path(output_csv_path)
