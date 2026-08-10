@@ -1,10 +1,8 @@
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import pandas as pd
-import json
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, Form
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from agents.cleanser_agent import run_cleanser
@@ -43,39 +41,24 @@ async def cleanser_flow(req: FlowRequest):
         raise HTTPException(status_code=400, detail="No harmonized data found for this project/object")
     harmonized_data = res_harm.data[0]["payload"]
     
-    # 3. Fetch Validation Report
+    # 3. Fetch complete Validation Report payload. It contains issue metadata
+    # beyond row/rule/field and must not be reduced before Cleanser receives it.
     res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
     validation_payload = res_val.data[0]["payload"] if res_val.data else []
-    
-    # Convert validation payload to format expected by cleanser agent CSV
-    agent_issues = [["Row Number", "Rule Code", "Field Name"]]
-    for issue in validation_payload:
-        agent_issues.append([
-            str(issue.get("row_number", "")),
-            issue.get("rule_code", ""),
-            issue.get("field_name", "")
-        ])
 
     with TemporaryDirectory(prefix="sap_cleanser_") as tmp_dir:
         tmp_path = Path(tmp_dir)
         input_csv_path = tmp_path / "harmonization.csv"
-        validation_csv_path = tmp_path / "validation_report.csv"
         output_csv_path = tmp_path / "cleaned.csv"
 
         # Write data to CSV
         df = pd.DataFrame(harmonized_data)
         df.to_csv(input_csv_path, index=False)
-        
-        # Write validation report
-        with open(validation_csv_path, "w", encoding="utf-8", newline="") as f:
-            import csv
-            writer = csv.writer(f)
-            writer.writerows(agent_issues)
 
         try:
             summary = run_cleanser(
                 dataset_csv_path=input_csv_path,
-                validation_report_csv_path=validation_csv_path,
+                validation_report_payload=validation_payload,
                 output_csv_path=output_csv_path,
             )
             cleaned_data = parse_cleaned_csv(output_csv_path)
@@ -107,6 +90,8 @@ async def cleanser_upload_csv(
 
         report_path: Path | None = None
         if validation_report_csv and validation_report_csv.filename:
+            suffix = Path(validation_report_csv.filename).suffix.lower()
+            validation_csv_path = tmp_path / ("validation_report.json" if suffix == ".json" else "validation_report.csv")
             validation_csv_path.write_bytes(await validation_report_csv.read())
             report_path = validation_csv_path
 

@@ -203,7 +203,7 @@ export function Step6Cleanse() {
                 <input
                   ref={valCsvInputRef}
                   type="file"
-                  accept=".csv"
+                  accept=".csv,.json"
                   className="hidden"
                   onChange={(e) => setStandaloneValidationCsv(e.target.files?.[0] || null)}
                 />

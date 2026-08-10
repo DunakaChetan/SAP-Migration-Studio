@@ -227,6 +227,8 @@ class CleaningSummary:
     input_csv_path: str
     validation_report_csv_path: str | None
     output_csv_path: str
+    validation_issues: list[dict[str, Any]] = field(default_factory=list)
+    dynamic_issues: list[dict[str, Any]] = field(default_factory=list)
     validation_fixes: list[dict[str, Any]] = field(default_factory=list)
     cleanser_fixes: list[dict[str, Any]] = field(default_factory=list)
     rows_modified: set[int] = field(default_factory=set)
@@ -264,10 +266,18 @@ class CleaningSummary:
     def to_dict(self) -> dict[str, Any]:
         return {
             "input_csv_path": self.input_csv_path,
-            "validation_report_json_path": self.validation_report_json_path,
+            "validation_report_csv_path": self.validation_report_csv_path,
             "output_csv_path": self.output_csv_path,
             "rows_loaded": self.rows_loaded,
             "rows_exported": self.rows_exported,
+            "validation_issues": {
+                "count": len(self.validation_issues),
+                "items": self.validation_issues,
+            },
+            "dynamic_issues": {
+                "count": len(self.dynamic_issues),
+                "items": self.dynamic_issues,
+            },
             "validation_fixes": {
                 "count": len(self.validation_fixes),
                 "items": self.validation_fixes,
@@ -426,12 +436,88 @@ def load_csv(dataset_csv_path: str | Path) -> pd.DataFrame:
     return pd.read_csv(dataset_csv_path, dtype=str, keep_default_na=False)
 
 
-def load_validation_report(validation_report_csv_path: str | Path | None) -> dict[str, Any]:
+def _parse_row_number(issue: dict[str, Any]) -> int | None:
+    raw = issue.get("row_number", issue.get("Row Number", issue.get("row")))
+    is_zero_based_idx = False
+    if raw in (None, "") and issue.get("idx") not in (None, ""):
+        raw = issue["idx"]
+        is_zero_based_idx = True
+    try:
+        row_number = int(raw) + 1 if is_zero_based_idx else int(raw)
+    except (TypeError, ValueError):
+        return None
+    return row_number if row_number > 0 else None
+
+
+def _normalize_validation_issue(issue: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(issue)
+    normalized["rule_code"] = _clean_key(
+        issue.get("rule_code")
+        or issue.get("Rule Code")
+        or issue.get("rule")
+    )
+    normalized["row"] = _parse_row_number(issue)
+    normalized["field"] = _stringify(
+        issue.get("field_name")
+        or issue.get("Field Name")
+        or issue.get("field")
+        or issue.get("f")
+    ).strip()
+
+    if "rule_type" not in normalized and "Rule Type" in issue:
+        normalized["rule_type"] = issue["Rule Type"]
+    if "severity" not in normalized and "Severity" in issue:
+        normalized["severity"] = issue["Severity"]
+    if "reason" not in normalized and "Reason" in issue:
+        normalized["reason"] = issue["Reason"]
+    if "invalid_value" not in normalized and "Invalid Value" in issue:
+        normalized["invalid_value"] = issue["Invalid Value"]
+
+    return normalized
+
+
+def _normalize_validation_report_payload(payload: Any) -> dict[str, Any]:
+    if payload is None:
+        return {"version": "1.0", "issues": []}
+
+    if isinstance(payload, dict):
+        raw_issues = payload.get("issues", [])
+        version = payload.get("version", "1.0")
+    elif isinstance(payload, list):
+        raw_issues = payload
+        version = "1.0"
+    else:
+        raw_issues = []
+        version = "1.0"
+
+    issues = [
+        _normalize_validation_issue(issue)
+        for issue in raw_issues
+        if isinstance(issue, dict)
+    ]
+    return {"version": version, "issues": issues}
+
+
+def load_validation_report(
+    validation_report_csv_path: str | Path | None = None,
+    validation_report_payload: Any = None,
+) -> dict[str, Any]:
+    if validation_report_payload is not None:
+        return _normalize_validation_report_payload(validation_report_payload)
+
     if not validation_report_csv_path:
         return {"version": "1.0", "issues": []}
+
     path = Path(validation_report_csv_path)
     if not path.exists():
         return {"version": "1.0", "issues": []}
+
+    if path.suffix.lower() == ".json":
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                return _normalize_validation_report_payload(json.load(handle))
+        except Exception:
+            return {"version": "1.0", "issues": []}
         
     try:
         df = pd.read_csv(path, dtype=str, keep_default_na=False)
@@ -439,20 +525,11 @@ def load_validation_report(validation_report_csv_path: str | Path | None) -> dic
         return {"version": "1.0", "issues": []}
         
     issues = []
-    # Expected columns: Row Number, Rule Code, Field Name, Severity, Reason, Invalid Value
+    # CSV compatibility path. Production flow passes the complete DB payload.
     for _, row in df.iterrows():
-        try:
-            r_num = int(row.get("Row Number", 0))
-            rule_code = row.get("Rule Code", "")
-            field_name = row.get("Field Name", "")
-            if r_num > 0 and rule_code and field_name:
-                issues.append({
-                    "row": r_num,
-                    "rule_code": rule_code,
-                    "field": field_name
-                })
-        except ValueError:
-            pass
+        issue = _normalize_validation_issue(row.to_dict())
+        if issue.get("row") and issue.get("rule_code") and issue.get("field"):
+            issues.append(issue)
             
     return {"version": "1.0", "issues": issues}
 
@@ -704,6 +781,20 @@ VALIDATION_FIXERS: dict[str, ValidationFixer] = {
     "VAL_PAYMENT_TERMS_FORMAT": fix_payment_terms_format,
 }
 
+# Production Validation rule codes are the source of truth. The VAL_* keys are
+# retained only for standalone fixture compatibility and point at the same
+# existing fixer functions.
+VALIDATION_FIXERS.update({
+    "REQUIRED_FIELDS": fix_required_fields,
+    "NUMERIC_ID": fix_numeric_identifier_format,
+    "COUNTRY_ISO": fix_country_code_format,
+    "CURRENCY_ISO": fix_currency_code_format,
+    "EMAIL_FORMAT": fix_email_address_format,
+    "DATE_FORMAT": fix_date_yyyymmdd_format,
+    "FIELD_LENGTH": fix_field_length,
+    "PAYMENT_TERMS": fix_payment_terms_format,
+})
+
 CLEANSER_RULES: list[tuple[str, CleanserRule]] = [
     ("CL_TRIM_WHITESPACE", apply_trim_whitespace),
     ("CL_COUNTRY_TO_ISO", apply_country_to_iso),
@@ -731,7 +822,15 @@ def apply_validation_fixes(
         rule_code = issue.get("rule_code")
         row_number = issue.get("row")
         field_name = issue.get("field")
-        if not isinstance(rule_code, str) or not isinstance(row_number, int) or not isinstance(field_name, str):
+        summary.validation_issues.append(dict(issue))
+
+        rule_type = _stringify(issue.get("rule_type")).upper()
+        if isinstance(rule_code, str) and (rule_code.startswith("DYNAMIC_") or "DYNAMIC" in rule_type):
+            summary.dynamic_issues.append(dict(issue))
+            summary.warnings.append(f"Dynamic validation issue {rule_code} observed for row {row_number}; dynamic fixes are not executed in Phase 2.")
+            continue
+
+        if not isinstance(rule_code, str) or not rule_code or not isinstance(row_number, int) or not isinstance(field_name, str) or not field_name:
             summary.warnings.append(f"Skipped malformed validation issue: {issue}")
             continue
         if row_number < 1 or row_number > len(df.index):
@@ -759,6 +858,7 @@ def apply_cleanser_rules(df: pd.DataFrame, summary: CleaningSummary) -> pd.DataF
 def run_cleanser(
     dataset_csv_path: str | Path,
     validation_report_csv_path: str | Path | None = None,
+    validation_report_payload: Any = None,
     output_csv_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if output_csv_path is None:
@@ -769,7 +869,7 @@ def run_cleanser(
     validation_path = Path(validation_report_csv_path) if validation_report_csv_path else None
 
     df = load_csv(dataset_csv_path)
-    validation_report = load_validation_report(validation_path)
+    validation_report = load_validation_report(validation_path, validation_report_payload)
 
     summary = CleaningSummary(
         input_csv_path=str(dataset_csv_path),
