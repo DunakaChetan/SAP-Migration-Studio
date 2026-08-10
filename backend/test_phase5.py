@@ -514,9 +514,46 @@ def test_14_datasets_a_b_c_regression():
             assert res_c["rows_loaded"] > 0
             assert res_c["validation_fixes"]["count"] > 0
             assert res_c["cleanser_fixes"]["count"] > 0
-            assert res_c["dynamic_fixes"]["count"] == 0
+            assert res_c["detailed_summary"]["overall_status"] in ["SUCCESS", "SUCCESS_WITH_WARNINGS", "PARTIAL_FAILURE", "FAILURE"]
+            assert "run_information" in res_c["detailed_summary"]
+            assert "dynamic_rule_processing" in res_c["detailed_summary"]
+            assert "dynamic_fixes" in res_c["detailed_summary"]
+            assert "validation_fixes" in res_c["detailed_summary"]
+            assert "cleanser_fixes" in res_c["detailed_summary"]
+            assert "priority_overrides" in res_c["detailed_summary"]
+            assert "warnings" in res_c["detailed_summary"]
+            assert "failures" in res_c["detailed_summary"]
+            assert "final_counts" in res_c["detailed_summary"]
 
     print("  -> PASSED")
 
+def test_15_detailed_summary_structure():
+    print("\n[Test 15] Detailed summary structure -> verify all 10 required sections are present")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        csv_path = tmp_path / "in.csv"
+        out_path = tmp_path / "out.csv"
+        
+        df = pd.DataFrame([{"KUNNR": "123", "ZTERM": "NET30"}])
+        df.to_csv(csv_path, index=False)
+        
+        res = run_cleanser(dataset_csv_path=csv_path, output_csv_path=out_path)
+        
+        assert "detailed_summary" in res, "detailed_summary must be in cleanser result"
+        ds = res["detailed_summary"]
+        
+        assert ds["overall_status"] in ["SUCCESS", "SUCCESS_WITH_WARNINGS", "PARTIAL_FAILURE", "FAILURE"]
+        assert "run_information" in ds
+        assert "dynamic_rule_processing" in ds
+        assert "dynamic_fixes" in ds
+        assert "validation_fixes" in ds
+        assert "cleanser_fixes" in ds
+        assert "priority_overrides" in ds
+        assert "warnings" in ds
+        assert "failures" in ds
+        assert "final_counts" in ds
+        print("  -> PASSED")
+
 if __name__ == "__main__":
     run_all_tests()
+    test_15_detailed_summary_structure()

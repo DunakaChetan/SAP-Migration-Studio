@@ -476,15 +476,19 @@ class CleaningSummary:
                 if isinstance(item, dict)
             ]
 
+        detailed = build_detailed_cleanser_summary(self)
+
         return {
             "input_csv_path": self.input_csv_path,
             "validation_report_csv_path": self.validation_report_csv_path,
             "output_csv_path": self.output_csv_path,
             "rows_loaded": self.rows_loaded,
             "rows_exported": self.rows_exported,
+            "overall_status": detailed["overall_status"],
             "execution_plan": self.execution_plan,
             "dynamic_fixer_generation": sanitized_gen,
             "dynamic_fixer_execution": self.dynamic_fixer_execution,
+            "detailed_summary": detailed,
             "validation_issues": {
                 "count": len(self.validation_issues),
                 "items": self.validation_issues,
@@ -510,6 +514,179 @@ class CleaningSummary:
             "rules_applied": self.rules_applied,
             "warnings": self.warnings,
         }
+
+
+def build_detailed_cleanser_summary(summary: CleaningSummary) -> dict[str, Any]:
+    val_report_supplied = bool(summary.validation_report_csv_path or summary.validation_issues)
+    run_info = {
+        "input_csv_path": summary.input_csv_path,
+        "validation_report_supplied": val_report_supplied,
+        "validation_report_csv_path": summary.validation_report_csv_path,
+        "output_csv_path": summary.output_csv_path,
+        "rows_loaded": summary.rows_loaded,
+        "rows_exported": summary.rows_exported,
+    }
+
+    plan = summary.execution_plan or {}
+    dyn_rules_items = plan.get("dynamic_rules", {}).get("items", [])
+    
+    dyn_considered = len(dyn_rules_items)
+    dyn_with_issues = sum(1 for r in dyn_rules_items if r.get("status") == "has_issues")
+    dyn_satisfied = sum(1 for r in dyn_rules_items if r.get("status") == "satisfied")
+    grouped_issue_groups_count = len(plan.get("issue_groups", []))
+
+    gen_info = summary.dynamic_fixer_generation or {}
+    exec_info = summary.dynamic_fixer_execution or {}
+
+    llm_attempts = gen_info.get("llm_calls", 0)
+    successful_gen_count = len(gen_info.get("generated_fixers", []))
+    failed_gen_count = len(gen_info.get("failed_generations", []))
+
+    exec_attempts_count = len(exec_info.get("executed", [])) + len(exec_info.get("failed", []))
+    successful_exec_count = len(exec_info.get("executed", []))
+    failed_exec_count = len(exec_info.get("failed", []))
+
+    dynamic_rule_processing = {
+        "dynamic_rules_considered": dyn_considered,
+        "dynamic_rules_with_issues": dyn_with_issues,
+        "dynamic_rules_satisfied": dyn_satisfied,
+        "grouped_issue_groups_count": grouped_issue_groups_count,
+        "llm_fixer_generation_attempts": llm_attempts,
+        "successful_generations_count": successful_gen_count,
+        "failed_generations_count": failed_gen_count,
+        "execution_attempts_count": exec_attempts_count,
+        "successful_executions_count": successful_exec_count,
+        "failed_executions_count": failed_exec_count,
+    }
+
+    dynamic_fixes_items = [
+        {
+            "row": fix["row"],
+            "field": fix["field"],
+            "old": fix["old"],
+            "new": fix["new"],
+            "rule_code": fix["rule_code"],
+        }
+        for fix in summary.dynamic_fixes
+    ]
+
+    val_rule_counts: dict[str, int] = {}
+    val_rows_set = set()
+    for fix in summary.validation_fixes:
+        code = fix["rule_code"]
+        val_rule_counts[code] = val_rule_counts.get(code, 0) + 1
+        val_rows_set.add(fix["row"])
+
+    validation_fixes_summary = {
+        "total": len(summary.validation_fixes),
+        "rule_wise_counts": val_rule_counts,
+        "affected_rows": sorted(val_rows_set),
+        "items": summary.validation_fixes,
+    }
+
+    cl_rule_counts: dict[str, int] = {}
+    cl_rows_set = set()
+    for fix in summary.cleanser_fixes:
+        code = fix["rule_code"]
+        cl_rule_counts[code] = cl_rule_counts.get(code, 0) + 1
+        cl_rows_set.add(fix["row"])
+
+    cleanser_fixes_summary = {
+        "total": len(summary.cleanser_fixes),
+        "rule_wise_counts": cl_rule_counts,
+        "affected_rows": sorted(cl_rows_set),
+        "items": summary.cleanser_fixes,
+    }
+
+    overridden_val = [
+        r["rule_code"]
+        for r in plan.get("overridden_rules", [])
+        if r.get("rule_type") == "standard_validation"
+    ]
+    suppressed_cl = [
+        r["rule_code"]
+        for r in plan.get("overridden_rules", [])
+        if r.get("rule_type") == "standard_cleanser"
+    ]
+    satisfied_dyn = [
+        item["rule_code"]
+        for item in plan.get("satisfied_dynamic_rules", {}).get("items", [])
+    ]
+
+    priority_overrides = {
+        "dynamic_overrides_standard_validation": overridden_val,
+        "dynamic_suppressed_cleanser": suppressed_cl,
+        "standard_rules_skipped": overridden_val + suppressed_cl,
+        "satisfied_dynamic_rules": satisfied_dyn,
+    }
+
+    warnings_summary = {
+        "count": len(summary.warnings),
+        "items": summary.warnings,
+    }
+
+    failures_items = []
+    for f in gen_info.get("failed_generations", []):
+        failures_items.append({
+            "type": "generation_failure",
+            "group_id": f.get("group_id"),
+            "rule_code": f.get("rule_code"),
+            "field": f.get("field"),
+            "reason": f.get("reason"),
+        })
+    for f in exec_info.get("failed", []):
+        failures_items.append({
+            "type": "execution_failure",
+            "group_id": f.get("group_id"),
+            "rule_code": f.get("rule_code"),
+            "field": f.get("field"),
+            "reason": f.get("reason"),
+        })
+
+    failures_summary = {
+        "count": len(failures_items),
+        "items": failures_items,
+    }
+
+    final_counts = {
+        "rows_loaded": summary.rows_loaded,
+        "rows_exported": summary.rows_exported,
+        "rows_modified_count": len(summary.rows_modified),
+        "rows_modified": sorted(summary.rows_modified),
+        "dynamic_fixes_count": len(summary.dynamic_fixes),
+        "validation_fixes_count": len(summary.validation_fixes),
+        "cleanser_fixes_count": len(summary.cleanser_fixes),
+        "total_fixes_count": len(summary.dynamic_fixes) + len(summary.validation_fixes) + len(summary.cleanser_fixes),
+        "warnings_count": len(summary.warnings),
+        "failures_count": len(failures_items),
+        "rules_applied_count": len(summary.rules_applied),
+        "rules_applied": summary.rules_applied,
+    }
+
+    if summary.rows_exported == 0 and summary.rows_loaded > 0:
+        overall_status = "FAILURE"
+    elif len(failures_items) > 0:
+        overall_status = "PARTIAL_FAILURE"
+    elif len(summary.warnings) > 0:
+        overall_status = "SUCCESS_WITH_WARNINGS"
+    else:
+        overall_status = "SUCCESS"
+
+    return {
+        "overall_status": overall_status,
+        "run_information": run_info,
+        "dynamic_rule_processing": dynamic_rule_processing,
+        "dynamic_fixes": {
+            "count": len(dynamic_fixes_items),
+            "items": dynamic_fixes_items,
+        },
+        "validation_fixes": validation_fixes_summary,
+        "cleanser_fixes": cleanser_fixes_summary,
+        "priority_overrides": priority_overrides,
+        "warnings": warnings_summary,
+        "failures": failures_summary,
+        "final_counts": final_counts,
+    }
 
 
 def _stringify(value: Any) -> str:
