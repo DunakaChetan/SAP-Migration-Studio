@@ -554,6 +554,127 @@ def test_15_detailed_summary_structure():
         assert "final_counts" in ds
         print("  -> PASSED")
 
+def test_16_end_to_end_dynamic_rule():
+    print("\n[Test 16] End-to-end dynamic rule -> grouped issues, single LLM call, targeted record execution")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        csv_path = tmp_path / "in.csv"
+        out_path = tmp_path / "out.csv"
+        rule_store_path = tmp_path / "rules.json"
+        
+        rule_payload = {
+            "version": "1.0",
+            "rules": [
+                {"id": "DYNAMIC_ZTERM", "target_object": "CUSTOMER", "field": "ZTERM", "label": "ZTERM MUST BE NT45"}
+            ]
+        }
+        rule_store_path.write_text(json.dumps(rule_payload), encoding="utf-8")
+        
+        # 5 rows total
+        df = pd.DataFrame([
+            {"KUNNR": "1", "ZTERM": "NET30"},
+            {"KUNNR": "2", "ZTERM": "NET30"},
+            {"KUNNR": "3", "ZTERM": "NT45"},
+            {"KUNNR": "4", "ZTERM": "INVALID"},
+            {"KUNNR": "5", "ZTERM": "NT45"},
+        ])
+        df.to_csv(csv_path, index=False)
+        
+        val_report = {
+            "version": "1.0",
+            "issues": [
+                {"row": 1, "field": "ZTERM", "rule_code": "DYNAMIC_ZTERM", "rule_type": "DYNAMIC", "invalid_value": "NET30"},
+                {"row": 2, "field": "ZTERM", "rule_code": "DYNAMIC_ZTERM", "rule_type": "DYNAMIC", "invalid_value": "NET30"},
+                {"row": 4, "field": "ZTERM", "rule_code": "DYNAMIC_ZTERM", "rule_type": "DYNAMIC", "invalid_value": "INVALID"},
+            ]
+        }
+        
+        mock_code = {
+            "DYNAMIC_ZTERM": "def fix_dynamic_rule(df, issue_rows):\n    for issue in issue_rows:\n        row_idx = issue['row'] - 1\n        df.at[row_idx, 'ZTERM'] = 'NT45'\n    return df\n"
+        }
+        
+        summary = CleaningSummary(str(csv_path), str(tmp_path / "val.json"), str(out_path))
+        summary.rows_loaded = len(df)
+        summary.execution_plan = build_cleanser_execution_plan(val_report, dynamic_rule_store_path=rule_store_path)
+        summary.dynamic_fixer_generation = generate_dynamic_fixers_from_plan(summary.execution_plan, llm_generator=_mock_llm(mock_code))
+        
+        # Verify exactly 1 LLM generation request was made
+        assert summary.dynamic_fixer_generation["llm_calls"] == 1, "Must make exactly 1 LLM generation request for grouped issues"
+        
+        cleaned_df = execute_dynamic_fixers(df, summary.dynamic_fixer_generation, summary.execution_plan, summary)
+        
+        from agents.cleanser_agent import apply_validation_fixes, apply_cleanser_rules, export_cleaned_csv
+        apply_validation_fixes(cleaned_df, val_report, summary, summary.execution_plan)
+        apply_cleanser_rules(cleaned_df, summary, summary.execution_plan)
+        export_cleaned_csv(cleaned_df, out_path)
+        summary.rows_exported = len(cleaned_df)
+        
+        # Verify affected rows (1, 2, 4) became NT45
+        out_df = pd.read_csv(out_path, dtype=str)
+        assert out_df.at[0, "ZTERM"] == "NT45"
+        assert out_df.at[1, "ZTERM"] == "NT45"
+        assert out_df.at[3, "ZTERM"] == "NT45"
+        
+        # Verify unaffected rows (3, 5) were untouched
+        assert out_df.at[2, "ZTERM"] == "NT45"
+        assert out_df.at[4, "ZTERM"] == "NT45"
+        
+        res = summary.to_dict()
+        assert "detailed_summary" in res
+        assert res["detailed_summary"]["overall_status"] in ["SUCCESS", "SUCCESS_WITH_WARNINGS"]
+        print("  -> PASSED")
+
+def test_17_zero_issue_dynamic_policy():
+    print("\n[Test 17] Zero-issue dynamic policy -> no LLM generation, no data modification, policy suppression active")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        csv_path = tmp_path / "in.csv"
+        out_path = tmp_path / "out.csv"
+        rule_store_path = tmp_path / "rules.json"
+        
+        rule_payload = {
+            "version": "1.0",
+            "rules": [
+                {"id": "DYNAMIC_ZTERM", "target_object": "CUSTOMER", "field": "ZTERM", "label": "ZTERM MUST BE NT45"}
+            ]
+        }
+        rule_store_path.write_text(json.dumps(rule_payload), encoding="utf-8")
+        
+        df = pd.DataFrame([
+            {"KUNNR": "1", "ZTERM": "NT45"},
+            {"KUNNR": "2", "ZTERM": "NT45"},
+        ])
+        df.to_csv(csv_path, index=False)
+        
+        val_report = {"version": "1.0", "issues": []}
+        
+        summary = CleaningSummary(str(csv_path), None, str(out_path))
+        summary.rows_loaded = len(df)
+        summary.execution_plan = build_cleanser_execution_plan(val_report, dynamic_rule_store_path=rule_store_path)
+        summary.dynamic_fixer_generation = generate_dynamic_fixers_from_plan(summary.execution_plan)
+        
+        # Verify 0 LLM generation attempts
+        assert summary.dynamic_fixer_generation["llm_calls"] == 0
+        
+        cleaned_df = execute_dynamic_fixers(df, summary.dynamic_fixer_generation, summary.execution_plan, summary)
+        
+        from agents.cleanser_agent import apply_cleanser_rules
+        apply_cleanser_rules(cleaned_df, summary, summary.execution_plan)
+        
+        # Verify zero data modification
+        assert summary.dynamic_fixer_execution["fixes_count"] == 0
+        assert len(summary.dynamic_fixes) == 0
+        assert cleaned_df.at[0, "ZTERM"] == "NT45"
+        assert cleaned_df.at[1, "ZTERM"] == "NT45"
+        
+        # Verify generic cleanser ZTERM rule was suppressed by active policy
+        cleanser_items = summary.execution_plan["standard_cleanser_rules"]["items"]
+        payterms_item = next(i for i in cleanser_items if i["rule_code"] == "CL_PAYMENT_TERMS_TO_SAP")
+        assert payterms_item["status"] == "suppressed"
+        print("  -> PASSED")
+
 if __name__ == "__main__":
     run_all_tests()
     test_15_detailed_summary_structure()
+    test_16_end_to_end_dynamic_rule()
+    test_17_zero_issue_dynamic_policy()
