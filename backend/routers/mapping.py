@@ -4,7 +4,7 @@ from typing import List, Optional
 import logging
 
 from services.supabase_client import supabase_service
-from services.llm_orchestrator import llm_orchestrator
+from agents.ai_mapping_agent import ai_mapping_agent
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,8 @@ class MappingItem(BaseModel):
     conf: int
     req: Optional[bool] = False
     sapLabel: Optional[str] = ""
+    note: Optional[str] = ""
+    srcType: Optional[str] = ""
 
 class SaveAllRequest(BaseModel):
     projectId: str
@@ -31,6 +33,51 @@ class SaveAllRequest(BaseModel):
 
 class PromptRequest(BaseModel):
     prompt: str
+
+class SourceFieldItem(BaseModel):
+    sap_field_id: str
+    oracle_ebs_table: str
+    oracle_ebs_field_name: str
+
+class SaveSourceFieldsRequest(BaseModel):
+    sourceSystemId: str
+    objectId: str
+    fields: List[SourceFieldItem]
+
+@router.get("/systems")
+def get_systems():
+    client = supabase_service.get_client()
+    res = client.table("source_systems").select("*").execute()
+    return {"systems": res.data}
+
+@router.get("/objects")
+def get_objects():
+    client = supabase_service.get_client()
+    res = client.table("sap_objects").select("*").execute()
+    return {"objects": res.data}
+
+@router.post("/source_fields")
+def save_source_fields(req: SaveSourceFieldsRequest):
+    client = supabase_service.get_client()
+    payload = []
+    for f in req.fields:
+        payload.append({
+            "source_system_id": req.sourceSystemId,
+            "object_id": req.objectId,
+            "sap_field_id": f.sap_field_id,
+            "oracle_ebs_table": f.oracle_ebs_table,
+            "oracle_ebs_field_name": f.oracle_ebs_field_name
+        })
+    if payload:
+        try:
+            client.table("source_fields").upsert(
+                payload, 
+                on_conflict="source_system_id,object_id,oracle_ebs_table,oracle_ebs_field_name"
+            ).execute()
+        except Exception as e:
+            logger.error(f"Database error during source_fields insertion: {str(e)}")
+            raise HTTPException(status_code=400, detail="Failed to save mappings. One or more entries might be invalid or conflicting.")
+    return {"status": "success", "inserted": len(payload)}
 
 @router.get("/schema")
 def get_schema(object_name: str = "Customer"):
@@ -58,30 +105,62 @@ def generate_mapping(req: MapRequest):
     res_fields = client.table("sap_fields").select("*").eq("object_id", obj_id).execute()
     target_fields = res_fields.data
     
-    # Only pass MANDATORY fields to the LLM to guarantee they are mapped and prevent timeouts
-    # We DO NOT deduplicate mandatory fields so that the LLM explicitly maps every required instance
-    mandatory_target_fields = []
+    # Pass ALL target fields to the LLM as a dictionary (name and description only to save tokens)
+    minimal_target_fields = []
     for f in target_fields:
-        if f.get("is_mandatory") is True:
-            mandatory_target_fields.append({
-                "s": f["sap_structure"],
-                "n": f["field_name"],
-                "d": f["field_description"]
-            })
-            
-    # Hybrid LLM Logic - Simplified for mapping
-    known_source_fields = req.sourceFields
+        minimal_target_fields.append({
+            "sap_field": f"{f['sap_structure']}.{f['field_name']}",
+            "description": f["field_description"]
+        })
+    target_fields_to_pass = minimal_target_fields
+    # DB Pre-Mapping Logic
+    db_mappings = []
+    unmapped_fields = req.sourceFields.copy()
     
-    raw_mappings = llm_orchestrator.map_source_to_target(
-        source_system=req.sourceSystem,
-        target_object=req.targetObject,
-        known_source_fields=known_source_fields,
-        target_fields=mandatory_target_fields
-    )
+    if req.sourceSystem.upper() != 'SAP_ECC':
+        sys_res = client.table("source_systems").select("id").eq("name", req.sourceSystem.upper()).execute()
+        if sys_res.data:
+            sys_id = sys_res.data[0]["id"]
+            
+            # Fetch known mappings from DB
+            res_sf = client.table("source_fields").select("oracle_ebs_field_name, sap_field_id").eq("source_system_id", sys_id).eq("object_id", obj_id).execute()
+            
+            if res_sf.data:
+                sap_field_map = {f["id"]: f for f in target_fields}
+                
+                for row in res_sf.data:
+                    oracle_field = row.get("oracle_ebs_field_name")
+                    sap_id = row.get("sap_field_id")
+                    
+                    if oracle_field in unmapped_fields and sap_id and sap_id in sap_field_map:
+                        sap_f = sap_field_map[sap_id]
+                        target_name = f"{sap_f['sap_structure']}.{sap_f['field_name']}"
+                        
+                        db_mappings.append({
+                            "src": oracle_field,
+                            "sap": target_name,
+                            "tr": "none",
+                            "conf": 100 # DB mapping is 100% confident
+                        })
+                        unmapped_fields.remove(oracle_field)
+            
+    # Hybrid LLM Logic - ONLY process unmapped fields
+    raw_mappings = []
+    if unmapped_fields:
+        raw_mappings = ai_mapping_agent.map_source_to_target(
+            source_system=req.sourceSystem,
+            target_object=req.targetObject,
+            known_source_fields=unmapped_fields,
+            target_fields=target_fields_to_pass
+        )
     
     # Format for the frontend UI components
     formatted = []
     for m in raw_mappings:
+        target_f = str(m.get("target_field", "")).strip()
+        if not target_f or target_f.lower() in ["none", "n/a", "null"]:
+            continue
+            
         tr_rule = m.get("transform_rule", "none")
         if isinstance(tr_rule, str):
             if "Pad" in tr_rule:
@@ -95,12 +174,14 @@ def generate_mapping(req: MapRequest):
                 
         formatted.append({
             "src": m.get("source_field"),
-            "sap": m.get("target_field"),
+            "sap": target_f,
             "tr": tr_rule,
             "conf": m.get("confidence", 0)
         })
     
-    return {"mappings": formatted}
+    # Combine DB mappings + AI mappings
+    final_mappings = db_mappings + formatted
+    return {"mappings": final_mappings}
 
 @router.post("/map/save_all")
 def save_all_mappings(req: SaveAllRequest):
@@ -119,10 +200,16 @@ def save_all_mappings(req: SaveAllRequest):
     fields_res = client.table("sap_fields").select("id, field_name, sap_structure").eq("object_id", obj_id).execute()
     field_map = {}
     for f in fields_res.data:
-        full_name = f"{f['sap_structure']}.{f['field_name']}"
+        struct = f.get('sap_structure') or ''
+        full_name = f"{struct}.{f['field_name']}" if struct else f['field_name']
+        
         if full_name not in field_map:
             field_map[full_name] = []
         field_map[full_name].append(f["id"])
+        
+        if f['field_name'] not in field_map:
+            field_map[f['field_name']] = []
+        field_map[f['field_name']].append(f["id"])
         
     # Delete old mappings for this object in this project to replace them cleanly
     existing = client.table("user_corrected_mappings") \

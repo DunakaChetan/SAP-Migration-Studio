@@ -83,25 +83,7 @@ def _route_provider(provider: str, model: str, system_prompt: str, user_prompt: 
 
 
 class LLMOrchestrator:
-    def map_source_to_target(self, source_system: str, target_object: str, known_source_fields: list, target_fields: list):
-        system_prompt = f"""You are an expert ERP Data Migration Architect with deep knowledge of {source_system} and SAP S/4HANA.
-You need to accurately map fields from {source_system} to SAP S/4HANA target object {target_object}.
-You are given a STRICT list of MANDATORY target fields in SAP formatted as {{"s": "sap_structure", "n": "field_name", "d": "description"}}. 
-CRITICAL REQUIREMENT: You MUST provide EXACTLY ONE mapping for EVERY SINGLE field in the target list. Do NOT omit any fields. If there are duplicate field names (e.g. KUNNR), you must map each one individually because they belong to different SAP structures ("s"). Do NOT summarize or truncate.
-If the known source fields list is empty or incomplete, you MUST act as a Senior Architect and perform a deep internal knowledge search to find the EXACT standard database table and column names in {source_system} (e.g., for Oracle EBS, use standard tables like HZ_PARTIES, AP_SUPPLIERS) that correspond to each SAP target field.
-
-EXTREMELY CRITICAL INSTRUCTION FOR SOURCE FIELD NAMES:
-You MUST output EXACT, accurate, and short technical field names ONLY for the `source_field` (e.g., "HZ_CUST_ACCOUNTS.ACCOUNT_NUMBER" or "ACCOUNT_NUMBER"). 
-ABSOLUTELY NO sentences, explanations, or text like "Derivation based on...". It MUST be a valid technical column name.
-
-Output MUST be a JSON array of objects with the following keys:
-- source_field: The EXACT technical name of the field in {source_system}. No explanations allowed.
-- target_field: The EXACT target field in SAP, formatted as STRUCTURE.FIELD_NAME (e.g., KNA1.KUNNR). You MUST include the structure prefix.
-- transform_rule: Choose from [None, Trim, Pad->10 digits, Country->ISO, Currency->ISO].
-- confidence: An integer between 0 and 100.
-"""
-        user_prompt = f"Target Fields: {json.dumps(target_fields)}\nKnown Source Fields: {json.dumps(known_source_fields)}\nGenerate the mapping JSON array."
-
+    def execute_json_prompt(self, system_prompt: str, user_prompt: str):
         chain = [
             {"tier": "PRIMARY", "provider": PRIMARY_PROVIDER, "model": PRIMARY_MODEL},
             {"tier": "SECONDARY", "provider": SECONDARY_PROVIDER, "model": SECONDARY_MODEL},

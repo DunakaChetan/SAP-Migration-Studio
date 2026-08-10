@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
@@ -7,70 +7,168 @@ import { OBJS } from '@/data/sap-schemas';
 import { dl } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, Badge, StatBox, StatsGrid, PageHeader, EmptyState } from '@/components/shared';
-import { ArrowLeft, ArrowRight, Search, Download } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Download, Upload, FileSpreadsheet, ListChecks, Save } from 'lucide-react';
+
+const VALIDATE_API = 'http://localhost:8000';
+
+interface RuleFailure {
+  idx: number;
+  field: string;
+  value: string;
+  message: string;
+  severity: string;
+}
+
+interface RuleReport {
+  rule: string;
+  label: string;
+  description: string;
+  totalChecked: number;
+  failCount: number;
+  passCount: number;
+  failures: RuleFailure[];
+}
+
+type Source = 'harmonized' | 'upload';
 
 export function Step5Validate() {
   const { state, dispatch } = useMigration();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { showLoad, tick, hideLoad } = useLoading();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [source, setSource] = useState<Source>('harmonized');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const report = (state.validationReport || []) as RuleReport[];
+  const [uploadMeta, setUploadMeta] = useState<{ rows: number; cols: number } | null>(null);
+
   const has = state.validated.length > 0;
   const eR = state.validated.filter((v) => v.st === 'ERROR').length;
   const wR = state.validated.filter((v) => v.st === 'WARN').length;
   const pR = state.validated.filter((v) => v.st === 'PASS').length;
 
-  function doValidate() {
-    if (!state.harmonized.length) { toast('Run harmonization first', 'err'); return; }
+  async function runValidation() {
+    if (source === 'upload' && !uploadedFile) {
+      toast('Choose a CSV file first', 'err');
+      return;
+    }
+    if (source === 'harmonized' && !state.projectId) {
+      toast('Project not found. Please start from Step 1.', 'err');
+      return;
+    }
+    
+    dispatch({ type: 'SET_FIELD', field: 'isValidatedSaved', value: false });
+
     showLoad('Validating…', 'Checking SAP field rules', [
-      'Loading validation rules…', 'Required fields check…', 'Type validation…',
-      'Length checks…', 'Business rules…', 'Generating report…',
+      'Loading validation rules…', 'Sending data to validation service…', 'Applying 8 field rules…',
+      'Grouping failures by rule…', 'Computing stats…', 'Generating report…',
     ]);
-    [0, 1, 2, 3, 4, 5].forEach((i) => setTimeout(() => tick(i), 300 + i * 310));
-    setTimeout(() => {
-      const validated = state.harmonized.map((row, idx) => {
-        const errs: { f: string; m: string; sev: string }[] = [];
-        const warns: { f: string; m: string; sev: string }[] = [];
-        (OBJS[state.obj]?.fields || []).forEach((f) => {
-          const v = row[f.n];
-          const sv = v != null ? String(v).trim() : '';
-          if (f.req && !sv) { errs.push({ f: f.n, m: 'Required field empty', sev: 'ERROR' }); return; }
-          if (!sv) return;
-          if (f.t === 'CUKY' && !/^[A-Z]{3}$/.test(sv)) warns.push({ f: f.n, m: 'Must be 3-letter ISO currency', sev: 'WARN' });
-          if (f.t === 'DATS' && !/^\d{8}$/.test(sv)) warns.push({ f: f.n, m: 'Must be YYYYMMDD', sev: 'WARN' });
-          if (f.n === 'LAND1' && sv && !/^[A-Z]{2,3}$/.test(sv)) errs.push({ f: f.n, m: 'Country must be ISO 2-3 chars', sev: 'ERROR' });
-          if (f.n === 'KUNNR' && sv && !/^\d{0,10}$/.test(sv)) errs.push({ f: f.n, m: 'Must be numeric ≤10 digits', sev: 'ERROR' });
-          if (f.n === 'LIFNR' && sv && !/^\d{0,10}$/.test(sv)) errs.push({ f: f.n, m: 'Must be numeric ≤10 digits', sev: 'ERROR' });
-          if (f.n === 'SMTP_ADDR' && sv && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sv)) warns.push({ f: f.n, m: 'Invalid email format', sev: 'WARN' });
-          if (f.len && sv.length > f.len) errs.push({ f: f.n, m: `Exceeds max length ${f.len} (actual ${sv.length})`, sev: 'ERROR' });
+    [0, 1, 2, 3, 4, 5].forEach((i) => setTimeout(() => tick(i), 250 + i * 220));
+
+    try {
+      let data: any;
+
+      if (source === 'upload' && uploadedFile) {
+        const fd = new FormData();
+        fd.append('obj', state.obj);
+        fd.append('file', uploadedFile);
+        const res = await fetch(`${VALIDATE_API}/api/validate/upload-csv`, { method: 'POST', body: fd });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.detail || 'CSV validation failed');
+        }
+        data = await res.json();
+        setUploadMeta({ rows: data.rows?.length || 0, cols: data.headers?.length || 0 });
+      } else {
+        const res = await fetch(`${VALIDATE_API}/api/validate/flow`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: state.projectId, target_object: state.obj }),
         });
-        return { row, idx, errs, warns, st: errs.length > 0 ? 'ERROR' as const : warns.length > 0 ? 'WARN' as const : 'PASS' as const };
-      });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.detail || 'Validation failed');
+        }
+        data = await res.json();
+        setUploadMeta(null);
+      }
+
       dispatch({
         type: 'BATCH_UPDATE',
         updates: {
-          validated,
-          stats: {
-            ...state.stats,
-            errors: validated.filter((v) => v.st === 'ERROR').length,
-            warns: validated.filter((v) => v.st === 'WARN').length,
-            passed: validated.filter((v) => v.st === 'PASS').length,
-          },
+          validated: data.validated,
+          validationReport: data.report,
+          stats: { ...state.stats, errors: data.stats.errors, warns: data.stats.warns, passed: data.stats.passed },
         },
       });
       hideLoad();
-      toast(`Validation: ${validated.filter((v) => v.st === 'PASS').length} PASS · ${validated.filter((v) => v.st === 'ERROR').length} ERROR · ${validated.filter((v) => v.st === 'WARN').length} WARN`, 'ok');
-    }, 2600);
+      toast(`Validation: ${data.stats.passed} PASS · ${data.stats.errors} ERROR · ${data.stats.warns} WARN`, 'ok');
+    } catch (err) {
+      hideLoad();
+      const msg = err instanceof Error ? err.message : 'Validation failed';
+      toast(`${msg}`, 'err');
+    }
   }
 
+  const saveDataToDB = async () => {
+    if (!state.projectId) {
+      toast('No project ID found. Please create a project first.', 'err');
+      return;
+    }
+    if (!has) return;
+    
+    showLoad('Saving data...', 'Persisting validated records to database');
+    try {
+      const errorReport: any[] = [];
+      state.validated.forEach((v, i) => {
+        [...v.errs, ...v.warns].forEach((e) => {
+          errorReport.push({
+            rule_code: e.rule,
+            row_number: i + 1,
+            field_name: e.f,
+            severity: e.sev,
+            reason: e.m,
+            invalid_value: String(v.row[e.f] ?? '')
+          });
+        });
+      });
+
+      const res = await fetch('/api/validate/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: state.projectId,
+          target_object: state.obj,
+          payload: errorReport
+        })
+      });
+      
+      if (!res.ok) throw new Error('Failed to save data');
+      
+      hideLoad();
+      dispatch({ type: 'SET_FIELD', field: 'isValidatedSaved', value: true });
+      toast('Validated data saved to database successfully!', 'ok');
+    } catch (err: any) {
+      hideLoad();
+      toast(err.message || 'Failed to save data', 'err');
+    }
+  };
+
+
+
   function expErrors(): string {
-    const rows = ['#,Status,Field,Error,Record'];
+    const rows = ['Row Number,Rule Code,Field Name,Severity,Reason,Invalid Value'];
     state.validated.forEach((v, i) =>
-      [...v.errs, ...v.warns].forEach((e) =>
-        rows.push(`${i + 1},${e.sev},${e.f},"${e.m}","${Object.values(v.row || {}).slice(0, 3).join('|').replace(/"/g, "'")}"`)
-      )
+      [...v.errs, ...v.warns].forEach((e) => {
+        const val = String(v.row[e.f] ?? '').replace(/"/g, "'");
+        rows.push(`${i + 1},${e.rule},${e.f},${e.sev},"${e.m}","${val}"`);
+      })
     );
     return rows.join('\n');
   }
+
+
 
   return (
     <PageLayout>
@@ -97,12 +195,69 @@ export function Step5Validate() {
 
       {/* Middle Column */}
       <GridCol span={6}>
-        <PageHeader title="Step 5 — Data Validation" subtitle="Validate against SAP S/4HANA field rules, required fields, data types, business rules">
-          <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/harmonize')}>Back</Button>
-          <Button variant="warning" icon={<Search className="w-3.5 h-3.5" />} onClick={doValidate}>Run Validation</Button>
-          {has && <Button variant="danger" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>Error Report</Button>}
-          <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/cleanse')} disabled={!has}>Next: Cleanse</Button>
-        </PageHeader>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-[var(--text-primary)]">Step 5 — Data Validation</h1>
+              <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">Validate against SAP S/4HANA field rules, required fields, data types, business rules</p>
+            </div>
+
+            <div className="flex items-center gap-2 mt-4">
+              <button
+                onClick={() => { setSource('harmonized'); dispatch({ type: 'BATCH_UPDATE', updates: { validated: [], validationReport: [] } }); }}
+                className={`
+                  px-3.5 py-1.5 rounded-lg text-[11.5px] font-semibold transition-all duration-200 border
+                  ${source === 'harmonized'
+                    ? 'bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-600/20'
+                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border)] hover:border-violet-300'}
+                `}
+              >
+                ⚡ Flow
+              </button>
+              <button
+                onClick={() => { setSource('upload'); dispatch({ type: 'BATCH_UPDATE', updates: { validated: [], validationReport: [] } }); }}
+                className={`
+                  px-3.5 py-1.5 rounded-lg text-[11.5px] font-semibold transition-all duration-200 border
+                  ${source === 'upload'
+                    ? 'bg-violet-600 text-white border-violet-600 shadow-md shadow-violet-600/20'
+                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border)] hover:border-violet-300'}
+                `}
+              >
+                📄 Upload CSV
+              </button>
+
+            </div>
+
+            {source === 'upload' && (
+              <div className="flex items-center gap-2 mt-4">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => setUploadedFile(e.target.files?.[0] || null)}
+                />
+                <Button variant="secondary" size="sm" icon={<Upload className="w-3.5 h-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                  {uploadedFile ? uploadedFile.name : 'Choose CSV File…'}
+                </Button>
+                {uploadMeta && (
+                  <span className="text-[10.5px] text-[var(--text-tertiary)]">
+                    Loaded {uploadMeta.rows} rows × {uploadMeta.cols} columns
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3 mt-4 mb-4">
+              <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/harmonize')}>Back</Button>
+              <Button variant="warning" icon={<Search className="w-3.5 h-3.5" />} onClick={runValidation} disabled={source === 'upload' && !uploadedFile}>Run Validation</Button>
+              <div title={!has ? "Run validation first before saving." : ""}>
+                <Button variant="secondary" icon={<Save className="w-3.5 h-3.5" />} onClick={saveDataToDB} disabled={!has}>Save Report</Button>
+              </div>
+              <div title={!state.isValidatedSaved ? "You must save your data before proceeding to Step 6." : ""}>
+                <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/cleanse')} disabled={!state.isValidatedSaved}>Next: Cleanse</Button>
+              </div>
+            </div>
+
+
 
         {has && (
           <StatsGrid>
@@ -111,6 +266,45 @@ export function Step5Validate() {
             <StatBox value={wR} label="WARNINGS" subtitle="Review needed" color="var(--color-warning)" />
             <StatBox value={state.validated.length} label="Total" color="var(--color-primary-500)" />
           </StatsGrid>
+        )}
+
+        {report.length > 0 && (
+          <Card>
+            <CardHeader title="Validation Report — By Rule" subtitle="Feed this into Cleansing" icon={<ListChecks className="w-4 h-4" />}>
+              <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>
+                Export Report
+              </Button>
+            </CardHeader>
+            <CardBody className="space-y-2">
+              {report.map((r) => (
+                <div key={r.rule} className="px-3 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/30">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[12px] font-bold text-[var(--text-primary)]">{r.label}</span>
+                      <span className="text-[10.5px] text-[var(--text-tertiary)] ml-2">{r.description}</span>
+                    </div>
+                    <Badge variant={r.failCount > 0 ? 'red' : 'green'}>
+                      {r.failCount > 0 ? `${r.failCount} failing` : 'All pass'}
+                    </Badge>
+                  </div>
+                  {r.failures.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {r.failures.slice(0, 4).map((f, i) => (
+                        <div key={i} className="text-[10.5px] text-[var(--text-secondary)] font-mono">
+                          #{f.idx + 1} <strong>{f.field}</strong>="{String(f.value).slice(0, 24)}" — {f.message}
+                        </div>
+                      ))}
+                      {r.failures.length > 4 && (
+                        <div className="text-[10px] text-[var(--text-tertiary)]">
+                          +{r.failures.length - 4} more — see exported report
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </CardBody>
+          </Card>
         )}
 
         <Card>
@@ -160,7 +354,7 @@ export function Step5Validate() {
           </CardBody>
         </Card>
       </GridCol>
-          
+
       </PageGrid>
     </PageLayout>
   );

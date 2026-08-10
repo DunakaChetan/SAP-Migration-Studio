@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
+import { useLoading } from '@/components/ui/loading-overlay';
 import { SAMPLE } from '@/data/sample-data';
 import { OBJS } from '@/data/sap-schemas';
 import {
@@ -35,6 +36,7 @@ export function Step1SourceData() {
   const { state, dispatch } = useMigration();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { showLoad, hideLoad, tick } = useLoading();
   const [projects, setProjects] = useState<any[]>([]);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
@@ -44,6 +46,12 @@ export function Step1SourceData() {
   const [editProjectDesc, setEditProjectDesc] = useState('');
   
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Connection State
+  const [isTestingConn, setIsTestingConn] = useState(false);
+  const [isFetchingSample, setIsFetchingSample] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchProjects();
@@ -80,10 +88,45 @@ export function Step1SourceData() {
       } else {
         toast('Failed to create project', 'err');
       }
-    } catch (err) {
-      toast('Failed to create project', 'err');
+    } catch (err: any) {
+      toast(err.message, 'err');
     } finally {
-      setIsCreating(false);
+      setIsFetchingSample(false);
+      // hideLoad();
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    showLoad('Uploading File...', `Parsing ${file.name}`, ['Reading columns...']);
+    
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/sap/extract/upload', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Failed to upload file');
+      }
+
+      const data = await res.json();
+      dispatch({ type: 'SET_FIELD', field: 'headers', value: data.headers });
+      dispatch({ type: 'SET_FIELD', field: 'uploadedData', value: data.data });
+      toast(`Successfully loaded ${data.headers.length} columns and ${data.data.length} rows!`, 'ok');
+    } catch (err: any) {
+      toast(err.message, 'err');
+    } finally {
+      setIsUploading(false);
+      hideLoad();
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -149,32 +192,109 @@ export function Step1SourceData() {
   const pickSrc = (k: string) => dispatch({ type: 'SET_FIELD', field: 'src', value: k });
   const pickObj = (k: string) => dispatch({ type: 'SET_FIELD', field: 'obj', value: k });
 
-  const testConn = () => {
-    toast('Testing connection…', 'info');
-    setTimeout(() => toast('Connection OK — Simulated. In production: JDBC/RFC/REST API.', 'ok'), 1100);
+  const testConn = async () => {
+    if (!state.connUrl || !state.connUser || !state.connPass) {
+      toast('Please fill in Base URL, Username, and Password', 'err');
+      return;
+    }
+    
+    setIsTestingConn(true);
+    toast('Testing connection to SAP...', 'info');
+    
+    try {
+      const res = await fetch('/api/sap/connection/test_connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base_url: state.connUrl,
+          client: state.connClient,
+          username: state.connUser,
+          password: state.connPass,
+          system_type: state.src
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast('Connection successful!', 'ok');
+      } else {
+        toast(`Connection failed: ${data.detail || 'Unknown error'}`, 'err');
+      }
+    } catch (err) {
+      toast('Failed to reach backend', 'err');
+    } finally {
+      setIsTestingConn(false);
+    }
   };
 
-  const autoLoad = (srcOverride?: string, objOverride?: string) => {
-    const src = srcOverride || state.src;
-    const obj = objOverride || state.obj;
-    let data: Record<string, string>[];
-    let finalObj = obj;
-    let finalSrc = src;
-
-    if (src === 'ORACLE_EBS') { data = SAMPLE.ORACLE_VENDOR; finalObj = 'VENDOR'; finalSrc = 'ORACLE_EBS'; }
-    else if (src === 'EXCEL_CSV') { data = SAMPLE.EXCEL_MATERIAL; finalObj = 'MATERIAL'; finalSrc = 'EXCEL_CSV'; }
-    else { data = SAMPLE.SAP_ECC_CUSTOMER; finalObj = 'CUSTOMER'; finalSrc = src; }
+  const autoLoad = async () => {
+    let data: Record<string, string>[] = [];
+    
+    if (state.src === 'SAP_ECC') {
+      if (!state.connUrl || !state.connUser || !state.connPass) {
+        toast('Please fill in Base URL, Username, and Password to fetch live data', 'err');
+        return;
+      }
+      setIsFetchingSample(true);
+      toast(`Fetching live ${state.obj || 'CUSTOMER'} data from SAP...`, 'info');
+      
+      try {
+        const res = await fetch('/api/sap/extract/fetch_sample', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_url: state.connUrl,
+            client: state.connClient,
+            username: state.connUser,
+            password: state.connPass,
+            system_type: state.src,
+            target_object: state.obj || 'CUSTOMER'
+          })
+        });
+        const resData = await res.json();
+        if (res.ok) {
+          data = resData.data;
+          if (data.length === 0) {
+             toast('No records found in SAP for this object.', 'info');
+             setIsFetchingSample(false);
+             return;
+          }
+        } else {
+          toast(`Fetch failed: ${resData.detail || 'Unknown error'}`, 'err');
+          setIsFetchingSample(false);
+          return;
+        }
+      } catch (err) {
+        toast('Failed to reach backend to fetch data', 'err');
+        setIsFetchingSample(false);
+        return;
+      } finally {
+        setIsFetchingSample(false);
+      }
+    } else {
+      // Choose data purely based on the selected SAP target object
+      if (state.obj === 'VENDOR') {
+        data = SAMPLE.ORACLE_VENDOR;
+      } else if (state.obj === 'MATERIAL') {
+        data = SAMPLE.EXCEL_MATERIAL;
+      } else {
+        // Default to CUSTOMER
+        data = SAMPLE.SAP_ECC_CUSTOMER;
+      }
+    }
 
     dispatch({
       type: 'BATCH_UPDATE',
       updates: {
-        src: finalSrc,
-        obj: finalObj,
         rawData: data,
         headers: Object.keys(data[0]),
       },
     });
-    toast(`Loaded ${data.length} records from ${finalSrc}`, 'ok');
+    
+    if (state.src === 'SAP_ECC') {
+      toast(`Successfully loaded ${data.length} live records from SAP!`, 'ok');
+    } else {
+      toast(`Loaded ${data.length} sample records for ${state.obj || 'CUSTOMER'}`, 'ok');
+    }
   };
 
   const updateField = (field: string, value: string) => {
@@ -183,12 +303,16 @@ export function Step1SourceData() {
 
   const has = state.rawData.length > 0;
 
+  const nextDisabled = !state.src || !state.obj || !state.projectId || (state.src === 'SAP_ECC' && (!state.connUrl || !state.connUser || !state.connPass || state.rawData.length === 0));
+
   return (
     <PageLayout>
       <PageHeader title="Step 1 — Source & Data Connect" subtitle="Upload legacy ECC extracts or connect to source databases">
-        <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/mapping')} disabled={!state.src || !state.obj || !state.projectId}>
-          Next: AI Mapping
-        </Button>
+        <div title={nextDisabled ? "Complete all connection fields, select a project, and load sample data to proceed." : ""}>
+          <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/mapping')} disabled={nextDisabled}>
+            Next: AI Mapping
+          </Button>
+        </div>
       </PageHeader>
 
       <PageGrid>
@@ -217,8 +341,8 @@ export function Step1SourceData() {
         <GridCol span={9}>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Connection Config */}
-            <Card className="opacity-50 pointer-events-none select-none">
-              <CardHeader icon={<Cable className="w-4 h-4" />} title="Connection Config (Disabled)" />
+            <Card>
+              <CardHeader icon={<Cable className="w-4 h-4" />} title="Connection Config" />
               <CardBody className="space-y-3">
                 <div>
                   <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Source System</label>
@@ -228,34 +352,92 @@ export function Step1SourceData() {
                     options={[['SAP_ECC','SAP ECC 6.0'],['ORACLE_EBS','Oracle EBS R12'],['EXCEL_CSV','Excel/CSV'],['DYNAMICS','MS Dynamics'],['SALESFORCE','Salesforce'],['LEGACY','Legacy DB']].map(([k,l]) => ({value: k, label: l}))}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Host/Server</label>
-                    <input type="text" placeholder="192.168.1.100" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                
+                {state.src === 'SAP_ECC' && (
+                  <>
+                    <div className="grid grid-cols-4 gap-2.5">
+                      <div className="col-span-3">
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Base URL</label>
+                        <input type="text" placeholder="https://host:port" value={state.connUrl} onChange={e => updateField('connUrl', e.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Client</label>
+                        <input type="text" placeholder="100" value={state.connClient} onChange={e => updateField('connClient', e.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Username</label>
+                        <input type="text" placeholder="sapuser" value={state.connUser} onChange={e => updateField('connUser', e.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Password</label>
+                        <input type="password" placeholder="••••••••" value={state.connPass} onChange={e => updateField('connPass', e.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {(state.src === 'EXCEL_CSV' || state.src === 'ORACLE_EBS') && (
+                  <div className="border-2 border-dashed border-[var(--border)] rounded-lg p-6 flex flex-col items-center justify-center text-center bg-[var(--bg-tertiary)]/50">
+                    <Cloud className="w-8 h-8 text-[var(--text-tertiary)] mb-2" />
+                    <p className="text-[12px] text-[var(--text-secondary)] font-medium">Drag and drop file here</p>
+                    <p className="text-[11px] text-[var(--text-tertiary)] mb-3">or click to browse (.xlsx, .csv)</p>
+                    <input 
+                      type="file" 
+                      accept=".csv, .xlsx, .xls" 
+                      className="hidden" 
+                      ref={fileInputRef} 
+                      onChange={handleFileUpload} 
+                    />
+                    <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                      {isUploading ? 'Uploading...' : 'Choose File'}
+                    </Button>
+                    {state.headers.length > 0 && (
+                      <p className="text-[11px] text-emerald-500 mt-2 font-medium">✓ File uploaded ({state.headers.length} columns loaded)</p>
+                    )}
                   </div>
-                  <div>
-                    <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Port</label>
-                    <input type="text" placeholder="1521" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                )}
+
+                {state.src !== 'SAP_ECC' && state.src !== 'EXCEL_CSV' && state.src !== 'ORACLE_EBS' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Host/Server</label>
+                        <input type="text" placeholder="192.168.1.100" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Port</label>
+                        <input type="text" placeholder="1521" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Database</label>
+                        <input type="text" placeholder="ORCL" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Username</label>
+                        <input type="text" placeholder="dbuser" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Table / View</label>
+                      <input type="text" placeholder="VENDORS_V" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
+                    </div>
+                  </>
+                )}
+
+                {state.src === 'SAP_ECC' && (
+                  <div className="flex gap-2 pt-1">
+                    <Button variant="secondary" icon={<Cable className="w-3.5 h-3.5" />} className="flex-1 justify-center" disabled={isTestingConn || isFetchingSample} onClick={testConn}>
+                      {isTestingConn ? 'Testing...' : 'Test Connection'}
+                    </Button>
+                    <Button variant="warning" icon={<Zap className="w-3.5 h-3.5" />} className="flex-1" disabled={isFetchingSample || isTestingConn} onClick={() => autoLoad()}>
+                      {isFetchingSample ? 'Loading Data...' : 'Load Sample Data'}
+                    </Button>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Database</label>
-                    <input type="text" placeholder="ORCL" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
-                  </div>
-                  <div>
-                    <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Username</label>
-                    <input type="text" placeholder="sapuser" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
-                  </div>
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Table / View</label>
-                  <input type="text" placeholder="KNA1 / CUSTOMER_VIEW" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="secondary" icon={<Cable className="w-3.5 h-3.5" />} className="flex-1" onClick={testConn}>Test Connection</Button>
-                  <Button variant="warning" icon={<Zap className="w-3.5 h-3.5" />} className="flex-1" onClick={() => autoLoad()}>Load Sample Data</Button>
-                </div>
+                )}
               </CardBody>
             </Card>
 

@@ -12,7 +12,7 @@ export function esc(s: unknown): string {
     .replace(/>/g, '&gt;');
 }
 
-export function expCSV(data: Record<string, string>[]): string {
+export function expCSV(data: Record<string, any>[]): string {
   if (!data.length) return '';
   const c = Object.keys(data[0]);
   return [

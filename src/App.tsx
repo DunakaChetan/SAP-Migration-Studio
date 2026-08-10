@@ -15,6 +15,7 @@ import { Step7Transform } from '@/pages/Step7_Transform';
 import { Step8DMCExport } from '@/pages/Step8_DMCExport';
 import { Step9TechDocs } from '@/pages/Step9_TechDocs';
 import { Auth } from '@/pages/Auth';
+import { InsertMapping } from '@/pages/InsertMapping';
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('access_token');
@@ -55,6 +56,7 @@ function AppContent() {
             <Route path="/transform" element={<Step7Transform />} />
             <Route path="/export" element={<Step8DMCExport />} />
             <Route path="/docs" element={<Step9TechDocs />} />
+            <Route path="/insert" element={<InsertMapping />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ProtectedLayout>
