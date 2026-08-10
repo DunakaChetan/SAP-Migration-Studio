@@ -27,11 +27,11 @@ export function Step6Cleanse() {
   
   const [source, setSource] = React.useState<Source>('harmonized');
   const [standaloneCsv, setStandaloneCsv] = React.useState<File | null>(null);
-  const [standaloneValidationJson, setStandaloneValidationJson] = React.useState<File | null>(null);
+  const [standaloneValidationCsv, setStandaloneValidationCsv] = React.useState<File | null>(null);
   const [summary, setSummary] = React.useState<CleanserSummary | null>(null);
   
   const csvInputRef = useRef<HTMLInputElement>(null);
-  const jsonInputRef = useRef<HTMLInputElement>(null);
+  const valCsvInputRef = useRef<HTMLInputElement>(null);
 
   const has = state.cleaned.length > 0;
 
@@ -59,8 +59,8 @@ export function Step6Cleanse() {
         }
         const formData = new FormData();
         formData.append('harmonization_csv', standaloneCsv);
-        if (standaloneValidationJson) {
-          formData.append('validation_report_json', standaloneValidationJson);
+        if (standaloneValidationCsv) {
+          formData.append('validation_report_csv', standaloneValidationCsv);
         }
 
         res = await fetch('/api/sap/cleanser/upload-csv', {
@@ -201,14 +201,14 @@ export function Step6Cleanse() {
               </div>
               <div className="flex items-center gap-2">
                 <input
-                  ref={jsonInputRef}
+                  ref={valCsvInputRef}
                   type="file"
-                  accept=".json"
+                  accept=".csv"
                   className="hidden"
-                  onChange={(e) => setStandaloneValidationJson(e.target.files?.[0] || null)}
+                  onChange={(e) => setStandaloneValidationCsv(e.target.files?.[0] || null)}
                 />
-                <Button variant="secondary" size="sm" icon={<Upload className="w-3.5 h-3.5" />} onClick={() => jsonInputRef.current?.click()}>
-                  {standaloneValidationJson ? standaloneValidationJson.name : 'Choose Validation Report JSON…'}
+                <Button variant="secondary" size="sm" icon={<Upload className="w-3.5 h-3.5" />} onClick={() => valCsvInputRef.current?.click()}>
+                  {standaloneValidationCsv ? standaloneValidationCsv.name : 'Choose Validation Report CSV…'}
                 </Button>
                 <span className="text-[10.5px] text-[var(--text-tertiary)]">(Optional)</span>
               </div>

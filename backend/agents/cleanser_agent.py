@@ -225,7 +225,7 @@ UNSAFE_DEFAULT_FIELDS = {
 @dataclass
 class CleaningSummary:
     input_csv_path: str
-    validation_report_json_path: str | None
+    validation_report_csv_path: str | None
     output_csv_path: str
     validation_fixes: list[dict[str, Any]] = field(default_factory=list)
     cleanser_fixes: list[dict[str, Any]] = field(default_factory=list)
@@ -426,20 +426,35 @@ def load_csv(dataset_csv_path: str | Path) -> pd.DataFrame:
     return pd.read_csv(dataset_csv_path, dtype=str, keep_default_na=False)
 
 
-def load_validation_report(validation_report_json_path: str | Path | None) -> dict[str, Any]:
-    if not validation_report_json_path:
+def load_validation_report(validation_report_csv_path: str | Path | None) -> dict[str, Any]:
+    if not validation_report_csv_path:
         return {"version": "1.0", "issues": []}
-    path = Path(validation_report_json_path)
+    path = Path(validation_report_csv_path)
     if not path.exists():
         return {"version": "1.0", "issues": []}
-    with path.open("r", encoding="utf-8") as handle:
-        report = json.load(handle)
-    if not isinstance(report, dict):
-        raise ValueError("Validation report must be a JSON object.")
-    issues = report.get("issues", [])
-    if not isinstance(issues, list):
-        raise ValueError("Validation report field 'issues' must be a list.")
-    return report
+        
+    try:
+        df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    except Exception:
+        return {"version": "1.0", "issues": []}
+        
+    issues = []
+    # Expected columns: Row Number, Rule Code, Field Name, Severity, Reason, Invalid Value
+    for _, row in df.iterrows():
+        try:
+            r_num = int(row.get("Row Number", 0))
+            rule_code = row.get("Rule Code", "")
+            field_name = row.get("Field Name", "")
+            if r_num > 0 and rule_code and field_name:
+                issues.append({
+                    "row": r_num,
+                    "rule_code": rule_code,
+                    "field": field_name
+                })
+        except ValueError:
+            pass
+            
+    return {"version": "1.0", "issues": issues}
 
 
 # =============================================================================
@@ -743,7 +758,7 @@ def apply_cleanser_rules(df: pd.DataFrame, summary: CleaningSummary) -> pd.DataF
 
 def run_cleanser(
     dataset_csv_path: str | Path,
-    validation_report_json_path: str | Path | None = None,
+    validation_report_csv_path: str | Path | None = None,
     output_csv_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if output_csv_path is None:
@@ -751,14 +766,14 @@ def run_cleanser(
 
     dataset_csv_path = Path(dataset_csv_path)
     output_csv_path = Path(output_csv_path)
-    validation_path = Path(validation_report_json_path) if validation_report_json_path else None
+    validation_path = Path(validation_report_csv_path) if validation_report_csv_path else None
 
     df = load_csv(dataset_csv_path)
     validation_report = load_validation_report(validation_path)
 
     summary = CleaningSummary(
         input_csv_path=str(dataset_csv_path),
-        validation_report_json_path=str(validation_path) if validation_path else None,
+        validation_report_csv_path=str(validation_path) if validation_path else None,
         output_csv_path=str(output_csv_path),
         rows_loaded=len(df.index),
     )

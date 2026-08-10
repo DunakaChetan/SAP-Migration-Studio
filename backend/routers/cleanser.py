@@ -47,20 +47,19 @@ async def cleanser_flow(req: FlowRequest):
     res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
     validation_payload = res_val.data[0]["payload"] if res_val.data else []
     
-    # Convert validation payload to format expected by cleanser agent
-    agent_issues = []
+    # Convert validation payload to format expected by cleanser agent CSV
+    agent_issues = [["Row Number", "Rule Code", "Field Name"]]
     for issue in validation_payload:
-        agent_issues.append({
-            "rule_code": issue.get("rule_code"),
-            "row": issue.get("row_number"),
-            "field": issue.get("field_name")
-        })
-    agent_report = {"version": "1.0", "issues": agent_issues}
+        agent_issues.append([
+            str(issue.get("row_number", "")),
+            issue.get("rule_code", ""),
+            issue.get("field_name", "")
+        ])
 
     with TemporaryDirectory(prefix="sap_cleanser_") as tmp_dir:
         tmp_path = Path(tmp_dir)
         input_csv_path = tmp_path / "harmonization.csv"
-        validation_json_path = tmp_path / "validation_report.json"
+        validation_csv_path = tmp_path / "validation_report.csv"
         output_csv_path = tmp_path / "cleaned.csv"
 
         # Write data to CSV
@@ -68,13 +67,15 @@ async def cleanser_flow(req: FlowRequest):
         df.to_csv(input_csv_path, index=False)
         
         # Write validation report
-        with open(validation_json_path, "w", encoding="utf-8") as f:
-            json.dump(agent_report, f)
+        with open(validation_csv_path, "w", encoding="utf-8", newline="") as f:
+            import csv
+            writer = csv.writer(f)
+            writer.writerows(agent_issues)
 
         try:
             summary = run_cleanser(
                 dataset_csv_path=input_csv_path,
-                validation_report_json_path=validation_json_path,
+                validation_report_csv_path=validation_csv_path,
                 output_csv_path=output_csv_path,
             )
             cleaned_data = parse_cleaned_csv(output_csv_path)
@@ -91,7 +92,7 @@ async def cleanser_flow(req: FlowRequest):
 @router.post("/upload-csv")
 async def cleanser_upload_csv(
     harmonization_csv: UploadFile = File(...),
-    validation_report_json: UploadFile | None = File(None),
+    validation_report_csv: UploadFile | None = File(None),
 ):
     if not harmonization_csv.filename:
         raise HTTPException(status_code=400, detail="harmonization_csv is required")
@@ -99,20 +100,20 @@ async def cleanser_upload_csv(
     with TemporaryDirectory(prefix="sap_cleanser_") as tmp_dir:
         tmp_path = Path(tmp_dir)
         input_csv_path = tmp_path / "harmonization.csv"
-        validation_json_path = tmp_path / "validation_report.json"
+        validation_csv_path = tmp_path / "validation_report.csv"
         output_csv_path = tmp_path / "cleaned.csv"
 
         input_csv_path.write_bytes(await harmonization_csv.read())
 
         report_path: Path | None = None
-        if validation_report_json and validation_report_json.filename:
-            validation_json_path.write_bytes(await validation_report_json.read())
-            report_path = validation_json_path
+        if validation_report_csv and validation_report_csv.filename:
+            validation_csv_path.write_bytes(await validation_report_csv.read())
+            report_path = validation_csv_path
 
         try:
             summary = run_cleanser(
                 dataset_csv_path=input_csv_path,
-                validation_report_json_path=report_path,
+                validation_report_csv_path=report_path,
                 output_csv_path=output_csv_path,
             )
             cleaned_data = parse_cleaned_csv(output_csv_path)
