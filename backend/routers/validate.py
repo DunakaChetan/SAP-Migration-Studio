@@ -1,7 +1,7 @@
 import io
 import csv
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response
@@ -20,10 +20,144 @@ agent = ValidationAgent()
 class ValidateFlowRequest(BaseModel):
     project_id: str
     target_object: str
+    custom_prompts: Optional[List[str]] = None
+    dynamic_rules: Optional[List[Dict[str, Any]]] = None
+
+class GenerateRulesRequest(BaseModel):
+    prompts: List[str]
+    target_object: str = "CUSTOMER"
+    actual_columns: Optional[List[str]] = None
+
+def sanitize_python_code(code: str, prompt: str) -> str:
+    """
+    Sanitize and ensure python_code strictly obeys the VIOLATION contract (returns True on failure).
+    If LLM generated equality (==) for a "must be N" or "should be N" rule, invert to inequality (!=).
+    """
+    if not code:
+        return "False"
+    
+    code = code.strip()
+    prompt_lower = prompt.lower()
+    import re
+
+    # 1. Catch `len(...) == N` where prompt specifies a required length requirement (e.g. "should be 4 digits", "must be 2 digits")
+    m_len_eq = re.search(r'len\(([^)]+)\)\s*==\s*(\d+)', code)
+    if m_len_eq:
+        num = m_len_eq.group(2)
+        if any(kw in prompt_lower for kw in [f"be {num}", f"be of {num}", f"is {num}", f"equal {num}", f"{num} digit", f"{num} letter", f"{num} char", f"length {num}"]):
+            code = re.sub(r'len\(([^)]+)\)\s*==\s*(\d+)', r'len(\1) != \2', code)
+
+    # 2. Catch `row.get(...) == 'VAL'` where prompt requires value equality (e.g. "should be USD")
+    m_val_eq = re.search(r'row\.get\(([^)]+)\)\s*==\s*([\'"][^\'"]+[\'"])', code)
+    if m_val_eq and not any(kw in prompt_lower for kw in ["not ", "never", "no ", "invalid"]):
+        val_str = m_val_eq.group(2).strip("'\"")
+        if val_str.lower() in prompt_lower:
+            code = re.sub(r'row\.get\(([^)]+)\)\s*==\s*', r'row.get(\1) != ', code)
+
+    return code
 
 @router.get("/validate/health")
 def health():
     return {"status": "ok", "service": "validate", "objects": list(OBJS.keys()), "rules": [r["id"] for r in RULES]}
+
+@router.post("/validate/generate-rules")
+def generate_dynamic_rules(req: GenerateRulesRequest):
+    """
+    Generate executable Python validation rule expressions from natural language rule prompts.
+    Triggers LLM ONCE for all requested rule prompts in batch.
+    """
+    if not req.prompts:
+        raise HTTPException(400, "No rule prompts provided")
+
+    fields_list = OBJS.get(req.target_object.upper(), [])
+    fields_desc = ", ".join([f"{f['n']} ({f['l']})" for f in fields_list])
+
+    actual_cols_desc = ""
+    if req.actual_columns:
+        actual_cols_desc = f"\nACTUAL DATASET COLUMNS PRESENT IN TABLE: {req.actual_columns}"
+
+    system_prompt = f"""You are an Expert Data Quality Engineer for SAP S/4HANA target object: {req.target_object}.
+Available SAP Table Fields for this object: {fields_desc}.{actual_cols_desc}
+
+YOUR MANDATE:
+Convert EACH natural language custom business rule prompt into a single-line Python boolean condition `python_code`.
+
+CRITICAL INSTRUCTIONS FOR `python_code`:
+1. VIOLATION CONTRACT: `python_code` MUST evaluate to `True` when a row VIOLATES (FAILS) the rule. It MUST evaluate to `False` when the row IS VALID (PASSES).
+2. POSITIVE/NEGATIVE PHRASING & LENGTH CONSTRAINTS:
+   When user prompt states what a field "should be" or "must be" (e.g., "Country iso should be of 2 letters, not 4 digits", "Currency iso should be 4 digits", "Postal code must be 5 digits"):
+   - Identify the VALID REQUIREMENT (e.g. valid length is 2, or valid length is 4).
+   - Invert it in `python_code` so ANY non-compliant value evaluates to `True` (Violation)!
+   - "should be 2 letters / digits" -> `len(str(row.get('LAND1', '')).strip()) != 2`
+   - "should be 4 digits" -> `len(str(row.get('WAERS', '')).strip()) != 4`
+   - "must be 5 digits" -> `len(str(row.get('PSTLZ', '')).strip()) != 5`
+   - "must not be empty" -> `not str(row.get('SMTP_ADDR', '')).strip()`
+3. COUNTRY ISO MAPPING:
+   Country values in table are stored as 2-letter ISO codes (e.g., 'IN' for India, 'US' for USA/United States, 'DE' for Germany, 'GB' for UK, 'CA' for Canada, 'FR' for France, 'AU' for Australia).
+   When user prompt mentions a country by name or code:
+   - "when country is India" -> `str(row.get('LAND1', '')).strip().upper() in ['IN', 'INDIA']`
+   - "when country is US" or "when country is USA" -> `str(row.get('LAND1', '')).strip().upper() in ['US', 'USA', 'UNITED STATES']`
+4. CONDITIONAL CONSTRAINTS COMBINATION:
+   Combine condition and violation with AND:
+   e.g., "Postal code must be 2 digits when country is india":
+   `str(row.get('LAND1', '')).strip().upper() in ['IN', 'INDIA'] and len(str(row.get('PSTLZ', '')).strip()) != 2`
+5. DYNAMIC FIELD LOOKUP CONTRACT:
+   If `ACTUAL DATASET COLUMNS PRESENT IN TABLE` is provided, ALWAYS match the user prompt concept to the EXACT column header present in that list!
+   Examples based on actual table columns:
+   - "country" -> use 'COUNTRY' (or 'LAND1')
+   - "postal code" / "zip" -> use 'POST_CODE1' (or 'PSTLZ')
+   - "phone" / "telephone" -> use 'TELNR_LONG' (or 'TELF1')
+   - "email" -> use 'SMTP_ADDR'
+   - "city" -> use 'CITY2' (or 'ORT01')
+   - "state" / "region" -> use 'UF' (or 'REGIO')
+   - "street" / "address" -> use 'STREET' (or 'STRAS')
+   - "customer" / "bp" -> use 'BPEXT' or 'KUNNR'
+   Set the `field` property of the JSON rule object to the exact column name present in the table (e.g. "COUNTRY", "POST_CODE1", "TELNR_LONG", "CITY2", "UF", "STREET", "SMTP_ADDR", "BPEXT", etc.).
+
+Output MUST be a JSON object with key "rules" containing a list of rule objects:
+{{
+  "rules": [
+    {{
+      "id": "DYNAMIC_1",
+      "label": "Short Title",
+      "description": "Natural language rule description",
+      "field": "Exact Table Column Header Name or GENERAL",
+      "python_code": "Single line Python condition returning True on rule violation",
+      "error_message": "Human readable error message describing the violation",
+      "severity": "ERROR"
+    }}
+  ]
+}}"""
+
+    user_prompt = f"Target SAP Object: {req.target_object}\nPrompts to compile:\n"
+    for i, p in enumerate(req.prompts, 1):
+        user_prompt += f"{i}. {p}\n"
+
+    try:
+        from services.llm_orchestrator import llm_orchestrator
+        res = llm_orchestrator.execute_json_prompt(system_prompt, user_prompt)
+        rules = res.get("rules", []) if isinstance(res, dict) else (res if isinstance(res, list) else [])
+        
+        # Ensure rules have unique IDs, severities, and sanitized python_code
+        cleaned_rules = []
+        for idx, r in enumerate(rules, 1):
+            prompt_str = req.prompts[min(idx - 1, len(req.prompts) - 1)]
+            raw_code = r.get("python_code") or "False"
+            sanitized_code = sanitize_python_code(raw_code, prompt_str)
+            
+            cleaned_rules.append({
+                "id": r.get("id") or f"DYNAMIC_RULE_{idx}",
+                "label": r.get("label") or f"Custom Rule {idx}",
+                "description": r.get("description") or prompt_str,
+                "field": r.get("field") or "GENERAL",
+                "python_code": sanitized_code,
+                "error_message": r.get("error_message") or r.get("label") or "Custom rule violation",
+                "severity": (r.get("severity") or "ERROR").upper()
+            })
+        return {"rules": cleaned_rules}
+    except Exception as e:
+        logger.exception("Failed to generate dynamic rules via LLM")
+        raise HTTPException(500, f"Failed to generate dynamic rules: {str(e)}")
 
 @router.post("/validate/flow")
 def validate_flow(req: ValidateFlowRequest):
@@ -46,7 +180,15 @@ def validate_flow(req: ValidateFlowRequest):
         if not harmonized_payload:
             raise HTTPException(400, "Harmonized data payload is empty.")
 
-        return agent.run_validation(req.target_object.upper(), harmonized_payload)
+        # Compile custom AI rule prompts if provided
+        dynamic_rules = list(req.dynamic_rules) if req.dynamic_rules else []
+        if req.custom_prompts:
+            actual_cols = list(harmonized_payload[0].keys()) if harmonized_payload and isinstance(harmonized_payload[0], dict) else None
+            gen_res = generate_dynamic_rules(GenerateRulesRequest(prompts=req.custom_prompts, target_object=req.target_object, actual_columns=actual_cols))
+            compiled = gen_res.get("rules", [])
+            dynamic_rules.extend(compiled)
+
+        return agent.run_validation(req.target_object.upper(), harmonized_payload, dynamic_rules)
 
     except HTTPException:
         raise
@@ -55,7 +197,12 @@ def validate_flow(req: ValidateFlowRequest):
         raise HTTPException(500, f"Validation flow failed: {str(e)}")
 
 @router.post("/validate/upload-csv")
-async def validate_upload(obj: str = Form(...), file: UploadFile = File(...)):
+async def validate_upload(
+    obj: str = Form(...),
+    file: UploadFile = File(...),
+    custom_prompts_json: Optional[str] = Form(None),
+    dynamic_rules_json: Optional[str] = Form(None)
+):
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are supported.")
 
@@ -69,7 +216,17 @@ async def validate_upload(obj: str = Form(...), file: UploadFile = File(...)):
     if not rows:
         raise HTTPException(status_code=400, detail="CSV file is empty.")
 
-    result = agent.run_validation(obj, rows)
+    import json
+    dynamic_rules = json.loads(dynamic_rules_json) if dynamic_rules_json else []
+    custom_prompts = json.loads(custom_prompts_json) if custom_prompts_json else []
+
+    if custom_prompts:
+        actual_cols = list(rows[0].keys()) if rows and isinstance(rows[0], dict) else None
+        gen_res = generate_dynamic_rules(GenerateRulesRequest(prompts=custom_prompts, target_object=obj, actual_columns=actual_cols))
+        compiled = gen_res.get("rules", [])
+        dynamic_rules.extend(compiled)
+
+    result = agent.run_validation(obj, rows, dynamic_rules)
     result["headers"] = list(df.columns)
     result["rows"] = rows
     result["filename"] = file.filename

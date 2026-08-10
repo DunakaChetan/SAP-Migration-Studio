@@ -9,7 +9,7 @@ import {
 } from '@/components/shared';
 import {
   FlaskConical, Upload, FileSpreadsheet, MapPin, Download,
-  Play, Trash2, CheckCircle2, AlertCircle, FileText, ArrowLeft, ArrowRight, Save
+  Play, Trash2, CheckCircle2, AlertCircle, FileText, ArrowLeft, ArrowRight, Save, Database
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
@@ -31,6 +31,13 @@ interface HarmonizationStats {
   empty_removed?: number;
   columns?: number;
   [key: string]: number | undefined;
+}
+
+interface HarmonizationResult {
+  stats: HarmonizationStats;
+  fix_log: string[];
+  final_table: Record<string, any>[];
+  columns: string[];
 }
 
 /* ─── Drop Zone Component ─── */
@@ -199,6 +206,226 @@ function DropZone({
 }
 
 
+/* ─── Source Options ─── */
+const SOURCE_OPTIONS = [
+  { value: 'SAP_ECC', label: 'SAP ECC 6.0' },
+  { value: 'ORACLE_EBS', label: 'Oracle EBS R12' },
+  { value: 'EXCEL_CSV', label: 'Excel / CSV' },
+  { value: 'DYNAMICS', label: 'MS Dynamics 365' },
+  { value: 'SALESFORCE', label: 'Salesforce CRM' },
+  { value: 'LEGACY', label: 'Legacy DB' },
+];
+
+/* ─── Harmonization Audit & Summary Report Component ─── */
+function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
+  const [showLogDetails, setShowLogDetails] = useState(false);
+
+  const fixLog = result.fix_log || [];
+  const stats = result.stats || {};
+  const rows = result.final_table || [];
+  const cols = result.columns || [];
+
+  // Source breakdown from final_table
+  const sourceCounts: Record<string, number> = {};
+  rows.forEach((r) => {
+    const src = String(r.SOURCE || 'UNKNOWN');
+    sourceCounts[src] = (sourceCounts[src] || 0) + 1;
+  });
+
+  // Extract secondary new columns from fix_log if present
+  let newSecondaryCols: string[] = [];
+  fixLog.forEach((log) => {
+    if (log.includes('[Merge] New columns from secondary:')) {
+      try {
+        const match = log.match(/\[Merge\] New columns from secondary:\s*(\[.*\])/);
+        if (match) {
+          newSecondaryCols = JSON.parse(match[1].replace(/'/g, '"'));
+        }
+      } catch { /* ignore */ }
+    }
+  });
+
+  // Group log items by category
+  const categories = [
+    {
+      title: 'Dedup & Filtering',
+      icon: '🗑️',
+      items: fixLog.filter((l) => l.includes('[Dedup]') || l.includes('[EmptyFilter]') || l.includes('[HeaderCleanup]')),
+    },
+    {
+      title: 'Country, Currency & Code Conversions',
+      icon: '🌍',
+      items: fixLog.filter((l) =>
+        l.includes('[Country→ISO]') ||
+        l.includes('[Currency→ISO]') ||
+        l.includes('[PayTerms→SAP]') ||
+        l.includes('[MatType→SAP]') ||
+        l.includes('[UOM→SAP]')
+      ),
+    },
+    {
+      title: 'Date & Phone Formatting',
+      icon: '📅',
+      items: fixLog.filter((l) => l.includes('[Date→YYYYMMDD]') || l.includes('[PhoneClean]')),
+    },
+    {
+      title: 'Text & Field Length Adjustments',
+      icon: '✂️',
+      items: fixLog.filter((l) => l.includes('[WhitespaceTrim]') || l.includes('[Trunc35]') || l.includes('[UPPER]') || l.includes('[Pad10]') || l.includes('[Trim]') || l.includes('[Transform:')),
+    },
+  ];
+
+  const totalFixEvents = fixLog.filter(
+    (l) => l.startsWith('[') && !l.includes('[Init]') && !l.includes('[ColumnNaming]')
+  ).length;
+
+  return (
+    <Card className="mt-4 border-violet-200 dark:border-violet-900/40 bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-secondary)] to-violet-50/20 dark:to-violet-950/10 shadow-sm">
+      <CardHeader
+        title="Harmonization Changes & Audit Report"
+        subtitle="Comprehensive summary of transformations, column additions, and source origins"
+      />
+      <CardBody className="p-4 space-y-4">
+        {/* Metric Cards Grid */}
+        <div className="grid grid-cols-4 gap-3">
+          <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
+            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Rows Preserved</div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-xl font-extrabold text-[var(--text-primary)]">{stats.total_output || rows.length}</span>
+              <span className="text-[10px] text-[var(--text-tertiary)]">/ {stats.total_input || 0} input</span>
+            </div>
+            <div className="mt-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+              {(stats.deduped || 0) + (stats.empty_removed || 0) > 0
+                ? `Cleaned ${(stats.deduped || 0) + (stats.empty_removed || 0)} invalid/dup rows`
+                : 'All input records preserved'}
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
+            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Output Columns</div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-xl font-extrabold text-[var(--text-primary)]">{cols.length}</span>
+              <span className="text-[10px] text-[var(--text-tertiary)]">total fields</span>
+            </div>
+            <div className="mt-1 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+              Includes SOURCE tag & SAP schema
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
+            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Rule Transformations</div>
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-xl font-extrabold text-violet-600 dark:text-violet-400">{totalFixEvents}</span>
+              <span className="text-[10px] text-[var(--text-tertiary)]">field fixes</span>
+            </div>
+            <div className="mt-1 text-[10px] font-semibold text-[var(--text-tertiary)]">
+              Evaluated across 11 auto-rules
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
+            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Source Systems</div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {Object.entries(sourceCounts).map(([src, count]) => (
+                <span key={src} className="px-2 py-0.5 rounded-md bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 font-mono font-bold text-[10px]">
+                  {src}: {count}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* What was added into the final output table */}
+        <div className="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/30 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[11.5px] font-bold text-[var(--text-primary)]">
+              Final Output Table Structure & Added Columns
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              {cols.length} total columns generated
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {cols.map((col) => {
+              const isSource = col === 'SOURCE';
+              const isSecondary = newSecondaryCols.includes(col);
+              return (
+                <span
+                  key={col}
+                  className={`px-2.5 py-1 rounded-lg text-[10.5px] font-mono font-bold border transition-all ${
+                    isSource
+                      ? 'bg-amber-50 dark:bg-amber-900/25 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 shadow-sm'
+                      : isSecondary
+                      ? 'bg-teal-50 dark:bg-teal-900/25 border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300 shadow-sm'
+                      : 'bg-[var(--bg-tertiary)] border-[var(--border)] text-[var(--text-secondary)]'
+                  }`}
+                >
+                  {col}
+                  {isSource && ' 🏷️ (Source System Tag)'}
+                  {isSecondary && ' ➕ (Secondary Column)'}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Transformation Categories Grid */}
+        <div className="space-y-2">
+          <div className="text-[11.5px] font-bold text-[var(--text-primary)]">
+            Harmonization Transformation Breakdown
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {categories.map((cat, i) => (
+              <div key={i} className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/40 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-bold text-[var(--text-primary)]">
+                  <span className="flex items-center gap-1.5">
+                    <span>{cat.icon}</span>
+                    <span>{cat.title}</span>
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[9.5px] font-bold text-violet-600 dark:text-violet-400 border border-[var(--border)]">
+                    {cat.items.length} events
+                  </span>
+                </div>
+                {cat.items.length > 0 ? (
+                  <div className="space-y-1 max-h-[100px] overflow-y-auto scrollbar-thin scrollbar-thumb-[var(--border)] scrollbar-track-transparent pr-1">
+                    {cat.items.map((item, idx) => (
+                      <div key={idx} className="text-[10px] text-[var(--text-secondary)] font-mono truncate bg-[var(--bg-primary)]/50 px-2 py-0.5 rounded">
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-[var(--text-tertiary)] italic px-1 py-0.5">No changes required for this category</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Expandable Full Audit Log */}
+        <div className="pt-2 border-t border-[var(--border)] flex items-center justify-between">
+          <button
+            onClick={() => setShowLogDetails(!showLogDetails)}
+            className="text-[11px] font-bold text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            {showLogDetails ? '▼ Hide Complete Audit Trail' : '▶ View Complete Audit Trail'} ({fixLog.length} log entries)
+          </button>
+        </div>
+
+        {showLogDetails && (
+          <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] max-h-[250px] overflow-y-auto font-mono text-[10px] space-y-1 scrollbar-thin">
+            {fixLog.map((log, idx) => (
+              <div key={idx} className="text-[var(--text-secondary)]">
+                {log}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
 /* ─── Main Page ─── */
 export function Step4Harmonize() {
   const { toast } = useToast();
@@ -217,6 +444,10 @@ export function Step4Harmonize() {
   const [distChannel, setDistChannel] = useState(state.distch || '10');
   const [division, setDivision] = useState(state.spart || '00');
 
+  // Source Systems
+  const [primarySource, setPrimarySource] = useState(state.src || 'SAP_ECC');
+  const [secondarySource, setSecondarySource] = useState('ORACLE_EBS');
+
   // Files
   const [primaryFile, setPrimaryFile] = useState<DroppedFile | null>(null);
   const [secondaryFile, setSecondaryFile] = useState<DroppedFile | null>(null);
@@ -224,7 +455,7 @@ export function Step4Harmonize() {
   const [secondaryMappingFile, setSecondaryMappingFile] = useState<DroppedFile | null>(null);
 
   // Results
-  const result = state.harmonizationResult;
+  const result: HarmonizationResult | null = state.harmonizationResult;
   const setResult = (val: any) => dispatch({ type: 'SET_FIELD', field: 'harmonizationResult', value: val });
 
   const saveDataToDB = async () => {
@@ -288,22 +519,24 @@ export function Step4Harmonize() {
     ? true
     : mode === 'single'
       ? !!primaryFile
-      : !!(primaryFile && secondaryFile && primaryMappingFile && secondaryMappingFile);
+      : !!(secondaryFile && secondaryMappingFile);
 
   async function runHarmonization() {
-    if (!canRun || (mode !== 'flow' && !primaryFile)) return;
+    if (!canRun) return;
+    if (mode === 'single' && !primaryFile) return;
     dispatch({ type: 'SET_FIELD', field: 'isHarmonizedSaved', value: false });
 
-    showLoad('Running Harmonization Agent…', 'Processing your data through 7 rules', [
+    showLoad('Running Harmonization Agent…', 'Processing your data through 11 rules', [
       'Reading files from Database or Uploads…',
       'Applying field mappings…',
-      'Rule 1: Key-based Dedup…',
-      'Rule 2: Empty Row Filter…',
-      'Rules 3-6: Code conversions…',
+      'Rules 1-2: Dedup & Empty filter…',
+      'Rules 3-6: Country, Currency, PayTerms, MatType…',
       'Rule 7: Whitespace Trim…',
-      'Generating results…',
+      'Rules 8-9: Date format & Phone cleanup…',
+      'Rules 10-11: UOM normalize & Text truncate…',
+      'Generating results with Source tracking…',
     ]);
-    [0, 1, 2, 3, 4, 5, 6].forEach(i => setTimeout(() => tick(i), 300 + i * 350));
+    [0, 1, 2, 3, 4, 5, 6, 7].forEach(i => setTimeout(() => tick(i), 300 + i * 300));
 
     try {
       let res;
@@ -323,12 +556,16 @@ export function Step4Harmonize() {
             plant: plant,
             dist_channel: distChannel,
             division: division,
-            currency: currency
+            currency: currency,
+            primary_source: state.src || primarySource,
           })
         });
-      } else {
+      } else if (mode === 'multi') {
+        if (!state.projectId) {
+          throw new Error("No Project ID found. Please extract and save data in Step 3 first.");
+        }
         const formData = new FormData();
-        formData.append('mode', mode);
+        formData.append('project_id', state.projectId);
         formData.append('sap_object', sapObject);
         formData.append('company_code', companyCode);
         formData.append('sales_org', salesOrg);
@@ -337,14 +574,28 @@ export function Step4Harmonize() {
         formData.append('dist_channel', distChannel);
         formData.append('division', division);
         formData.append('currency', currency);
+        formData.append('primary_source', state.src || primarySource);
+        formData.append('secondary_source', secondarySource);
+        formData.append('secondary_file', secondaryFile!.file);
+        formData.append('secondary_mapping_file', secondaryMappingFile!.file);
+
+        res = await fetch('/api/sap/harmonize/multi-flow', { method: 'POST', body: formData });
+      } else {
+        // single mode
+        const formData = new FormData();
+        formData.append('mode', 'single');
+        formData.append('sap_object', sapObject);
+        formData.append('company_code', companyCode);
+        formData.append('sales_org', salesOrg);
+        formData.append('purch_org', purchOrg);
+        formData.append('plant', plant);
+        formData.append('dist_channel', distChannel);
+        formData.append('division', division);
+        formData.append('currency', currency);
+        formData.append('primary_source', primarySource);
         formData.append('primary_file', primaryFile!.file);
 
         if (primaryMappingFile) formData.append('primary_mapping_file', primaryMappingFile.file);
-
-        if (mode === 'multi') {
-          if (secondaryFile) formData.append('secondary_file', secondaryFile.file);
-          if (secondaryMappingFile) formData.append('secondary_mapping_file', secondaryMappingFile.file);
-        }
 
         res = await fetch('/api/sap/harmonize', { method: 'POST', body: formData });
       }
@@ -357,7 +608,7 @@ export function Step4Harmonize() {
       const data = await res.json();
 
       setTimeout(() => {
-        tick(7, 'Complete');
+        tick(8, 'Complete');
         setTimeout(() => {
           hideLoad();
           setResult(data);
@@ -439,74 +690,141 @@ export function Step4Harmonize() {
           </div>
 
           {/* Drop Zones / DB Fetch */}
-          {mode !== 'flow' && (
+          {mode === 'single' && (
             <Card>
               <CardHeader
-                title={mode === 'multi' ? 'Upload Files (Multi-Source)' : 'Upload Files (Single-Source)'}
-                subtitle={mode === 'multi' ? 'Primary data + Secondary data + 2 mapping files' : 'Data file + optional Mapping CSV'}
+                title="Upload Files (Single-Source)"
+                subtitle="Data file + optional Mapping CSV"
               />
               <CardBody className="p-4">
+                {/* Primary Data Source Selector */}
+                <div className="mb-3 px-3 py-2.5 rounded-xl border border-violet-300 dark:border-violet-600 bg-violet-50/40 dark:bg-violet-900/15">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11.5px] font-semibold text-violet-800 dark:text-violet-300">Data Source System</div>
+                      <div className="text-[10px] text-violet-600/80 dark:text-violet-400/80">Select system origin for your data file</div>
+                    </div>
+                    <select
+                      value={primarySource}
+                      onChange={(e) => setPrimarySource(e.target.value)}
+                      className="px-3 py-1.5 rounded-lg text-[11.5px] font-bold bg-[var(--bg-primary)] border border-violet-400 dark:border-violet-500 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer shadow-sm"
+                    >
+                      {SOURCE_OPTIONS.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label} ({s.value})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
-                <DropZone
-                  id="drop-primary"
-                  label={mode === 'multi' ? "Primary Data File" : "Data File"}
-                  subtitle="Drag & drop CSV or Excel"
-                  icon={FileSpreadsheet}
-                  accept=".csv,.xlsx,.xls"
-                  file={primaryFile}
-                  onDrop={handleFileDrop(setPrimaryFile)}
-                  onClear={() => setPrimaryFile(null)}
-                  accentColor="primary"
-                />
+                  <DropZone
+                    id="drop-primary"
+                    label="Data File"
+                    subtitle="Drag & drop CSV or Excel"
+                    icon={FileSpreadsheet}
+                    accept=".csv,.xlsx,.xls"
+                    file={primaryFile}
+                    onDrop={handleFileDrop(setPrimaryFile)}
+                    onClear={() => setPrimaryFile(null)}
+                    accentColor="primary"
+                  />
 
-                <DropZone
-                  id="drop-primary-mapping"
-                  label={mode === 'multi' ? "Primary Mapping CSV" : "Mapping CSV (Optional)"}
-                  subtitle="Columns: src, sap, transform, confidence"
-                  icon={MapPin}
-                  accept=".csv"
-                  file={primaryMappingFile}
-                  onDrop={handleFileDrop(setPrimaryMappingFile)}
-                  onClear={() => setPrimaryMappingFile(null)}
-                  accentColor="violet"
-                />
+                  <DropZone
+                    id="drop-primary-mapping"
+                    label="Mapping CSV (Optional)"
+                    subtitle="Columns: src, sap, transform, confidence"
+                    icon={MapPin}
+                    accept=".csv"
+                    file={primaryMappingFile}
+                    onDrop={handleFileDrop(setPrimaryMappingFile)}
+                    onClear={() => setPrimaryMappingFile(null)}
+                    accentColor="violet"
+                  />
+                </div>
 
-                {mode === 'multi' && (
-                  <>
-                    <DropZone
-                      id="drop-secondary"
-                      label="Secondary Data File"
-                      subtitle="Drag & drop CSV or Excel"
-                      icon={FileSpreadsheet}
-                      accept=".csv,.xlsx,.xls"
-                      file={secondaryFile}
-                      onDrop={handleFileDrop(setSecondaryFile)}
-                      onClear={() => setSecondaryFile(null)}
-                      accentColor="teal"
-                    />
-
-                    <DropZone
-                      id="drop-secondary-mapping"
-                      label="Secondary Mapping CSV"
-                      subtitle="Columns: src, sap, transform, confidence"
-                      icon={MapPin}
-                      accept=".csv"
-                      file={secondaryMappingFile}
-                      onDrop={handleFileDrop(setSecondaryMappingFile)}
-                      onClear={() => setSecondaryMappingFile(null)}
-                      accentColor="amber"
-                    />
-                  </>
-                )}
-              </div>
-
-              {mode === 'single' && (
                 <div className="mt-3 px-3 py-2 rounded-lg bg-[var(--bg-tertiary)]/50 border border-[var(--border)]">
                   <div className="text-[10px] text-[var(--text-tertiary)]">
                     <strong>Single mode:</strong> Upload your data file. If a Mapping CSV is provided, fields will be mapped and output headers will use short SAP target field names (after the dot, e.g. <code>KUNNR</code>, <code>NAME1</code>, <code>LAND1</code>).
                   </div>
                 </div>
-              )}
+              </CardBody>
+            </Card>
+          )}
+
+          {mode === 'multi' && (
+            <Card>
+              <CardHeader
+                title="Multi-Source Harmonization"
+                subtitle="Primary data from database + secondary data uploaded"
+              />
+              <CardBody className="p-4">
+                {/* Primary data from DB indicator */}
+                <div className="mb-3 px-3 py-2.5 rounded-xl border border-emerald-300 dark:border-emerald-600 bg-emerald-50/50 dark:bg-emerald-900/20">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center">
+                      <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <div>
+                      <div className="text-[11.5px] font-semibold text-emerald-700 dark:text-emerald-300">Primary Data: From Database ({state.src || 'SAP_ECC'})</div>
+                      <div className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">
+                        Using extracted data & mappings from Step 3 {state.extracted.length > 0 ? `(${state.extracted.length} rows)` : ''}
+                      </div>
+                    </div>
+                    {state.isDataSaved && <CheckCircle2 className="w-4 h-4 text-emerald-500 ml-auto" />}
+                  </div>
+                </div>
+
+                {/* Secondary Data Source Selector */}
+                <div className="mb-3 px-3 py-2.5 rounded-xl border border-teal-300 dark:border-teal-600 bg-teal-50/40 dark:bg-teal-900/15">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11.5px] font-semibold text-teal-800 dark:text-teal-300">Secondary Data Source System</div>
+                      <div className="text-[10px] text-teal-600/80 dark:text-teal-400/80">Select system origin for secondary file</div>
+                    </div>
+                    <select
+                      value={secondarySource}
+                      onChange={(e) => setSecondarySource(e.target.value)}
+                      className="px-3 py-1.5 rounded-lg text-[11.5px] font-bold bg-[var(--bg-primary)] border border-teal-400 dark:border-teal-500 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer shadow-sm"
+                    >
+                      {SOURCE_OPTIONS.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label} ({s.value})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Secondary file uploads */}
+                <div className="grid grid-cols-2 gap-3">
+                  <DropZone
+                    id="drop-secondary"
+                    label="Secondary Data File"
+                    subtitle="Drag & drop CSV or Excel"
+                    icon={FileSpreadsheet}
+                    accept=".csv,.xlsx,.xls"
+                    file={secondaryFile}
+                    onDrop={handleFileDrop(setSecondaryFile)}
+                    onClear={() => setSecondaryFile(null)}
+                    accentColor="teal"
+                  />
+
+                  <DropZone
+                    id="drop-secondary-mapping"
+                    label="Secondary Mapping CSV"
+                    subtitle="Columns: src, sap, transform, confidence"
+                    icon={MapPin}
+                    accept=".csv"
+                    file={secondaryMappingFile}
+                    onDrop={handleFileDrop(setSecondaryMappingFile)}
+                    onClear={() => setSecondaryMappingFile(null)}
+                    accentColor="amber"
+                  />
+                </div>
+
+                <div className="mt-3 px-3 py-2 rounded-lg bg-[var(--bg-tertiary)]/50 border border-[var(--border)]">
+                  <div className="text-[10px] text-[var(--text-tertiary)]">
+                    <strong>Multi mode:</strong> Primary data & mappings are loaded from your Step 3 extract. Upload a secondary data file and its mapping CSV to merge.
+                  </div>
+                </div>
               </CardBody>
             </Card>
           )}
@@ -542,6 +860,9 @@ export function Step4Harmonize() {
             </Card>
           )}
 
+          {/* Harmonization Changes & Audit Report */}
+          {result && <HarmonizationReportCard result={result} />}
+
           {!result && (
             <Card>
               <CardBody>
@@ -554,81 +875,103 @@ export function Step4Harmonize() {
           )}
         </GridCol>
 
-        {/* ─── Right Column: Results & Fix Log ─── */}
+        {/* ─── Right Column: Stats, Fix Log & Rules ─── */}
         <GridCol span={3}>
-          {result ? (
-            <>
-              <Card>
-                <CardHeader title="Stats" />
-                <CardBody className="p-3 space-y-2">
-                  {Object.entries(result.stats).map(([k, v]) => (
-                    <div key={k} className="flex justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] text-[11px]">
-                      <span className="text-[var(--text-tertiary)]">{k.replace(/_/g, ' ')}</span>
-                      <span className="font-mono font-bold text-[var(--text-primary)]">{v}</span>
-                    </div>
-                  ))}
-                </CardBody>
-              </Card>
-
-              <Card>
-                <CardHeader title="Fix Log" subtitle={`${result.fix_log.length} entries`} />
-                <CardBody className="p-3">
-                  <div className="space-y-1 max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-[var(--border-light)] scrollbar-track-transparent">
-                    {result.fix_log.map((log, i) => {
-                      const isRule = log.startsWith('[');
-                      const bracket = log.match(/^\[([^\]]+)\]/)?.[1] || '';
-                      const rest = log.replace(/^\[[^\]]+\]\s*/, '');
-                      return (
-                        <div key={i} className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)]/50 text-[10px]">
-                          {isRule && (
-                            <span className="font-mono font-bold text-violet-600 dark:text-violet-400 mr-1">
-                              [{bracket}]
-                            </span>
-                          )}
-                          <span className="text-[var(--text-secondary)]">{rest}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardBody>
-              </Card>
-            </>
-          ) : (
+          {/* Stats Card — only when result exists */}
+          {result && (
             <Card>
-              <CardHeader title="7 Harmonization Rules" />
+              <CardHeader title="Stats" />
               <CardBody className="p-3 space-y-2">
-                {[
-                  ['Key-based Dedup', 'Remove duplicate key field rows', '🔑'],
-                  ['Empty Row Filter', 'Remove 100% empty records', '🗑️'],
-                  ['Country → ISO', 'Full names to 2-3 letter ISO', '🌍'],
-                  ['Currency → ISO', 'Map to ISO 4217 3-letter', '💱'],
-                  ['PayTerms → SAP', 'Convert text to NT30/NT45 etc', '💳'],
-                  ['MatType → SAP', 'Convert to ROH/FERT/HALB etc', '📦'],
-                  ['Whitespace Trim', 'All fields trimmed', '✂️'],
-                ].map(([t, d, emoji], i) => (
-                  <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
-                    <span className="text-sm mt-0.5">{emoji}</span>
-                    <div>
-                      <div className="text-[11.5px] font-bold text-[var(--text-primary)]">{t}</div>
-                      <div className="text-[10px] text-[var(--text-tertiary)]">{d}</div>
-                    </div>
+                {Object.entries(result.stats).map(([k, v]: [string, unknown]) => (
+                  <div key={k} className="flex justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] text-[11px]">
+                    <span className="text-[var(--text-tertiary)]">{k.replace(/_/g, ' ')}</span>
+                    <span className="font-mono font-bold text-[var(--text-primary)]">{String(v)}</span>
                   </div>
                 ))}
+              </CardBody>
+            </Card>
+          )}
 
-                <div className="border-t border-[var(--border)] my-2" />
-
-                <div className="text-[10px] text-[var(--text-tertiary)] px-1">
-                  <strong>Mapping CSV format:</strong>
-                  <div className="font-mono mt-1 p-2 rounded bg-[var(--bg-tertiary)] text-[9px]">
-                    src,sap,transform,confidence<br />
-                    PARTY_NAME,NAME1,trim,90<br />
-                    COUNTRY_CODE,LAND1,country,85<br />
-                    CURRENCY,WAERS,currency,80
-                  </div>
+          {/* Fix Log Card — only when result exists */}
+          {result && (
+            <Card>
+              <CardHeader title="Fix Log" subtitle={`${result.fix_log.length} entries`} />
+              <CardBody className="p-3">
+                <div className="space-y-1 max-h-[300px] overflow-y-auto scrollbar-thin scrollbar-thumb-[var(--border-light)] scrollbar-track-transparent">
+                  {result.fix_log.map((log: string, i: number) => {
+                    const isRule = log.startsWith('[');
+                    const bracket = log.match(/^\[([^\]]+)\]/)?.[1] || '';
+                    const rest = log.replace(/^\[[^\]]+\]\s*/, '');
+                    return (
+                      <div key={i} className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)]/50 text-[10px]">
+                        {isRule && (
+                          <span className="font-mono font-bold text-violet-600 dark:text-violet-400 mr-1">
+                            [{bracket}]
+                          </span>
+                        )}
+                        <span className="text-[var(--text-secondary)]">{rest}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </CardBody>
             </Card>
           )}
+
+          {/* Rules Card — ALWAYS visible */}
+          <Card>
+            <CardHeader title={`11 Harmonization Rules`} subtitle={result ? 'Applied ✓' : undefined} />
+            <CardBody className="p-3 space-y-1.5">
+              {[
+                ['Key-based Dedup', 'Remove duplicate key field rows', '🔑', 'Dedup'],
+                ['Empty Row Filter', 'Remove 100% empty records', '🗑️', 'EmptyFilter'],
+                ['Country → ISO', 'Full names to 2-3 letter ISO', '🌍', 'Country'],
+                ['Currency → ISO', 'Map to ISO 4217 3-letter', '💱', 'Currency'],
+                ['PayTerms → SAP', 'Convert text to NT30/NT45 etc', '💳', 'PayTerms'],
+                ['MatType → SAP', 'Convert to ROH/FERT/HALB etc', '📦', 'MatType'],
+                ['Whitespace Trim', 'All fields trimmed', '✂️', 'WhitespaceTrim'],
+                ['Date → YYYYMMDD', 'SAP 8-digit date format', '📅', 'Date'],
+                ['Phone Cleanup', 'Remove invalid characters', '📞', 'PhoneClean'],
+                ['UOM → SAP', 'Normalize unit of measure', '📐', 'UOM'],
+                ['Truncate 35', 'Name/address field limit', '✏️', 'Trunc35'],
+              ].map(([t, d, emoji, logKey], i) => {
+                const applied = result ? result.fix_log.some((l: string) => l.includes(`[${logKey}`)) : false;
+                return (
+                  <div key={i} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all duration-200 ${
+                    applied
+                      ? 'border-emerald-300 dark:border-emerald-600 bg-emerald-50/40 dark:bg-emerald-900/15'
+                      : 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
+                  }`}>
+                    <span className="text-sm flex-shrink-0">{emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] font-bold text-[var(--text-primary)] leading-tight">{t}</div>
+                      <div className="text-[9.5px] text-[var(--text-tertiary)] leading-tight">{d}</div>
+                    </div>
+                    {result && (
+                      applied
+                        ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                        : <span className="text-[9px] text-[var(--text-tertiary)] flex-shrink-0">—</span>
+                    )}
+                  </div>
+                );
+              })}
+
+              {!result && (
+                <>
+                  <div className="border-t border-[var(--border)] my-2" />
+                  <div className="text-[10px] text-[var(--text-tertiary)] px-1">
+                    <strong>Mapping CSV format:</strong>
+                    <div className="font-mono mt-1 p-2 rounded bg-[var(--bg-tertiary)] text-[9px]">
+                      src,sap,transform,confidence<br />
+                      PARTY_NAME,NAME1,trim,90<br />
+                      COUNTRY_CODE,LAND1,country,85<br />
+                      CURRENCY,WAERS,currency,80
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardBody>
+          </Card>
         </GridCol>
 
       </PageGrid>

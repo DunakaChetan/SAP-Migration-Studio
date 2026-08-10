@@ -8,9 +8,9 @@ into a unified, SAP S/4HANA-ready table.
 Two modes:
   - Multi-Source: Primary + Secondary data with separate mappings per source.
                   Row-append merge with null-filling for missing columns.
-  - Single-Source: One table, apply 7 harmonization rules directly.
+  - Single-Source: One table, apply 11 harmonization rules directly.
 
-7 Core Harmonization Rules:
+11 Core Harmonization Rules:
   1. Key-based Dedup
   2. Empty Row Filter
   3. Country → ISO
@@ -18,6 +18,10 @@ Two modes:
   5. PayTerms → SAP
   6. MatType → SAP
   7. Whitespace Trim
+  8. Date → YYYYMMDD
+  9. Phone/Fax Cleanup
+  10. UOM → SAP
+  11. Text Truncate 35
 
 Usage (CLI):
   python harmonization_agent.py --mode single --primary data.csv --object CUSTOMER --output result.csv
@@ -398,8 +402,35 @@ class HarmonizationAgent:
             if matched_col and matched_col in df.columns:
                 tf_fn = TRANSFORMS.get(m.transform, TRANSFORMS["trim"])
                 target_col = m.sap.split(".")[-1] if "." in m.sap else m.sap
-                result[target_col] = df[matched_col].apply(tf_fn)
+
+                orig_series = df[matched_col].astype(str)
+                transformed_series = df[matched_col].apply(tf_fn)
+                result[target_col] = transformed_series
                 mapped_src_cols.add(matched_col)
+
+                # Log transformations that actually changed values
+                tag_map = {
+                    "country": "Country→ISO",
+                    "currency": "Currency→ISO",
+                    "payterm": "PayTerms→SAP",
+                    "mattype": "MatType→SAP",
+                    "date8": "Date→YYYYMMDD",
+                    "phone": "PhoneClean",
+                    "quantity": "UOM→SAP",
+                    "uom": "UOM→SAP",
+                    "trunc35": "Trunc35",
+                    "upper": "UPPER",
+                    "pad10": "Pad10",
+                    "trim": "WhitespaceTrim",
+                }
+                tag = tag_map.get(m.transform, f"Transform:{m.transform}")
+
+                diff_mask = (orig_series.str.strip() != transformed_series.astype(str).str.strip()) & (orig_series.str.strip() != "") & (orig_series.str.strip() != "nan")
+                if diff_mask.any():
+                    for idx in df.index[diff_mask]:
+                        raw = orig_series.at[idx]
+                        mapped = transformed_series.at[idx]
+                        self.fix_log.append(f"[{tag}] Row {idx + 1} ({target_col}): '{raw}' → '{mapped}'")
 
         # Preserve unmapped source columns (short name after dot)
         for col in df.columns:
@@ -490,10 +521,10 @@ class HarmonizationAgent:
         for col in df.columns:
             col_upper = col.upper()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["LAND1", "COUNTRY", "COUNTRY_CODE", "LAND", "NATION"] or "COUNTRY" in col_upper or "LAND" in base:
+            if base in schema_fields or base in ["LAND1", "COUNTRY", "COUNTRY_CODE", "LAND", "NATION", "CTRY", "BILLING_COUNTRY", "SHIP_COUNTRY"] or "COUNTRY" in col_upper or "LAND" in base or "CTRY" in col_upper:
                 target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(10)]
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
             if any(v in COUNTRY_MAP for v in sample_vals if v):
                 target_cols.append(col)
         return target_cols
@@ -504,10 +535,10 @@ class HarmonizationAgent:
         for col in df.columns:
             col_upper = col.upper()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["WAERS", "CURRENCY", "CURRENCY_CODE", "CURR"] or "WAERS" in col_upper or "CURR" in base:
+            if base in schema_fields or base in ["WAERS", "CURRENCY", "CURRENCY_CODE", "CURR", "CCY", "PRICE_CURR"] or "WAERS" in col_upper or "CURR" in base or "CCY" in col_upper:
                 target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(10)]
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
             if any(v in CURRENCY_MAP for v in sample_vals if v):
                 target_cols.append(col)
         return target_cols
@@ -518,10 +549,10 @@ class HarmonizationAgent:
         for col in df.columns:
             col_upper = col.upper()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["ZTERM", "PAYMENT_TERMS", "PAY_TERMS", "PAYTERMS"] or "ZTERM" in col_upper or "PAY" in base:
+            if base in schema_fields or base in ["ZTERM", "PAYMENT_TERMS", "PAY_TERMS", "PAYTERMS", "PAY_TERM", "TERMS"] or "ZTERM" in col_upper or "PAY" in base:
                 target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(10)]
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
             if any(v in PAYMENT_TERMS_MAP for v in sample_vals if v):
                 target_cols.append(col)
         return target_cols
@@ -532,10 +563,10 @@ class HarmonizationAgent:
         for col in df.columns:
             col_upper = col.upper()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["MTART", "MATERIAL_TYPE", "MAT_TYPE", "MATTYPE"] or "MTART" in col_upper or "MAT_TYPE" in base:
+            if base in schema_fields or base in ["MTART", "MATERIAL_TYPE", "MAT_TYPE", "MATTYPE", "MAT_GROUP"] or "MTART" in col_upper or "MAT_TYPE" in base or "MTART" in base:
                 target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(10)]
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
             if any(v in MATERIAL_TYPE_MAP for v in sample_vals if v):
                 target_cols.append(col)
         return target_cols
@@ -650,8 +681,147 @@ class HarmonizationAgent:
             self.fix_log.append(f"[WhitespaceTrim] Trimmed {trimmed_count} values")
         return df
 
+    # ──────────────────────────────────────
+    # Rules 8-11: Date, Phone, UOM, Trunc35
+    # ──────────────────────────────────────
+
+    def _find_date_columns(self, df: pd.DataFrame) -> List[str]:
+        """Auto-detect date columns by name patterns and data sampling."""
+        DATE_NAME_PATTERNS = [
+            "ERDAT", "AEDAT", "ERNAM_DATE", "BUDAT", "BLDAT", "CPUDT",
+            "FKDAT", "AUDAT", "VDATU", "BDATU", "PSODT", "BEDAT",
+        ]
+        target_cols = []
+        for col in df.columns:
+            col_upper = col.upper()
+            base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            # Match known SAP date field names
+            if base in DATE_NAME_PATTERNS:
+                target_cols.append(col)
+                continue
+            # Match columns containing DATE, _AT suffix (common timestamp pattern)
+            if "DATE" in base or base.endswith("_AT") or base.endswith("_DT") or base.startswith("DT_"):
+                target_cols.append(col)
+                continue
+            # Sample-based detection: check if values look like dates
+            sample_vals = [str(v).strip() for v in df[col].dropna().head(15) if str(v).strip() and str(v) != "nan"]
+            if len(sample_vals) >= 3:
+                date_pattern = re.compile(r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{4}$|^\d{4}[/\-]\d{2}[/\-]\d{2}$")
+                matches = sum(1 for v in sample_vals if date_pattern.match(v))
+                if matches >= len(sample_vals) * 0.5:
+                    target_cols.append(col)
+        return target_cols
+
+    def _find_phone_columns(self, df: pd.DataFrame) -> List[str]:
+        """Auto-detect phone/fax columns by name patterns."""
+        PHONE_NAMES = [
+            "TELF1", "TELF2", "TELFX", "TELMOB", "TEL_NUMBER",
+            "FAX_NUMBER", "SMTP_ADDR",
+        ]
+        target_cols = []
+        for col in df.columns:
+            col_upper = col.upper()
+            base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            if base in PHONE_NAMES:
+                target_cols.append(col)
+                continue
+            if any(kw in base for kw in ["PHONE", "FAX", "MOBILE", "TELF", "CELL"]):
+                target_cols.append(col)
+        return target_cols
+
+    def _find_uom_columns(self, df: pd.DataFrame) -> List[str]:
+        """Auto-detect unit-of-measure columns by name patterns and data sampling."""
+        UOM_NAMES = ["MEINS", "BSTME", "GEWEI", "VOLEH", "LMEIN"]
+        target_cols = []
+        for col in df.columns:
+            col_upper = col.upper()
+            base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            if base in UOM_NAMES:
+                target_cols.append(col)
+                continue
+            if any(kw in base for kw in ["_UOM", "UNIT_OF", "_UNIT", "BASE_UNIT", "UOM"]):
+                target_cols.append(col)
+                continue
+            # Sample-based: check if values are common quantity names
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(10) if str(v).strip() and str(v) != "nan"]
+            if sample_vals and all(v in QUANTITY_MAP for v in sample_vals if v):
+                if len([v for v in sample_vals if v in QUANTITY_MAP]) >= 3:
+                    target_cols.append(col)
+        return target_cols
+
+    def _find_text_columns(self, df: pd.DataFrame) -> List[str]:
+        """Auto-detect name/address text fields that should be truncated to 35 chars."""
+        TEXT_NAMES = [
+            "NAME1", "NAME2", "NAME3", "NAME4",
+            "ORT01", "ORT02", "STRAS", "PSTLZ",
+            "SORTL", "MCOD1", "MCOD2", "MCOD3",
+        ]
+        target_cols = []
+        for col in df.columns:
+            col_upper = col.upper()
+            base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            if base in TEXT_NAMES:
+                target_cols.append(col)
+        return target_cols
+
+    def _rule_8_date_format(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Rule 8: Date → YYYYMMDD format on date columns."""
+        date_cols = self._find_date_columns(df)
+        for col in date_cols:
+            original = df[col].astype(str).str.strip()
+            formatted = original.apply(_tf_date8)
+            diff_mask = (original != formatted) & (original != "") & (original != "nan")
+            if diff_mask.any():
+                changed = diff_mask.sum()
+                self.fix_log.append(f"[Date→YYYYMMDD] Formatted {changed} values in '{col}'")
+            df[col] = formatted
+        return df
+
+    def _rule_9_phone_clean(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Rule 9: Phone/Fax cleanup — remove invalid characters."""
+        phone_cols = self._find_phone_columns(df)
+        for col in phone_cols:
+            original = df[col].astype(str).str.strip()
+            cleaned = original.apply(_tf_phone)
+            diff_mask = (original != cleaned) & (original != "") & (original != "nan")
+            if diff_mask.any():
+                changed = diff_mask.sum()
+                self.fix_log.append(f"[PhoneClean] Cleaned {changed} values in '{col}'")
+            df[col] = cleaned
+        return df
+
+    def _rule_10_uom_normalize(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Rule 10: UOM → SAP format on unit-of-measure columns."""
+        uom_cols = self._find_uom_columns(df)
+        for col in uom_cols:
+            s_clean = df[col].astype(str).str.strip().str.upper()
+            mapped_series = s_clean.map(lambda v: QUANTITY_MAP.get(v, v))
+            diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN")
+            if diff_mask.any():
+                for idx in df.index[diff_mask]:
+                    raw = s_clean.at[idx]
+                    mapped = mapped_series.at[idx]
+                    self.fix_log.append(f"[UOM→SAP] Row {idx + 1} ({col}): '{raw}' → '{mapped}'")
+            df[col] = mapped_series
+        return df
+
+    def _rule_11_trunc35(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Rule 11: Truncate name/address fields to 35 characters (SAP standard)."""
+        text_cols = self._find_text_columns(df)
+        truncated_count = 0
+        for col in text_cols:
+            original = df[col].astype(str)
+            truncated = original.str[:35]
+            diff_mask = original.str.len() > 35
+            if diff_mask.any():
+                truncated_count += diff_mask.sum()
+            df[col] = truncated
+        if truncated_count > 0:
+            self.fix_log.append(f"[Trunc35] Truncated {truncated_count} values to 35 chars in {len(text_cols)} field(s)")
+        return df
+
     def _apply_rules(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply all 7 harmonization rules in order."""
+        """Apply all 11 harmonization rules in order."""
         df = self._rule_1_dedup(df)
         df = self._rule_2_empty_filter(df)
         df = self._rule_3_country_iso(df)
@@ -659,6 +829,10 @@ class HarmonizationAgent:
         df = self._rule_5_payterms_sap(df)
         df = self._rule_6_mattype_sap(df)
         df = self._rule_7_whitespace_trim(df)
+        df = self._rule_8_date_format(df)
+        df = self._rule_9_phone_clean(df)
+        df = self._rule_10_uom_normalize(df)
+        df = self._rule_11_trunc35(df)
         return df
 
     # ──────────────────────────────────────
@@ -688,17 +862,18 @@ class HarmonizationAgent:
         secondary_df: pd.DataFrame,
         primary_mappings: List[MappingEntry],
         secondary_mappings: List[MappingEntry],
+        primary_source: str = "SAP_ECC",
+        secondary_source: str = "ORACLE_EBS",
     ) -> HarmonizationResult:
         """
         Mode 1: Multi-source harmonization pipeline.
 
         1. Apply mapping 1 → primary data (rename source cols → SAP cols, apply transforms)
         2. Apply mapping 2 → secondary data (rename source cols → SAP cols, apply transforms)
-           - Column naming: SAP fields use primary's mapped names
-           - Unmapped secondary fields keep their original names (new columns)
-        3. Row-append merge (union all columns, null-fill missing)
-        4. Apply 7 harmonization rules
-        5. Return result
+        3. Assign SOURCE system identifier column to both tables
+        4. Row-append merge (union all columns, null-fill missing)
+        5. Apply 11 harmonization rules
+        6. Return result
         """
         self.fix_log = []
         self.stats = {}
@@ -709,27 +884,26 @@ class HarmonizationAgent:
         self.stats["secondary_rows"] = len(secondary_df)
 
         self.fix_log.append(
-            f"[Init] Multi-source mode: {len(primary_df)} primary + "
-            f"{len(secondary_df)} secondary rows"
+            f"[Init] Multi-source mode: {len(primary_df)} primary ({primary_source}) + "
+            f"{len(secondary_df)} secondary ({secondary_source}) rows"
         )
 
         # Step 1: Apply mappings
         mapped_primary = self._apply_mapping(primary_df, primary_mappings)
         mapped_secondary = self._apply_mapping(secondary_df, secondary_mappings)
 
+        # Step 2: Assign SOURCE tracking column
+        mapped_primary["SOURCE"] = primary_source
+        mapped_secondary["SOURCE"] = secondary_source
+
         self.fix_log.append(
-            f"[Mapping] Primary: {len(primary_df.columns)} cols → "
+            f"[Mapping] Primary ({primary_source}): {len(primary_df.columns)} cols → "
             f"{len(mapped_primary.columns)} cols"
         )
         self.fix_log.append(
-            f"[Mapping] Secondary: {len(secondary_df.columns)} cols → "
+            f"[Mapping] Secondary ({secondary_source}): {len(secondary_df.columns)} cols → "
             f"{len(mapped_secondary.columns)} cols"
         )
-
-        # Step 2: Ensure column naming uses primary's names for shared SAP columns.
-        # Secondary mapped columns should already match primary's mapped names
-        # since both mappings target the same SAP field names.
-        # New columns from secondary keep secondary's original names.
 
         # Step 3: Row-append merge
         merged = self._merge_sources(mapped_primary, mapped_secondary)
@@ -745,7 +919,7 @@ class HarmonizationAgent:
                 f"[Merge] New columns from secondary: {secondary_only_cols}"
             )
 
-        # Step 4: Apply 7 harmonization rules
+        # Step 4: Apply harmonization rules
         harmonized = self._apply_rules(merged)
 
         # Step 5: Format final column headers to short SAP field names (part after dot)
@@ -753,6 +927,11 @@ class HarmonizationAgent:
         if rename_dict:
             harmonized = harmonized.rename(columns=rename_dict)
             self.fix_log.append(f"[ColumnNaming] Formatted final output columns with short field names (after dot)")
+
+        # Step 6: Ensure SOURCE column is placed at the very end of the output table
+        if "SOURCE" in harmonized.columns:
+            cols = [c for c in harmonized.columns if c != "SOURCE"] + ["SOURCE"]
+            harmonized = harmonized[cols]
 
         self.stats["total_output"] = len(harmonized)
         self.stats["columns"] = len(harmonized.columns)
@@ -767,11 +946,12 @@ class HarmonizationAgent:
         self,
         source_df: pd.DataFrame,
         mappings: Optional[List[MappingEntry]] = None,
+        primary_source: str = "SAP_ECC",
     ) -> HarmonizationResult:
         """
         Mode 2: Single-source harmonization pipeline.
 
-        1. Apply 7 harmonization rules directly on the source data (or mapped data)
+        1. Apply 11 harmonization rules directly on the source data (or mapped data)
         2. Format column headers to short field names (part after dot)
         3. Return result
         """
@@ -782,7 +962,7 @@ class HarmonizationAgent:
         self.stats["total_input"] = total_input
 
         self.fix_log.append(
-            f"[Init] Single-source mode: {total_input} rows × "
+            f"[Init] Single-source mode ({primary_source}): {total_input} rows × "
             f"{len(source_df.columns)} columns"
         )
 
@@ -796,15 +976,23 @@ class HarmonizationAgent:
                     self.fix_log.append("[HeaderCleanup] Removed first row because it contained source column headers.")
 
             mapped_df = self._apply_mapping(source_df, mappings)
+            mapped_df["SOURCE"] = primary_source
             harmonized = self._apply_rules(mapped_df)
         else:
-            harmonized = self._apply_rules(source_df.copy())
+            df_copy = source_df.copy()
+            df_copy["SOURCE"] = primary_source
+            harmonized = self._apply_rules(df_copy)
 
         # Strip table prefix if present (e.g. HZ_LOCATIONS.COUNTRY -> COUNTRY)
         rename_dict = {col: col.split(".")[-1] for col in harmonized.columns if "." in col}
         if rename_dict:
             harmonized = harmonized.rename(columns=rename_dict)
             self.fix_log.append(f"[ColumnNaming] Formatted final output columns with short field names (after dot)")
+
+        # Ensure SOURCE column is placed at the very end of the output table
+        if "SOURCE" in harmonized.columns:
+            cols = [c for c in harmonized.columns if c != "SOURCE"] + ["SOURCE"]
+            harmonized = harmonized[cols]
 
         self.stats["total_output"] = len(harmonized)
         self.stats["columns"] = len(harmonized.columns)
