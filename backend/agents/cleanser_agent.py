@@ -20,6 +20,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from services.cleanser_dynamic_rules import get_relevant_rules_for_cleanser
+
 
 # =============================================================================
 # Configuration
@@ -227,6 +229,7 @@ class CleaningSummary:
     input_csv_path: str
     validation_report_csv_path: str | None
     output_csv_path: str
+    execution_plan: dict[str, Any] = field(default_factory=dict)
     validation_issues: list[dict[str, Any]] = field(default_factory=list)
     dynamic_issues: list[dict[str, Any]] = field(default_factory=list)
     validation_fixes: list[dict[str, Any]] = field(default_factory=list)
@@ -270,6 +273,7 @@ class CleaningSummary:
             "output_csv_path": self.output_csv_path,
             "rows_loaded": self.rows_loaded,
             "rows_exported": self.rows_exported,
+            "execution_plan": self.execution_plan,
             "validation_issues": {
                 "count": len(self.validation_issues),
                 "items": self.validation_issues,
@@ -810,6 +814,241 @@ CLEANSER_RULES: list[tuple[str, CleanserRule]] = [
 
 
 # =============================================================================
+# Rule Resolution Plan
+# =============================================================================
+
+SEMANTIC_CLEANSER_RULE_FIELDS: dict[str, set[str]] = {
+    "CL_COUNTRY_TO_ISO": COUNTRY_FIELD_NAMES,
+    "CL_CURRENCY_TO_ISO": CURRENCY_FIELD_NAMES,
+    "CL_PAYMENT_TERMS_TO_SAP": PAYMENT_TERM_FIELD_NAMES,
+    "CL_MATERIAL_TYPE_TO_SAP": MATERIAL_TYPE_FIELD_NAMES,
+    "CL_PAD_NUMERIC_IDENTIFIER": set(IDENTIFIER_LENGTHS),
+    "CL_UPPERCASE_CODE_FIELDS": CODE_FIELD_NAMES,
+    "CL_CLEAN_TAX_NUMBER": {"STCD1", "STCD2", "TAX_NUMBER", "PAN", "GST"},
+    "CL_TRUNCATE_OVERLENGTH": set(FIELD_LENGTHS),
+}
+
+
+def _issue_rule_code(issue: dict[str, Any]) -> str:
+    return _clean_key(issue.get("rule_code") or issue.get("rule") or issue.get("Rule Code"))
+
+
+def _issue_field(issue: dict[str, Any]) -> str:
+    return _field_key(
+        _stringify(
+            issue.get("field")
+            or issue.get("field_name")
+            or issue.get("Field Name")
+            or issue.get("f")
+            or "GENERAL"
+        )
+    )
+
+
+def _is_dynamic_issue(issue: dict[str, Any]) -> bool:
+    rule_code = _issue_rule_code(issue)
+    rule_type = _clean_key(issue.get("rule_type") or issue.get("Rule Type"))
+    return rule_code.startswith("DYNAMIC_") or "DYNAMIC" in rule_type
+
+
+def _dynamic_rule_field(rule: dict[str, Any]) -> str:
+    return _field_key(_stringify(rule.get("field") or "GENERAL"))
+
+
+def _dynamic_rule_id(rule: dict[str, Any]) -> str:
+    return _clean_key(rule.get("id") or rule.get("rule_code"))
+
+
+def _issue_group_key(issue: dict[str, Any]) -> tuple[str, str, str]:
+    scope = "dynamic" if _is_dynamic_issue(issue) else "standard_validation"
+    return (scope, _issue_rule_code(issue) or "UNKNOWN_RULE", _issue_field(issue))
+
+
+def _issue_group_to_dict(key: tuple[str, str, str], issues: list[dict[str, Any]]) -> dict[str, Any]:
+    scope, rule_code, field_name = key
+    return {
+        "group_id": f"{scope}:{rule_code}:{field_name}",
+        "scope": scope,
+        "rule_code": rule_code,
+        "field_name": field_name,
+        "issue_count": len(issues),
+        "issues": [dict(issue) for issue in issues],
+    }
+
+
+def _cleanser_rule_conflicts(dynamic_fields: set[str], rule_code: str) -> bool:
+    target_fields = {_field_key(field) for field in SEMANTIC_CLEANSER_RULE_FIELDS.get(rule_code, set())}
+    return bool(dynamic_fields and target_fields and dynamic_fields.intersection(target_fields))
+
+
+def build_cleanser_execution_plan(
+    validation_report: dict[str, Any] | None,
+    *,
+    project_id: str | None = None,
+    target_object: str | None = None,
+    dynamic_rules: list[dict[str, Any]] | None = None,
+    dynamic_rule_store_path: str | Path | None = None,
+    cleanser_rules: list[tuple[str, CleanserRule]] | None = None,
+) -> dict[str, Any]:
+    """
+    Build a deterministic rule-resolution plan without modifying data.
+
+    Dynamic rules are active policies even when there are zero validation
+    issues, so they can suppress lower-priority generic Cleanser rules. This
+    function intentionally does not execute dynamic fixers, call an LLM, or
+    change standard rule implementations.
+    """
+    issues = [
+        dict(issue)
+        for issue in (validation_report or {}).get("issues", [])
+        if isinstance(issue, dict)
+    ]
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for issue in issues:
+        grouped.setdefault(_issue_group_key(issue), []).append(issue)
+
+    issue_groups = [_issue_group_to_dict(key, value) for key, value in sorted(grouped.items())]
+    dynamic_issue_groups = [group for group in issue_groups if group["scope"] == "dynamic"]
+    standard_issue_groups = [group for group in issue_groups if group["scope"] == "standard_validation"]
+
+    stored_dynamic_rules = dynamic_rules
+    if stored_dynamic_rules is None:
+        stored_dynamic_rules = get_relevant_rules_for_cleanser(
+            project_id=project_id,
+            target_object=target_object,
+            store_path=dynamic_rule_store_path,
+        )
+
+    dynamic_fields = {
+        field
+        for field in (_dynamic_rule_field(rule) for rule in stored_dynamic_rules)
+        if field and field != "GENERAL"
+    }
+
+    dynamic_items = []
+    satisfied_dynamic_rules = []
+    for rule in stored_dynamic_rules:
+        rule_id = _dynamic_rule_id(rule)
+        field_name = _dynamic_rule_field(rule)
+        matching_groups = [
+            group
+            for group in dynamic_issue_groups
+            if (rule_id and group["rule_code"] == rule_id)
+            or (field_name != "GENERAL" and group["field_name"] == field_name)
+        ]
+        status = "has_issues" if matching_groups else "satisfied"
+        item = {
+            "rule": dict(rule),
+            "rule_code": rule_id,
+            "field_name": field_name,
+            "status": status,
+            "issue_groups": matching_groups,
+        }
+        dynamic_items.append(item)
+        if status == "satisfied":
+            satisfied_dynamic_rules.append(item)
+
+    standard_validation_items = []
+    overridden_rules = []
+    unknown_rules = []
+    for group in standard_issue_groups:
+        overridden_by = [
+            item["rule_code"]
+            for item in dynamic_items
+            if item["field_name"] != "GENERAL" and item["field_name"] == group["field_name"]
+        ]
+        status = "overridden" if overridden_by else "planned"
+        item = {
+            **group,
+            "status": status,
+            "overridden_by": overridden_by,
+        }
+        standard_validation_items.append(item)
+        if overridden_by:
+            overridden_rules.append({
+                "rule_code": group["rule_code"],
+                "rule_type": "standard_validation",
+                "field_name": group["field_name"],
+                "overridden_by": overridden_by,
+                "reason": "Dynamic rule targets the same logical field.",
+            })
+        if group["rule_code"] not in VALIDATION_FIXERS:
+            unknown_rules.append({
+                "rule_code": group["rule_code"],
+                "rule_type": "standard_validation",
+                "field_name": group["field_name"],
+                "issue_count": group["issue_count"],
+                "reason": "No validation fixer is registered for this rule.",
+            })
+
+    dynamic_unknown_groups = []
+    for group in dynamic_issue_groups:
+        matched = [
+            item["rule_code"]
+            for item in dynamic_items
+            if (item["rule_code"] and item["rule_code"] == group["rule_code"])
+            or (item["field_name"] != "GENERAL" and item["field_name"] == group["field_name"])
+        ]
+        if not matched:
+            dynamic_unknown_groups.append(group)
+            unknown_rules.append({
+                "rule_code": group["rule_code"],
+                "rule_type": "dynamic",
+                "field_name": group["field_name"],
+                "issue_count": group["issue_count"],
+                "reason": "Dynamic issue has no matching stored dynamic rule.",
+            })
+
+    cleanser_items = []
+    active_dynamic_ids = [item["rule_code"] for item in dynamic_items if item["rule_code"]]
+    for rule_code, _rule_func in cleanser_rules or CLEANSER_RULES:
+        suppressed = _cleanser_rule_conflicts(dynamic_fields, rule_code)
+        item = {
+            "rule_code": rule_code,
+            "rule_type": "standard_cleanser",
+            "status": "suppressed" if suppressed else "planned",
+            "overridden_by": active_dynamic_ids if suppressed else [],
+        }
+        cleanser_items.append(item)
+        if suppressed:
+            overridden_rules.append({
+                "rule_code": rule_code,
+                "rule_type": "standard_cleanser",
+                "field_name": "MULTIPLE",
+                "overridden_by": active_dynamic_ids,
+                "reason": "Dynamic rule targets a field handled by this generic Cleanser rule.",
+            })
+
+    return {
+        "version": "1.0",
+        "priority_order": ["dynamic", "standard_validation", "standard_cleanser"],
+        "issue_groups": issue_groups,
+        "dynamic_rules": {
+            "count": len(dynamic_items),
+            "items": dynamic_items,
+        },
+        "standard_validation_rules": {
+            "count": len(standard_validation_items),
+            "items": standard_validation_items,
+        },
+        "standard_cleanser_rules": {
+            "count": len(cleanser_items),
+            "items": cleanser_items,
+        },
+        "overridden_rules": overridden_rules,
+        "satisfied_dynamic_rules": {
+            "count": len(satisfied_dynamic_rules),
+            "items": satisfied_dynamic_rules,
+        },
+        "unresolved_unknown_rules": {
+            "count": len(unknown_rules),
+            "items": unknown_rules,
+        },
+        "dynamic_issue_groups_without_stored_rule": dynamic_unknown_groups,
+    }
+
+
+# =============================================================================
 # Main Agent
 # =============================================================================
 
@@ -860,6 +1099,9 @@ def run_cleanser(
     validation_report_csv_path: str | Path | None = None,
     validation_report_payload: Any = None,
     output_csv_path: str | Path | None = None,
+    project_id: str | None = None,
+    target_object: str | None = None,
+    dynamic_rule_store_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if output_csv_path is None:
         raise ValueError("output_csv_path is required.")
@@ -878,6 +1120,12 @@ def run_cleanser(
         rows_loaded=len(df.index),
     )
 
+    summary.execution_plan = build_cleanser_execution_plan(
+        validation_report,
+        project_id=project_id,
+        target_object=target_object,
+        dynamic_rule_store_path=dynamic_rule_store_path,
+    )
     apply_validation_fixes(df, validation_report, summary)
     apply_cleanser_rules(df, summary)
     export_cleaned_csv(df, output_csv_path)
