@@ -104,28 +104,64 @@ class ExtractAgent:
         
         total_rows = len(df)
         eda_stats = []
+        total_null_pct = 0.0
+        healthy_count = 0
+        warning_count = 0
+        critical_count = 0
         
         for col in df.columns:
             series = df[col]
             series = series.replace(r'^\s*$', pd.NA, regex=True)
             
-            null_count = series.isna().sum()
-            null_pct = (null_count / total_rows) * 100
-            unique_count = series.nunique()
+            null_count = int(series.isna().sum())
+            null_pct = round((null_count / total_rows) * 100, 1) if total_rows > 0 else 0.0
+            unique_count = int(series.nunique())
             
-            # Max length
             lengths = series.dropna().astype(str).map(len)
-            max_len = lengths.max() if not lengths.empty else 0
+            max_len = int(lengths.max()) if not lengths.empty else 0
+            
+            status = "HEALTHY" if null_pct <= 10 else ("WARNING" if null_pct <= 50 else "CRITICAL")
+            if status == "HEALTHY":
+                healthy_count += 1
+            elif status == "WARNING":
+                warning_count += 1
+            else:
+                critical_count += 1
+                
+            total_null_pct += null_pct
                 
             eda_stats.append({
                 "field": col,
-                "null_percentage": round(float(null_pct), 1),
-                "unique_count": int(unique_count),
-                "max_length": int(max_len)
+                "null_count": null_count,
+                "null_percentage": null_pct,
+                "completeness_pct": round(100.0 - null_pct, 1),
+                "unique_count": unique_count,
+                "max_length": max_len,
+                "status": status
             })
+
+        num_fields = max(len(eda_stats), 1)
+        avg_completeness = round(100.0 - (total_null_pct / num_fields), 1)
+        calculated_score = max(0, min(100, int(avg_completeness)))
+        
+        if calculated_score >= 90:
+            calculated_grade = "A"
+        elif calculated_score >= 75:
+            calculated_grade = "B"
+        elif calculated_score >= 60:
+            calculated_grade = "C"
+        else:
+            calculated_grade = "D"
 
         eda_summary_json = json.dumps({
             "total_records": total_rows,
+            "total_fields": num_fields,
+            "calculated_score": calculated_score,
+            "field_health_distribution": {
+                "healthy_fields": healthy_count,
+                "warning_fields": warning_count,
+                "critical_fields": critical_count
+            },
             "field_statistics": eda_stats
         }, indent=2)
         
@@ -139,34 +175,60 @@ Here are the mathematical statistics computed via Python Pandas:
 Based on these statistics, generate a highly professional 'Executive Data Quality Report'.
 You MUST return the output as a valid JSON object matching this exact schema:
 {{
-  "report_title": "String",
-  "executive_summary": "String (1-2 paragraphs analyzing the overall health)",
-  "critical_warnings": ["String array of major issues (e.g., high nulls on mandatory fields)"],
-  "recommendations": ["String array of 3-5 concrete action items before harmonization"]
+  "report_title": "Executive Data Quality Report: {target_object} Master Data for S/4HANA Migration",
+  "overall_score": {calculated_score},
+  "health_grade": "{calculated_grade}",
+  "executive_summary": "String (1-2 clear, executive-ready paragraphs analyzing overall health and migration readiness)",
+  "critical_warnings": ["String array of 2-4 major issues with specific field names and percentages"],
+  "recommendations": ["String array of 3-5 concrete action items formatted as 'Title: Description'"]
 }}
 """
         try:
-            report_str = llm_orchestrator.generate_generic(system_prompt="You are a SAP Expert. Always return valid JSON.", user_prompt=prompt)
-            # Remove any markdown codeblocks if llm_orchestrator wrapped it
+            report_str = llm_orchestrator.generate_generic(system_prompt="You are a SAP Data Migration Architect Expert. Always return valid JSON.", user_prompt=prompt)
             if report_str.startswith("```json"):
                 report_str = report_str[7:].rstrip("`\n")
             elif report_str.startswith("```"):
                 report_str = report_str[3:].rstrip("`\n")
                 
             report_json = json.loads(report_str)
+            if "overall_score" not in report_json:
+                report_json["overall_score"] = calculated_score
+            if "health_grade" not in report_json:
+                report_json["health_grade"] = calculated_grade
             
             return {
                 "eda_stats": eda_stats,
-                "ai_report": report_json
+                "ai_report": report_json,
+                "summary_metrics": {
+                    "total_records": total_rows,
+                    "total_fields": num_fields,
+                    "healthy_count": healthy_count,
+                    "warning_count": warning_count,
+                    "critical_count": critical_count,
+                    "score": calculated_score,
+                    "grade": calculated_grade
+                }
             }
         except Exception as e:
             logger.error(f"Failed to generate LLM report: {e}")
             return {
                 "eda_stats": eda_stats,
                 "ai_report": {
-                    "report_title": "Data Quality Analysis Failed",
-                    "executive_summary": f"EDA Analysis completed but AI Narrative generation failed: {str(e)}",
-                    "critical_warnings": [],
-                    "recommendations": []
+                    "report_title": f"Executive Data Quality Report: {target_object} Master Data",
+                    "overall_score": calculated_score,
+                    "health_grade": calculated_grade,
+                    "executive_summary": f"Exploratory Data Analysis completed across {total_rows} records and {num_fields} fields with an overall completeness score of {calculated_score}%.",
+                    "critical_warnings": [f"{critical_count} field(s) have critical null rates (>50% empty)."] if critical_count > 0 else [],
+                    "recommendations": ["Review unpopulated mandatory fields before starting harmonization."]
+                },
+                "summary_metrics": {
+                    "total_records": total_rows,
+                    "total_fields": num_fields,
+                    "healthy_count": healthy_count,
+                    "warning_count": warning_count,
+                    "critical_count": critical_count,
+                    "score": calculated_score,
+                    "grade": calculated_grade
                 }
             }
+

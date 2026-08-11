@@ -6,7 +6,7 @@ import { useLoading } from '@/components/ui/loading-overlay';
 import { OBJS } from '@/data/sap-schemas';
 import { dl } from '@/lib/utils';
 import { PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, Badge, StatBox, StatsGrid, EmptyState } from '@/components/shared';
-import { ArrowLeft, ArrowRight, Search, Download, Upload, ListChecks, Save, Sparkles, Plus, Trash2, Zap, FileText } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Download, Upload, ListChecks, Save, Sparkles, Plus, Trash2, Zap, FileText, Pencil, Check, X } from 'lucide-react';
 
 const VALIDATE_API = 'http://localhost:8000';
 
@@ -49,6 +49,8 @@ export function Step5Validate() {
     'Customer email (SMTP_ADDR) must not be empty when country (LAND1) is US',
   ]);
   const [newPromptInput, setNewPromptInput] = useState('');
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState('');
 
   const handleAddPrompt = () => {
     if (!newPromptInput.trim()) return;
@@ -58,6 +60,29 @@ export function Step5Validate() {
 
   const handleRemovePrompt = (index: number) => {
     setCustomPrompts(customPrompts.filter((_, i) => i !== index));
+    if (editingIndex === index) {
+      setEditingIndex(null);
+      setEditingText('');
+    }
+  };
+
+  const handleStartEdit = (index: number) => {
+    setEditingIndex(index);
+    setEditingText(customPrompts[index]);
+  };
+
+  const handleSaveEdit = (index: number) => {
+    if (!editingText.trim()) return;
+    const updated = [...customPrompts];
+    updated[index] = editingText.trim();
+    setCustomPrompts(updated);
+    setEditingIndex(null);
+    setEditingText('');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingIndex(null);
+    setEditingText('');
   };
 
   const isRuleOverridden = (ruleTitle: string): boolean => {
@@ -474,14 +499,60 @@ export function Step5Validate() {
                 </div>
                 <div className="space-y-1.5 max-h-[220px] overflow-y-auto scrollbar-thin">
                   {customPrompts.map((p, idx) => (
-                    <div key={idx} className="flex items-start justify-between p-2 rounded-lg bg-[var(--bg-tertiary)]/70 text-[10.5px] border border-[var(--border)] gap-1.5">
-                      <div className="flex gap-1.5">
-                        <span className="text-violet-600 font-bold shrink-0">⚡</span>
-                        <span className="text-[var(--text-primary)] font-medium leading-tight">#{idx + 1}. {p}</span>
-                      </div>
-                      <button onClick={() => handleRemovePrompt(idx)} className="text-[var(--text-tertiary)] hover:text-red-500 p-0.5 cursor-pointer shrink-0">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-[var(--bg-tertiary)]/70 text-[10.5px] border border-[var(--border)] gap-1.5">
+                      {editingIndex === idx ? (
+                        <div className="flex items-center gap-1.5 w-full">
+                          <span className="text-violet-600 font-bold shrink-0">⚡ #{idx + 1}</span>
+                          <input
+                            type="text"
+                            value={editingText}
+                            onChange={(e) => setEditingText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveEdit(idx);
+                              if (e.key === 'Escape') handleCancelEdit();
+                            }}
+                            className="flex-1 px-2 py-1 text-[10.5px] rounded bg-[var(--bg-primary)] border border-violet-400 text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-violet-500 font-medium"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleSaveEdit(idx)}
+                            className="p-1 rounded text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 cursor-pointer shrink-0 transition-colors"
+                            title="Save rule"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="p-1 rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] cursor-pointer shrink-0 transition-colors"
+                            title="Cancel edit"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex gap-1.5 items-start">
+                            <span className="text-violet-600 font-bold shrink-0">⚡</span>
+                            <span className="text-[var(--text-primary)] font-medium leading-tight">#{idx + 1}. {p}</span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => handleStartEdit(idx)}
+                              className="text-[var(--text-tertiary)] hover:text-violet-500 p-1 rounded hover:bg-violet-500/10 transition-colors cursor-pointer"
+                              title="Edit dynamic rule"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleRemovePrompt(idx)}
+                              className="text-[var(--text-tertiary)] hover:text-red-500 p-1 rounded hover:bg-red-500/10 transition-colors cursor-pointer"
+                              title="Delete dynamic rule"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>

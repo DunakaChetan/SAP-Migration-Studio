@@ -5,7 +5,10 @@ import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
 import { dl, expCSV } from '@/lib/utils';
 import { PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, StatBox, StatsGrid, DataTable, InfoBox, EmptyState, AIResponse } from '@/components/shared';
-import { ArrowLeft, ArrowRight, Sparkles, Download, Bot, Upload, Save } from 'lucide-react';
+import {
+  ArrowLeft, ArrowRight, Sparkles, Download, Bot, Upload, Save,
+  ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Layers, Activity, Filter, ShieldAlert, CheckCircle
+} from 'lucide-react';
 
 type Source = 'harmonized' | 'upload';
 
@@ -15,6 +18,32 @@ interface FixItem {
   field: string;
   old: string;
   new: string;
+}
+
+interface FixGroup {
+  rule_code: string;
+  field: string;
+  count: number;
+  items: FixItem[];
+}
+
+function groupFixItems(items: FixItem[] = []): FixGroup[] {
+  const map = new Map<string, FixGroup>();
+  items.forEach((item) => {
+    const key = `${item.rule_code || 'RULE'}::${item.field || 'FIELD'}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        rule_code: item.rule_code || 'CUSTOM_RULE',
+        field: item.field || '',
+        count: 0,
+        items: []
+      });
+    }
+    const g = map.get(key)!;
+    g.count += 1;
+    g.items.push(item);
+  });
+  return Array.from(map.values());
 }
 
 interface CleanserSummary {
@@ -52,6 +81,97 @@ function exportFixesReport(summary: CleanserSummary): string {
   return rows.join('\n');
 }
 
+function renderGroupedFixesSection({
+  title,
+  icon,
+  items,
+  badgeBg,
+  borderClr,
+  expandedGroups,
+  toggleGroup
+}: {
+  title: string;
+  icon: string;
+  items?: FixItem[];
+  badgeBg: string;
+  borderClr: string;
+  expandedGroups: Record<string, boolean>;
+  toggleGroup: (key: string) => void;
+}) {
+  if (!items || items.length === 0) return null;
+  const groups = groupFixItems(items);
+
+  return (
+    <div className={`p-4 rounded-xl border ${borderClr} bg-[var(--bg-tertiary)]/40 space-y-3`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[12px] font-bold text-[var(--text-primary)]">
+          <span>{icon}</span>
+          <span>{title}</span>
+          <span className={`px-2.5 py-0.5 rounded-full text-[9.5px] font-mono font-bold ${badgeBg}`}>
+            {items.length} applied · {groups.length} rule type{groups.length > 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+
+      {/* Parallel Grid Layout (No Long Scrolling) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {groups.map((group) => {
+          const groupKey = `${title}::${group.rule_code}::${group.field}`;
+          const isExpanded = !!expandedGroups[groupKey];
+          const displayItems = isExpanded ? group.items : group.items.slice(0, 3);
+          const hasMore = group.items.length > 3;
+
+          return (
+            <div key={groupKey} className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] shadow-sm space-y-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-[var(--border)] mb-2">
+                  <div className="font-mono text-[11px] font-bold text-[var(--text-primary)] truncate">
+                    {group.rule_code}
+                  </div>
+                  <span className="text-[9.5px] px-1.5 py-0.5 rounded font-mono font-bold bg-[var(--bg-tertiary)] text-[var(--text-secondary)] shrink-0 border border-[var(--border)]">
+                    {group.count} {group.count === 1 ? 'row' : 'rows'}
+                  </span>
+                </div>
+                {group.field && (
+                  <div className="text-[10px] text-[var(--text-tertiary)] font-mono mb-2">
+                    Field: <strong className="text-[var(--text-primary)]">{group.field}</strong>
+                  </div>
+                )}
+
+                <div className="space-y-1 font-mono text-[10px]">
+                  {displayItems.map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-1.5 rounded bg-[var(--bg-tertiary)]/60 gap-1.5">
+                      <span className="text-[var(--text-tertiary)] shrink-0 font-bold">Row #{item.row}</span>
+                      <span className="truncate text-right">
+                        <span className="line-through text-red-500 opacity-80">{String(item.old || '(empty)').slice(0, 14)}</span>
+                        <span className="text-[var(--text-tertiary)]"> → </span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">{String(item.new).slice(0, 16)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {hasMore && (
+                <button
+                  onClick={() => toggleGroup(groupKey)}
+                  className="w-full text-center text-[10px] font-bold text-violet-600 dark:text-violet-400 hover:underline pt-2 border-t border-[var(--border)] flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                >
+                  {isExpanded ? (
+                    <>Show less <ChevronUp className="w-3 h-3" /></>
+                  ) : (
+                    <>+ {group.items.length - 3} more affected rows <ChevronDown className="w-3 h-3" /></>
+                  )}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function Step6Cleanse() {
   const { state, dispatch } = useMigration();
   const navigate = useNavigate();
@@ -62,6 +182,8 @@ export function Step6Cleanse() {
   const [standaloneCsv, setStandaloneCsv] = React.useState<File | null>(null);
   const [standaloneValidationCsv, setStandaloneValidationCsv] = React.useState<File | null>(null);
   const [summary, setSummary] = React.useState<CleanserSummary | null>(null);
+  const [expandedGroups, setExpandedGroups] = React.useState<Record<string, boolean>>({});
+  const toggleGroup = (key: string) => setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   
   const csvInputRef = useRef<HTMLInputElement>(null);
   const valCsvInputRef = useRef<HTMLInputElement>(null);
@@ -288,82 +410,38 @@ export function Step6Cleanse() {
                   <StatBox value={summary.cleanser_fixes?.count ?? summary.cleanser_fixes?.total ?? summary.cleanser_fixes?.items?.length ?? 0} label="Cleanser Fixes" color="var(--color-success)" />
                 </StatsGrid>
 
-                {/* 1. Dynamic AI Fixes Breakdown */}
-                {(summary.dynamic_fixes?.items && summary.dynamic_fixes.items.length > 0) && (
-                  <div className="p-3 rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/20 dark:bg-violet-950/10 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-violet-700 dark:text-violet-300">
-                        <span>⚡ Dynamic AI Rule Fixes</span>
-                        <span className="px-1.5 py-0.2 rounded bg-violet-100 dark:bg-violet-900/40 text-[9px]">
-                          {summary.dynamic_fixes.items.length} applied
-                        </span>
-                      </div>
-                    </div>
-                    <div className="space-y-1 max-h-40 overflow-y-auto font-mono text-[10.5px]">
-                      {summary.dynamic_fixes.items.map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
-                          <span>Row #{item.row} · <strong className="text-violet-600 dark:text-violet-400">{item.field}</strong></span>
-                          <span className="text-[var(--text-tertiary)]">
-                            <span className="line-through text-red-500">{String(item.old || '(empty)')}</span> → <span className="text-emerald-600 dark:text-emerald-400 font-bold">{String(item.new)}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* 1. Dynamic AI Fixes Breakdown (Grouped & Parallel) */}
+                {renderGroupedFixesSection({
+                  title: 'Dynamic AI Rule Fixes',
+                  icon: '⚡',
+                  items: summary.dynamic_fixes?.items,
+                  badgeBg: 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300',
+                  borderClr: 'border-violet-200 dark:border-violet-900/50',
+                  expandedGroups,
+                  toggleGroup
+                })}
 
-                {/* 2. Validation Fixes Breakdown */}
-                {(summary.validation_fixes?.items && summary.validation_fixes.items.length > 0) && (
-                  <div className="p-3 rounded-xl border border-teal-200 dark:border-teal-900/50 bg-teal-50/20 dark:bg-teal-950/10 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-teal-700 dark:text-teal-300">
-                        <span>🛠️ Validation-Directed Fixes</span>
-                        <span className="px-1.5 py-0.2 rounded bg-teal-100 dark:bg-teal-900/40 text-[9px]">
-                          {summary.validation_fixes.items.length} applied
-                        </span>
-                      </div>
-                    </div>
-                    <div className="space-y-1 max-h-40 overflow-y-auto font-mono text-[10.5px]">
-                      {summary.validation_fixes.items.map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
-                          <span>Row #{item.row} · <strong className="text-teal-600 dark:text-teal-400">{item.field}</strong> ({item.rule_code})</span>
-                          <span className="text-[var(--text-tertiary)]">
-                            <span className="line-through text-red-500">{String(item.old || '(empty)')}</span> → <span className="text-emerald-600 dark:text-emerald-400 font-bold">{String(item.new)}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* 2. Validation Fixes Breakdown (Grouped & Parallel) */}
+                {renderGroupedFixesSection({
+                  title: 'Validation-Directed Fixes',
+                  icon: '🛠️',
+                  items: summary.validation_fixes?.items,
+                  badgeBg: 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300',
+                  borderClr: 'border-teal-200 dark:border-teal-900/50',
+                  expandedGroups,
+                  toggleGroup
+                })}
 
-                {/* 3. Generic Cleanser Normalization Breakdown */}
-                {(summary.cleanser_fixes?.items && summary.cleanser_fixes.items.length > 0) && (
-                  <div className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/20 dark:bg-emerald-950/10 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-emerald-700 dark:text-emerald-300">
-                        <span>🧹 Cleanser Normalizations</span>
-                        <span className="px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/40 text-[9px]">
-                          {summary.cleanser_fixes.items.length} applied
-                        </span>
-                      </div>
-                    </div>
-                    <div className="space-y-1 max-h-40 overflow-y-auto font-mono text-[10.5px]">
-                      {summary.cleanser_fixes.items.slice(0, 10).map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
-                          <span>Row #{item.row} · <strong className="text-emerald-600 dark:text-emerald-400">{item.field}</strong> ({item.rule_code})</span>
-                          <span className="text-[var(--text-tertiary)]">
-                            <span className="line-through text-red-500">{String(item.old || '(empty)')}</span> → <span className="text-emerald-600 dark:text-emerald-400 font-bold">{String(item.new)}</span>
-                          </span>
-                        </div>
-                      ))}
-                      {summary.cleanser_fixes.items.length > 10 && (
-                        <div className="text-[10px] text-[var(--text-tertiary)] text-center pt-1">
-                          +{summary.cleanser_fixes.items.length - 10} more cleanser fixes — download report CSV to view all
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {/* 3. Generic Cleanser Normalization Breakdown (Grouped & Parallel) */}
+                {renderGroupedFixesSection({
+                  title: 'Cleanser Normalizations',
+                  icon: '🧹',
+                  items: summary.cleanser_fixes?.items,
+                  badgeBg: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+                  borderClr: 'border-emerald-200 dark:border-emerald-900/50',
+                  expandedGroups,
+                  toggleGroup
+                })}
 
                 {/* 4. Priority Rule Overrides Section */}
                 {summary.priority_overrides?.standard_rules_skipped && summary.priority_overrides.standard_rules_skipped.length > 0 && (
