@@ -59,6 +59,7 @@ export interface MigrationState {
   harmonizationResult: any;
   isValidatedSaved: boolean;
   validationReport: any[];
+  dynamicRules: any[];
   isCleansedSaved: boolean;
 }
 
@@ -98,6 +99,7 @@ const defaultState: MigrationState = {
   harmonizationResult: null,
   isValidatedSaved: false,
   validationReport: [],
+  dynamicRules: [],
   isCleansedSaved: false,
 };
 

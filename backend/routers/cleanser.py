@@ -46,6 +46,10 @@ async def cleanser_flow(req: FlowRequest):
     res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
     validation_payload = res_val.data[0]["payload"] if res_val.data else []
 
+    # 4. Fetch Dynamic Rules from Supabase
+    res_rules = client.table("dynamic_rules").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+    dynamic_rules_payload = res_rules.data[0]["payload"] if res_rules.data else []
+
     with TemporaryDirectory(prefix="sap_cleanser_") as tmp_dir:
         tmp_path = Path(tmp_dir)
         input_csv_path = tmp_path / "harmonization.csv"
@@ -60,6 +64,9 @@ async def cleanser_flow(req: FlowRequest):
                 dataset_csv_path=input_csv_path,
                 validation_report_payload=validation_payload,
                 output_csv_path=output_csv_path,
+                project_id=req.project_id,
+                target_object=req.target_object,
+                dynamic_rules=dynamic_rules_payload,
             )
             cleaned_data = parse_cleaned_csv(output_csv_path)
         except Exception as exc:

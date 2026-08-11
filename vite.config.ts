@@ -6,6 +6,9 @@ import path from 'path'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    watch: {
+      ignored: ['**/backend/**']
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

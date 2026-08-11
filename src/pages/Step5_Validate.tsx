@@ -61,7 +61,7 @@ export function Step5Validate() {
   };
 
   const isRuleOverridden = (ruleTitle: string): boolean => {
-    const overriddenList = (state.stats?.overridden_rules || []) as string[];
+    const overriddenList = ((state.stats as any)?.overridden_rules || []) as string[];
     const titleLower = ruleTitle.toLowerCase();
     if (titleLower.includes('country') && overriddenList.includes('COUNTRY_ISO')) return true;
     if (titleLower.includes('currency') && overriddenList.includes('CURRENCY_ISO')) return true;
@@ -138,6 +138,7 @@ export function Step5Validate() {
         updates: {
           validated: data.validated,
           validationReport: data.report,
+          dynamicRules: data.dynamic_rules || [],
           stats: { ...state.stats, errors: data.stats.errors, warns: data.stats.warns, passed: data.stats.passed },
         },
       });
@@ -186,7 +187,8 @@ export function Step5Validate() {
         body: JSON.stringify({
           project_id: state.projectId,
           target_object: state.obj,
-          payload: errorReport
+          payload: errorReport,
+          dynamic_rules: state.dynamicRules || []
         })
       });
       

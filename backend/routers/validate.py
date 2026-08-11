@@ -9,6 +9,7 @@ from pydantic import BaseModel
 import pandas as pd
 
 from services.supabase_client import supabase_service
+from services.cleanser_dynamic_rules import save_rules, normalize_dynamic_rule
 from agents.validation_agent import ValidationAgent, gen_customer_rows, OBJS, RULES
 
 logger = logging.getLogger(__name__)
@@ -188,7 +189,14 @@ def validate_flow(req: ValidateFlowRequest):
             compiled = gen_res.get("rules", [])
             dynamic_rules.extend(compiled)
 
-        return agent.run_validation(req.target_object.upper(), harmonized_payload, dynamic_rules)
+        normalized_rules = [
+            normalize_dynamic_rule(r, project_id=req.project_id, target_object=req.target_object)
+            for r in dynamic_rules
+        ]
+
+        result = agent.run_validation(req.target_object.upper(), harmonized_payload, dynamic_rules)
+        result["dynamic_rules"] = normalized_rules
+        return result
 
     except HTTPException:
         raise
@@ -227,6 +235,7 @@ async def validate_upload(
         dynamic_rules.extend(compiled)
 
     result = agent.run_validation(obj, rows, dynamic_rules)
+    result["dynamic_rules"] = dynamic_rules
     result["headers"] = list(df.columns)
     result["rows"] = rows
     result["filename"] = file.filename
@@ -262,6 +271,7 @@ class SaveValidationRequest(BaseModel):
     project_id: str
     target_object: str
     payload: list
+    dynamic_rules: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/validate/save")
 def save_validation(req: SaveValidationRequest):
@@ -280,14 +290,29 @@ def save_validation(req: SaveValidationRequest):
             .eq("object_id", object_id) \
             .execute()
             
-        # Insert the new payload
+        # Insert the new validation payload
         res = client.table("validation_report").insert({
             "project_id": req.project_id,
             "object_id": object_id,
             "payload": req.payload
         }).execute()
+
+        # Save dynamic rules to database if provided
+        if req.dynamic_rules is not None:
+            client.table("dynamic_rules") \
+                .delete() \
+                .eq("project_id", req.project_id) \
+                .eq("object_id", object_id) \
+                .execute()
+
+            if req.dynamic_rules:
+                client.table("dynamic_rules").insert({
+                    "project_id": req.project_id,
+                    "object_id": object_id,
+                    "payload": req.dynamic_rules
+                }).execute()
         
-        return {"status": "success", "message": "Validation saved to database."}
+        return {"status": "success", "message": "Validation and dynamic rules saved to database."}
     except Exception as e:
         logger.error(f"Failed to save validation: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save validation: {str(e)}")

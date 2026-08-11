@@ -1,6 +1,7 @@
 -- ==========================================
 -- Drop existing tables to allow clean re-runs
 -- ==========================================
+DROP TABLE IF EXISTS dynamic_rules CASCADE;
 DROP TABLE IF EXISTS cleansed_data CASCADE;
 DROP TABLE IF EXISTS validation_report CASCADE;
 DROP TABLE IF EXISTS user_corrected_mappings CASCADE;
@@ -192,3 +193,20 @@ CREATE TABLE IF NOT EXISTS cleansed_data (
 ALTER TABLE cleansed_data ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Access for cleansed_data" ON cleansed_data
     FOR ALL USING (true) WITH CHECK (true);
+
+-- ==========================================
+-- STEP 7.5: Dynamic Rules Storage
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS dynamic_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    object_id UUID REFERENCES sap_objects(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE dynamic_rules ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access for dynamic_rules" ON dynamic_rules
+    FOR ALL USING (true) WITH CHECK (true);
+

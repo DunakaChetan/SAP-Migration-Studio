@@ -783,11 +783,33 @@ def _normalize_currency(value: Any) -> str | None:
 
 
 def _normalize_payment_term(value: Any) -> str | None:
-    key = _clean_key(value)
+    raw = _stringify(value).strip().upper()
+    if not raw:
+        return None
+    key = _clean_key(raw)
     if key in PAYMENT_TERM_MAP:
         return PAYMENT_TERM_MAP[key]
-    if key in {"NT30", "NT45"}:
-        return key
+    
+    # 1. Already valid SAP term format e.g. NT30, NT45, NT60, NT90
+    if re.fullmatch(r"NT\d{2}", raw):
+        return raw
+
+    # 2. NETXX or NXX e.g. NET30, NET 30, N30, NET90, N90
+    m_net = re.fullmatch(r"(?:NET|N)\s*(\d{1,2})", raw)
+    if m_net:
+        days = m_net.group(1).zfill(2)
+        return f"NT{days}"
+
+    # 3. Pure digits e.g. "90", "0090", "30", "45", "60"
+    digits = re.sub(r"\D", "", raw)
+    if digits:
+        try:
+            val_int = int(digits)
+            if 0 <= val_int <= 99:
+                return f"NT{str(val_int).zfill(2)}"
+        except ValueError:
+            pass
+
     return None
 
 
@@ -852,13 +874,17 @@ def _normalize_validation_issue(issue: dict[str, Any]) -> dict[str, Any]:
         or issue.get("Rule Code")
         or issue.get("rule")
     )
-    normalized["row"] = _parse_row_number(issue)
+    row_num = _parse_row_number(issue)
+    normalized["row"] = row_num
+    normalized["row_number"] = row_num
+    normalized["row_index"] = (row_num - 1) if (row_num is not None and row_num > 0) else 0
     normalized["field"] = _stringify(
         issue.get("field_name")
         or issue.get("Field Name")
         or issue.get("field")
         or issue.get("f")
     ).strip()
+    normalized["field_name"] = normalized["field"]
 
     if "rule_type" not in normalized and "Rule Type" in issue:
         normalized["rule_type"] = issue["Rule Type"]
@@ -1045,10 +1071,12 @@ def fix_payment_terms_format(
 ) -> None:
     field_name = issue["field"]
     idx = _row_index(issue["row"])
-    value = _get_value(df, idx, field_name).strip().upper()
-    if value in {"NT30", "NT45"}:
-        return
-    _warn_skipped(summary, rule_code, issue["row"], field_name, "payment term value does not match SAP NT30/NT45 format")
+    value = _get_value(df, idx, field_name)
+    normalized = _normalize_payment_term(value)
+    if normalized is not None:
+        _set_value(df, idx, field_name, normalized, summary, "validation", rule_code)
+    else:
+        _warn_skipped(summary, rule_code, issue["row"], field_name, f"payment term value '{value}' cannot be auto-formatted to SAP key")
 
 
 # =============================================================================
@@ -1324,7 +1352,7 @@ def build_cleanser_execution_plan(
         field_name = _dynamic_rule_field(rule)
         matching_groups = [
             group
-            for group in dynamic_issue_groups
+            for group in issue_groups
             if (rule_id and group["rule_code"] == rule_id)
             or (field_name != "GENERAL" and group["field_name"] == field_name)
         ]
@@ -1526,6 +1554,7 @@ def _safe_issue_for_prompt(issue: dict[str, Any]) -> dict[str, Any]:
         "rule_code",
         "rule_type",
         "row_number",
+        "row_index",
         "row",
         "field_name",
         "field",
@@ -1533,11 +1562,18 @@ def _safe_issue_for_prompt(issue: dict[str, Any]) -> dict[str, Any]:
         "reason",
         "invalid_value",
     )
-    return {
+    res = {
         key: issue[key]
         for key in allowed_keys
         if key in issue and issue[key] not in (None, "")
     }
+    if "row_index" not in res:
+        r = res.get("row_number") or res.get("row") or 1
+        try:
+            res["row_index"] = max(0, int(r) - 1)
+        except Exception:
+            res["row_index"] = 0
+    return res
 
 
 def _dynamic_rule_description(rule: dict[str, Any]) -> str:
@@ -1650,8 +1686,17 @@ def _build_dynamic_fixer_prompts(rule_item: dict[str, Any], issue_group: dict[st
 Return ONLY a JSON object with a string field named "code".
 The code must define exactly:
 def fix_dynamic_rule(df, issue_rows):
-The function must modify only issue_rows and the relevant field, preserve unrelated rows/columns, and return df.
-Do not import modules, access files, call shell commands, access network/database, or persist anything."""
+
+CRITICAL DATAFRAME INDEXING & FIELD INSTRUCTIONS:
+1. USE 0-INDEXED `row_index`: Each item in `issue_rows` has integer `row_index` (0-indexed position in `df`). Use `row_idx = int(issue.get('row_index', 0))` to index into `df.at[row_idx, col_name]`. (Do NOT use 1-indexed `row_number` directly as DataFrame index).
+2. TARGET COLUMN MATCHING: Find target column in `df.columns` by checking case-insensitively (e.g. if field is 'COUNTRY', check for 'COUNTRY' or 'LAND1' in `df.columns`).
+3. DATA-TYPE AWARE PADDING/EXTENSION:
+   - If the rule requires target length N (e.g. 4) and value contains text/letters (e.g. 'IN'): Right-pad/extend with '0' or 'X' to length N (e.g. 'IN' -> 'IN00' or 'INXX').
+   - If value is purely numeric (e.g. '12'): Left-pad with zeroes to length N (e.g. '0012').
+   - If empty: Fill valid default value matching required format.
+4. CONTRACT:
+   Must modify `df` at `row_idx` for target column for issue_rows and return `df`.
+   Do not import modules, access files, call shell commands, or access network/database."""
     user_prompt = json.dumps(payload, indent=2, sort_keys=True)
     return system_prompt, user_prompt
 
@@ -1996,17 +2041,22 @@ def apply_validation_fixes(
             summary.warnings.append(f"Skipped malformed validation issue: {issue}")
             continue
 
-        # Skip standard validation rules overridden by dynamic rules
+        # Skip standard validation rules overridden by dynamic rules ONLY if dynamic fixer applied fixes
         clean_rule = _clean_key(rule_code)
         clean_field = _field_key(field_name)
-        is_overridden = any(
+        executed_fields = {
+            _field_key(item.get("field", ""))
+            for item in summary.dynamic_fixer_execution.get("executed", [])
+            if item.get("fixes_applied", 0) > 0
+        }
+        is_overridden = clean_field in executed_fields and any(
             _clean_key(ov.get("rule_code")) == clean_rule and
             (ov.get("field_name") == "MULTIPLE" or _field_key(ov.get("field_name", "")) in (clean_field, "GENERAL"))
             for ov in overridden_rules
             if ov.get("rule_type") == "standard_validation"
         )
         if is_overridden:
-            summary.warnings.append(f"Skipped standard validation rule {rule_code} for field {field_name} (overridden by dynamic rule).")
+            summary.warnings.append(f"Skipped standard validation rule {rule_code} for field {field_name} (handled by active dynamic rule).")
             continue
 
         if row_number < 1 or row_number > len(df.index):
@@ -2029,15 +2079,24 @@ def apply_cleanser_rules(
     summary: CleaningSummary,
     execution_plan: dict[str, Any] | None = None,
 ) -> pd.DataFrame:
+    executed_fields = {
+        _field_key(item.get("field", ""))
+        for item in summary.dynamic_fixer_execution.get("executed", [])
+        if item.get("fixes_applied", 0) > 0
+    }
     suppressed_rules = set()
     if execution_plan:
         for item in execution_plan.get("standard_cleanser_rules", {}).get("items", []):
             if item.get("status") == "suppressed":
-                suppressed_rules.add(item.get("rule_code"))
+                rule_code = item.get("rule_code", "")
+                target_fields = {_field_key(f) for f in SEMANTIC_CLEANSER_RULE_FIELDS.get(rule_code, set())}
+                # Only suppress if dynamic fixer actually applied fixes for target field
+                if target_fields.intersection(executed_fields):
+                    suppressed_rules.add(rule_code)
 
     for rule_code, rule_func in CLEANSER_RULES:
         if rule_code in suppressed_rules:
-            summary.warnings.append(f"Skipped generic cleanser rule {rule_code} (suppressed by active dynamic rule).")
+            summary.warnings.append(f"Skipped generic cleanser rule {rule_code} (handled by active dynamic rule).")
             continue
         summary.add_rule(rule_code)
         rule_func(df, summary, rule_code)
@@ -2051,6 +2110,7 @@ def run_cleanser(
     output_csv_path: str | Path | None = None,
     project_id: str | None = None,
     target_object: str | None = None,
+    dynamic_rules: list[dict[str, Any]] | None = None,
     dynamic_rule_store_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if output_csv_path is None:
@@ -2074,6 +2134,7 @@ def run_cleanser(
         validation_report,
         project_id=project_id,
         target_object=target_object,
+        dynamic_rules=dynamic_rules,
         dynamic_rule_store_path=dynamic_rule_store_path,
     )
     summary.dynamic_fixer_generation = generate_dynamic_fixers_from_plan(summary.execution_plan)

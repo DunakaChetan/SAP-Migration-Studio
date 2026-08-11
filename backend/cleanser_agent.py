@@ -403,8 +403,34 @@ def _normalize_currency(value: Any) -> str | None:
 
 
 def _normalize_payment_term(value: Any) -> str | None:
-    key = _clean_key(value)
-    return PAYMENT_TERM_MAP.get(key)
+    raw = _stringify(value).strip().upper()
+    if not raw:
+        return None
+    key = _clean_key(raw)
+    if key in PAYMENT_TERM_MAP:
+        return PAYMENT_TERM_MAP[key]
+    
+    # 1. Already valid SAP term format e.g. NT30, NT45, NT60, NT90
+    if re.fullmatch(r"NT\d{2}", raw):
+        return raw
+
+    # 2. NETXX or NXX e.g. NET30, NET 30, N30, NET90, N90
+    m_net = re.fullmatch(r"(?:NET|N)\s*(\d{1,2})", raw)
+    if m_net:
+        days = m_net.group(1).zfill(2)
+        return f"NT{days}"
+
+    # 3. Pure digits e.g. "90", "0090", "30", "45", "60"
+    digits = re.sub(r"\D", "", raw)
+    if digits:
+        try:
+            val_int = int(digits)
+            if 0 <= val_int <= 99:
+                return f"NT{str(val_int).zfill(2)}"
+        except ValueError:
+            pass
+
+    return None
 
 
 def _normalize_material_type(value: Any) -> str:

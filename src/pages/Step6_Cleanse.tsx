@@ -9,14 +9,47 @@ import { ArrowLeft, ArrowRight, Sparkles, Download, Bot, Upload, Save } from 'lu
 
 type Source = 'harmonized' | 'upload';
 
+interface FixItem {
+  rule_code: string;
+  row: number;
+  field: string;
+  old: string;
+  new: string;
+}
+
 interface CleanserSummary {
+  overall_status?: string;
   rows_loaded?: number;
   rows_exported?: number;
   rows_modified_count?: number;
-  validation_fixes?: { count?: number; items?: any[] };
-  cleanser_fixes?: { count?: number; items?: any[] };
-  warnings?: string[];
+  rows_modified?: number[];
+  dynamic_fixes?: { count?: number; items?: FixItem[] };
+  validation_fixes?: { total?: number; count?: number; items?: FixItem[] };
+  cleanser_fixes?: { total?: number; count?: number; items?: FixItem[] };
+  priority_overrides?: {
+    dynamic_overrides_standard_validation?: string[];
+    dynamic_suppressed_cleanser?: string[];
+    standard_rules_skipped?: string[];
+    satisfied_dynamic_rules?: string[];
+  };
+  warnings?: any;
+  failures?: { count?: number; items?: any[] };
   rules_applied?: string[];
+}
+
+function exportFixesReport(summary: CleanserSummary): string {
+  const rows = ['Phase,Rule Code,Row Number,Field Name,Original Value,Cleansed Value'];
+  const addItems = (phase: string, items?: FixItem[]) => {
+    (items || []).forEach((item) => {
+      const cleanOld = String(item.old ?? '').replace(/"/g, "'");
+      const cleanNew = String(item.new ?? '').replace(/"/g, "'");
+      rows.push(`"${phase}","${item.rule_code}",${item.row},"${item.field}","${cleanOld}","${cleanNew}"`);
+    });
+  };
+  addItems('Dynamic AI Rule', summary.dynamic_fixes?.items);
+  addItems('Validation Fix', summary.validation_fixes?.items);
+  addItems('Cleanser Normalization', summary.cleanser_fixes?.items);
+  return rows.join('\n');
 }
 
 export function Step6Cleanse() {
@@ -74,7 +107,7 @@ export function Step6Cleanse() {
       
       setSummary(data.summary || null);
       
-      const fixesCount = (data.summary?.validation_fixes?.count || 0) + (data.summary?.cleanser_fixes?.count || 0);
+      const fixesCount = (data.summary?.dynamic_fixes?.count || 0) + (data.summary?.validation_fixes?.count || 0) + (data.summary?.cleanser_fixes?.count || 0);
 
       dispatch({
         type: 'BATCH_UPDATE',
@@ -231,26 +264,141 @@ export function Step6Cleanse() {
 
           {summary && (
             <Card className="mb-4">
-              <CardHeader title="Cleaning Summary" />
+              <CardHeader
+                title="Cleansing Summary Report"
+                subtitle={`Overall Status: ${summary.overall_status || 'SUCCESS'} · ${summary.rows_modified_count ?? 0} rows modified out of ${summary.rows_loaded ?? 0}`}
+                icon={<Sparkles className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
+              >
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<Download className="w-3 h-3" />}
+                  onClick={() => dl(exportFixesReport(summary), 'cleansing_fixes_report.csv', 'text/csv')}
+                >
+                  Export Fixes Report
+                </Button>
+              </CardHeader>
               <CardBody className="space-y-4">
+                {/* Stats Grid */}
                 <StatsGrid>
                   <StatBox value={summary.rows_loaded ?? 0} label="Rows Loaded" color="var(--color-primary-500)" />
                   <StatBox value={summary.rows_modified_count ?? 0} label="Rows Modified" color="var(--color-warning)" />
-                  <StatBox value={summary.validation_fixes?.count ?? 0} label="Validation Fixes" color="var(--color-teal)" />
-                  <StatBox value={summary.cleanser_fixes?.count ?? 0} label="Cleanser Fixes" color="var(--color-success)" />
+                  <StatBox value={summary.dynamic_fixes?.count ?? summary.dynamic_fixes?.items?.length ?? 0} label="Dynamic AI Fixes" color="var(--color-violet)" />
+                  <StatBox value={summary.validation_fixes?.count ?? summary.validation_fixes?.total ?? summary.validation_fixes?.items?.length ?? 0} label="Validation Fixes" color="var(--color-teal)" />
+                  <StatBox value={summary.cleanser_fixes?.count ?? summary.cleanser_fixes?.total ?? summary.cleanser_fixes?.items?.length ?? 0} label="Cleanser Fixes" color="var(--color-success)" />
                 </StatsGrid>
+
+                {/* 1. Dynamic AI Fixes Breakdown */}
+                {(summary.dynamic_fixes?.items && summary.dynamic_fixes.items.length > 0) && (
+                  <div className="p-3 rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/20 dark:bg-violet-950/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-violet-700 dark:text-violet-300">
+                        <span>⚡ Dynamic AI Rule Fixes</span>
+                        <span className="px-1.5 py-0.2 rounded bg-violet-100 dark:bg-violet-900/40 text-[9px]">
+                          {summary.dynamic_fixes.items.length} applied
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-1 max-h-40 overflow-y-auto font-mono text-[10.5px]">
+                      {summary.dynamic_fixes.items.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
+                          <span>Row #{item.row} · <strong className="text-violet-600 dark:text-violet-400">{item.field}</strong></span>
+                          <span className="text-[var(--text-tertiary)]">
+                            <span className="line-through text-red-500">{String(item.old || '(empty)')}</span> → <span className="text-emerald-600 dark:text-emerald-400 font-bold">{String(item.new)}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Validation Fixes Breakdown */}
+                {(summary.validation_fixes?.items && summary.validation_fixes.items.length > 0) && (
+                  <div className="p-3 rounded-xl border border-teal-200 dark:border-teal-900/50 bg-teal-50/20 dark:bg-teal-950/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-teal-700 dark:text-teal-300">
+                        <span>🛠️ Validation-Directed Fixes</span>
+                        <span className="px-1.5 py-0.2 rounded bg-teal-100 dark:bg-teal-900/40 text-[9px]">
+                          {summary.validation_fixes.items.length} applied
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-1 max-h-40 overflow-y-auto font-mono text-[10.5px]">
+                      {summary.validation_fixes.items.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
+                          <span>Row #{item.row} · <strong className="text-teal-600 dark:text-teal-400">{item.field}</strong> ({item.rule_code})</span>
+                          <span className="text-[var(--text-tertiary)]">
+                            <span className="line-through text-red-500">{String(item.old || '(empty)')}</span> → <span className="text-emerald-600 dark:text-emerald-400 font-bold">{String(item.new)}</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Generic Cleanser Normalization Breakdown */}
+                {(summary.cleanser_fixes?.items && summary.cleanser_fixes.items.length > 0) && (
+                  <div className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/20 dark:bg-emerald-950/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[11.5px] font-bold text-emerald-700 dark:text-emerald-300">
+                        <span>🧹 Cleanser Normalizations</span>
+                        <span className="px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/40 text-[9px]">
+                          {summary.cleanser_fixes.items.length} applied
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-1 max-h-40 overflow-y-auto font-mono text-[10.5px]">
+                      {summary.cleanser_fixes.items.slice(0, 10).map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
+                          <span>Row #{item.row} · <strong className="text-emerald-600 dark:text-emerald-400">{item.field}</strong> ({item.rule_code})</span>
+                          <span className="text-[var(--text-tertiary)]">
+                            <span className="line-through text-red-500">{String(item.old || '(empty)')}</span> → <span className="text-emerald-600 dark:text-emerald-400 font-bold">{String(item.new)}</span>
+                          </span>
+                        </div>
+                      ))}
+                      {summary.cleanser_fixes.items.length > 10 && (
+                        <div className="text-[10px] text-[var(--text-tertiary)] text-center pt-1">
+                          +{summary.cleanser_fixes.items.length - 10} more cleanser fixes — download report CSV to view all
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Priority Rule Overrides Section */}
+                {summary.priority_overrides?.standard_rules_skipped && summary.priority_overrides.standard_rules_skipped.length > 0 && (
+                  <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 space-y-1.5">
+                    <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+                      <span>⚡ Priority Rule Overrides</span>
+                      <span className="text-[9.5px] font-normal text-[var(--text-tertiary)]">
+                        (Standard rules skipped because dynamic rules took precedence)
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {summary.priority_overrides.standard_rules_skipped.map((r, i) => (
+                        <span key={i} className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 font-mono text-[10px] font-semibold">
+                          Skipped {r}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Warnings / Manual Review Items */}
                 <div>
-                  <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-2">Warnings ({summary.warnings?.length ?? 0})</div>
-                  {summary.warnings?.length ? (
+                  <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-2">
+                    Manual Review Items / Warnings ({(Array.isArray(summary.warnings) ? summary.warnings : summary.warnings?.items)?.length ?? 0})
+                  </div>
+                  {(Array.isArray(summary.warnings) ? summary.warnings : summary.warnings?.items)?.length ? (
                     <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] p-3 space-y-1.5 max-h-44 overflow-y-auto">
-                      {summary.warnings.map((warning, i) => (
-                        <div key={i} className="text-[11px] text-amber-600 dark:text-amber-400">
+                      {(Array.isArray(summary.warnings) ? summary.warnings : summary.warnings?.items || []).map((warning: string, i: number) => (
+                        <div key={i} className="text-[11px] text-amber-600 dark:text-amber-400 font-mono">
                           {warning}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <InfoBox variant="success">No warnings returned by the standalone cleanser.</InfoBox>
+                    <InfoBox variant="success">All rules evaluated cleanly without manual review warnings.</InfoBox>
                   )}
                 </div>
               </CardBody>
