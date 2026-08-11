@@ -38,6 +38,7 @@ interface HarmonizationResult {
   fix_log: string[];
   final_table: Record<string, any>[];
   columns: string[];
+  session_id?: string;
 }
 
 /* ─── Drop Zone Component ─── */
