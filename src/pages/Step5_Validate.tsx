@@ -8,7 +8,7 @@ import { dl } from '@/lib/utils';
 import { PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, Badge, StatBox, StatsGrid, EmptyState } from '@/components/shared';
 import { ArrowLeft, ArrowRight, Search, Download, Upload, ListChecks, Save, Sparkles, Plus, Trash2, Zap, FileText, Pencil, Check, X } from 'lucide-react';
 
-const VALIDATE_API = 'http://localhost:8000';
+const VALIDATE_API = import.meta.env.VITE_BACKEND_URL;
 
 interface RuleFailure {
   idx: number;

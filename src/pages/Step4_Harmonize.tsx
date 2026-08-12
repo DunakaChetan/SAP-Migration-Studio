@@ -628,7 +628,7 @@ export function Step4Harmonize() {
 
   function downloadResult() {
     if (!result?.session_id) return;
-    window.open(`/api/sap/harmonize/download/${result.session_id}`, '_blank');
+    window.open(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/download/${result.session_id}`, '_blank');
   }
 
   return (
