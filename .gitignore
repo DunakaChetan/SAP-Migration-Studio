@@ -33,3 +33,6 @@ __pycache__/
 **/__pycache__/
 *.pyo
 *.pyd
+
+# Allow frontend .env to be tracked
+!/.env
