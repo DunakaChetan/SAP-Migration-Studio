@@ -154,7 +154,7 @@ export function Step7Transform() {
       <GridCol span={3}>
         <Card>
           <CardBody className="p-3 space-y-4">
-        {[['1. Apply mapping','src→sap field names'],['2. Run transforms','trim/pad/country etc'],['3. Org defaults','BUKRS/VKORG/WERKS'],['4. SAP defaults','VTWEG=10 SPART=00'],['5. AI custom rules','Pattern derivations'],['6. Final format','Length & type pass'],['7. DMC-ready flag','Mark for export']].map(([n,d]) => (
+        {[['1. Org defaults','BUKRS/VKORG/WERKS'],['2. SAP defaults','VTWEG=10 SPART=00'],['3. AI custom rules','Pattern derivations'],['4. DMC-ready flag','Mark for export']].map(([n,d]) => (
           <div key={n} className="flex gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
             <span className="font-mono text-[10px] text-primary-500 shrink-0 mt-0.5">{n.split('.')[0]}.</span>
             <div>
