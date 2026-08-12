@@ -50,7 +50,7 @@ export function Step2AIMapping() {
           }
           
           try {
-            const schemaRes = await fetch('/api/sap/extract/fetch_schema', {
+            const schemaRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/fetch_schema`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -121,7 +121,7 @@ export function Step2AIMapping() {
 
     try {
       const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
-      const res = await fetch('/api/sap/map/save_all', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/map/save_all`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -154,7 +154,7 @@ export function Step2AIMapping() {
 
     try {
       const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
-      const res = await fetch(`/api/sap/map/history?project_id=${state.projectId}&source_system=${state.src}&target_object=${objName}`);
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/map/history?project_id=${state.projectId}&source_system=${state.src}&target_object=${objName}`);
       if (!res.ok) throw new Error('Failed to fetch history');
 
       const data = await res.json();

@@ -25,11 +25,11 @@ export function InsertMapping() {
   useEffect(() => {
     async function loadMasterData() {
       try {
-        const sysRes = await fetch('/api/sap/systems');
+        const sysRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/systems`);
         const sysData = await sysRes.json();
         setSystems(sysData.systems || []);
 
-        const objRes = await fetch('/api/sap/objects');
+        const objRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/objects`);
         const objData = await objRes.json();
         setObjects(objData.objects || []);
       } catch (err) {
@@ -48,7 +48,7 @@ export function InsertMapping() {
     const obj = objects.find(o => o.id === selectedObject);
     if (obj) {
       setObjectName(obj.name);
-      fetch(`/api/sap/schema?object_name=${obj.name}`)
+      fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/schema?object_name=${obj.name}`)
         .then(res => res.json())
         .then(data => {
           setSapFields(data.fields || []);
@@ -83,7 +83,7 @@ export function InsertMapping() {
 
     showLoad('Saving Source Fields...', 'Inserting into database');
     try {
-      const res = await fetch('/api/sap/source_fields', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/source_fields`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

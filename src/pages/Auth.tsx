@@ -11,7 +11,7 @@ export function Auth() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
+    const endpoint = isLogin ? `${import.meta.env.VITE_BACKEND_URL}/api/auth/login` : `${import.meta.env.VITE_BACKEND_URL}/api/auth/signup`;
     
     try {
       const res = await fetch(endpoint, {

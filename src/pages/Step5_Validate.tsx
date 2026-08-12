@@ -206,7 +206,7 @@ export function Step5Validate() {
         });
       });
 
-      const res = await fetch('/api/validate/save', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

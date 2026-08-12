@@ -181,10 +181,10 @@ export function Step6Cleanse() {
   const [source, setSource] = React.useState<Source>('harmonized');
   const [standaloneCsv, setStandaloneCsv] = React.useState<File | null>(null);
   const [standaloneValidationCsv, setStandaloneValidationCsv] = React.useState<File | null>(null);
-  const [summary, setSummary] = React.useState<CleanserSummary | null>(null);
   const [expandedGroups, setExpandedGroups] = React.useState<Record<string, boolean>>({});
   const toggleGroup = (key: string) => setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   
+  const summary = state.cleansingSummary as CleanserSummary | null;
   const csvInputRef = useRef<HTMLInputElement>(null);
   const valCsvInputRef = useRef<HTMLInputElement>(null);
 
@@ -200,7 +200,7 @@ export function Step6Cleanse() {
         if (!state.projectId || !state.obj) {
           throw new Error("Project or Object not selected.");
         }
-        res = await fetch('/api/sap/cleanser/flow', {
+        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/cleanser/flow`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -218,7 +218,7 @@ export function Step6Cleanse() {
           formData.append('validation_report_csv', standaloneValidationCsv);
         }
 
-        res = await fetch('/api/sap/cleanser/upload-csv', {
+        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/cleanser/upload-csv`, {
           method: 'POST',
           body: formData,
         });
@@ -227,14 +227,13 @@ export function Step6Cleanse() {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.detail || 'Cleanser failed');
       
-      setSummary(data.summary || null);
-      
       const fixesCount = (data.summary?.dynamic_fixes?.count || 0) + (data.summary?.validation_fixes?.count || 0) + (data.summary?.cleanser_fixes?.count || 0);
 
       dispatch({
         type: 'BATCH_UPDATE',
         updates: {
           cleaned: data.cleaned,
+          cleansingSummary: data.summary || null,
           isCleansedSaved: false,
           stats: { ...state.stats, fixes: fixesCount },
         },
@@ -256,7 +255,7 @@ export function Step6Cleanse() {
     
     showLoad('Saving data...', 'Persisting cleansed records to database');
     try {
-      const res = await fetch('/api/sap/cleanser/save', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/cleanser/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -316,7 +315,7 @@ export function Step6Cleanse() {
 
           <div className="flex items-center gap-2 mt-4">
             <button
-              onClick={() => { setSource('harmonized'); dispatch({ type: 'BATCH_UPDATE', updates: { cleaned: [], isCleansedSaved: false } }); setSummary(null); }}
+              onClick={() => { setSource('harmonized'); dispatch({ type: 'BATCH_UPDATE', updates: { cleaned: [], isCleansedSaved: false, cleansingSummary: null } }); }}
               className={`
                 px-3.5 py-1.5 rounded-lg text-[11.5px] font-semibold transition-all duration-200 border
                 ${source === 'harmonized'
@@ -327,7 +326,7 @@ export function Step6Cleanse() {
               ⚡ Flow
             </button>
             <button
-              onClick={() => { setSource('upload'); dispatch({ type: 'BATCH_UPDATE', updates: { cleaned: [], isCleansedSaved: false } }); setSummary(null); }}
+              onClick={() => { setSource('upload'); dispatch({ type: 'BATCH_UPDATE', updates: { cleaned: [], isCleansedSaved: false, cleansingSummary: null } }); }}
               className={`
                 px-3.5 py-1.5 rounded-lg text-[11.5px] font-semibold transition-all duration-200 border
                 ${source === 'upload'

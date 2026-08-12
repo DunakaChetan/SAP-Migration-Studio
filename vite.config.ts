@@ -9,12 +9,7 @@ export default defineConfig({
     watch: {
       ignored: ['**/backend/**']
     },
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
-      }
-    }
+    // Proxy removed since we're using VITE_BACKEND_URL
   },
   resolve: {
     alias: {

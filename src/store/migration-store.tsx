@@ -61,6 +61,7 @@ export interface MigrationState {
   validationReport: any[];
   dynamicRules: any[];
   isCleansedSaved: boolean;
+  cleansingSummary: any;
 }
 
 const defaultState: MigrationState = {
@@ -101,6 +102,7 @@ const defaultState: MigrationState = {
   validationReport: [],
   dynamicRules: [],
   isCleansedSaved: false,
+  cleansingSummary: null,
 };
 
 const getInitialState = (): MigrationState => {

@@ -59,7 +59,7 @@ export function Step1SourceData() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch(`/api/sap/projects/list`);
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/list`);
       if (res.ok) {
         const data = await res.json();
         setProjects(data);
@@ -73,7 +73,7 @@ export function Step1SourceData() {
     if (!newProjectName.trim()) return;
     setIsCreating(true);
     try {
-      const res = await fetch('/api/sap/projects/create', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newProjectName, description: newProjectDesc })
@@ -107,7 +107,7 @@ export function Step1SourceData() {
     formData.append('file', file);
 
     try {
-      const res = await fetch('/api/sap/extract/upload', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, {
         method: 'POST',
         body: formData
       });
@@ -143,7 +143,7 @@ export function Step1SourceData() {
       const formData = new FormData();
       formData.append('file', file);
       
-      const res = await fetch('/api/sap/extract/upload', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, {
         method: 'POST',
         body: formData
       });
@@ -168,7 +168,7 @@ export function Step1SourceData() {
   const handleUpdateProject = async () => {
     if (!state.projectId || !editProjectName.trim()) return;
     try {
-      const res = await fetch(`/api/sap/projects/update/${state.projectId}`, {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/update/${state.projectId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editProjectName, description: editProjectDesc })
@@ -204,7 +204,7 @@ export function Step1SourceData() {
   const handleDeleteProject = async () => {
     if (!state.projectId) return;
     try {
-      const res = await fetch(`/api/sap/projects/delete/${state.projectId}`, {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/delete/${state.projectId}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -237,7 +237,7 @@ export function Step1SourceData() {
     toast('Testing connection to SAP...', 'info');
     
     try {
-      const res = await fetch('/api/sap/connection/test_connection', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/connection/test_connection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -273,7 +273,7 @@ export function Step1SourceData() {
       toast(`Fetching live ${state.obj || 'CUSTOMER'} data from SAP...`, 'info');
       
       try {
-        const res = await fetch('/api/sap/extract/fetch_sample', {
+        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/fetch_sample`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

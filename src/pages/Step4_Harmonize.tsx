@@ -468,7 +468,7 @@ export function Step4Harmonize() {
     
     showLoad('Saving data...', 'Persisting harmonized records to database');
     try {
-      const res = await fetch('/api/sap/harmonize/save', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -545,7 +545,7 @@ export function Step4Harmonize() {
         if (!state.projectId) {
           throw new Error("No Project ID found. Please extract and save data in Step 3 first.");
         }
-        res = await fetch('/api/sap/harmonize/flow', { 
+        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/flow`, { 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -580,7 +580,7 @@ export function Step4Harmonize() {
         formData.append('secondary_file', secondaryFile!.file);
         formData.append('secondary_mapping_file', secondaryMappingFile!.file);
 
-        res = await fetch('/api/sap/harmonize/multi-flow', { method: 'POST', body: formData });
+        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/multi-flow`, { method: 'POST', body: formData });
       } else {
         // single mode
         const formData = new FormData();
@@ -598,7 +598,7 @@ export function Step4Harmonize() {
 
         if (primaryMappingFile) formData.append('primary_mapping_file', primaryMappingFile.file);
 
-        res = await fetch('/api/sap/harmonize', { method: 'POST', body: formData });
+        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize`, { method: 'POST', body: formData });
       }
 
       if (!res.ok) {

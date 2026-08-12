@@ -6,6 +6,14 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Patch httpx to disable HTTP/2 to prevent "Server disconnected" errors with Supabase
+import httpx
+original_init = httpx.Client.__init__
+def new_init(self, *args, **kwargs):
+    kwargs['http2'] = False
+    original_init(self, *args, **kwargs)
+httpx.Client.__init__ = new_init
+
 class SupabaseServiceError(Exception):
     pass
 

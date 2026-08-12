@@ -45,7 +45,7 @@ export function Step3Extract() {
 
     showLoad('Saving data...', 'Persisting extracted records to database');
     try {
-      const res = await fetch('/api/sap/extract/save', {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -78,7 +78,7 @@ export function Step3Extract() {
 
       try {
         const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
-        const res = await fetch('/api/sap/extract/execute', {
+        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/execute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -118,7 +118,7 @@ export function Step3Extract() {
 
       try {
         const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
-        const res = await fetch('/api/sap/extract/execute_file', {
+        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/execute_file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -250,7 +250,7 @@ export function Step3Extract() {
   }, [state.aiReport, state.extracted]);
 
   const reportMetrics = useMemo(() => {
-    const aiReportObj = state.aiReport?.ai_report || state.aiReport?.report?.ai_report || (typeof state.aiReport === 'object' && !state.aiReport.eda_stats ? state.aiReport : {});
+    const aiReportObj = state.aiReport?.ai_report || state.aiReport?.report?.ai_report || (typeof state.aiReport === 'object' && state.aiReport !== null && !state.aiReport.eda_stats ? state.aiReport : {});
     const healthy = edaStats.filter((f: any) => (f.null_percentage ?? 0) <= 10).length;
     const warning = edaStats.filter((f: any) => (f.null_percentage ?? 0) > 10 && (f.null_percentage ?? 0) <= 50).length;
     const critical = edaStats.filter((f: any) => (f.null_percentage ?? 0) > 50).length;
