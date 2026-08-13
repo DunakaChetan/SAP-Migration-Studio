@@ -2021,10 +2021,13 @@ def apply_validation_fixes(
     validation_report: dict[str, Any],
     summary: CleaningSummary,
     execution_plan: dict[str, Any] | None = None,
+    excluded_validation_rules: list[str] | None = None,
 ) -> pd.DataFrame:
     overridden_rules = []
     if execution_plan:
         overridden_rules = execution_plan.get("overridden_rules", [])
+
+    excluded_set = {_clean_key(r) for r in excluded_validation_rules} if excluded_validation_rules else set()
 
     for issue in validation_report.get("issues", []):
         rule_code = issue.get("rule_code")
@@ -2039,6 +2042,10 @@ def apply_validation_fixes(
 
         if not isinstance(rule_code, str) or not rule_code or not isinstance(row_number, int) or not isinstance(field_name, str) or not field_name:
             summary.warnings.append(f"Skipped malformed validation issue: {issue}")
+            continue
+
+        if _clean_key(rule_code) in excluded_set:
+            summary.warnings.append(f"Skipped validation rule {rule_code} for field {field_name} (excluded by user).")
             continue
 
         # Skip standard validation rules overridden by dynamic rules ONLY if dynamic fixer applied fixes
@@ -2078,7 +2085,21 @@ def apply_cleanser_rules(
     df: pd.DataFrame,
     summary: CleaningSummary,
     execution_plan: dict[str, Any] | None = None,
+    standard_rules_config: list[dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
+    disabled_rules = set()
+    rule_param_overrides = {}
+    if standard_rules_config:
+        for rule_cfg in standard_rules_config:
+            if isinstance(rule_cfg, dict):
+                code = rule_cfg.get("code") or rule_cfg.get("rule_code")
+                enabled = rule_cfg.get("enabled", True)
+                if code:
+                    if not enabled:
+                        disabled_rules.add(code)
+                    if "params" in rule_cfg and isinstance(rule_cfg["params"], dict):
+                        rule_param_overrides[code] = rule_cfg["params"]
+
     executed_fields = {
         _field_key(item.get("field", ""))
         for item in summary.dynamic_fixer_execution.get("executed", [])
@@ -2095,11 +2116,21 @@ def apply_cleanser_rules(
                     suppressed_rules.add(rule_code)
 
     for rule_code, rule_func in CLEANSER_RULES:
+        if rule_code in disabled_rules:
+            summary.warnings.append(f"Skipped standard cleanser rule {rule_code} (disabled by user).")
+            continue
         if rule_code in suppressed_rules:
             summary.warnings.append(f"Skipped generic cleanser rule {rule_code} (handled by active dynamic rule).")
             continue
         summary.add_rule(rule_code)
-        rule_func(df, summary, rule_code)
+        params = rule_param_overrides.get(rule_code)
+        if params:
+            try:
+                rule_func(df, summary, rule_code, params=params)
+            except TypeError:
+                rule_func(df, summary, rule_code)
+        else:
+            rule_func(df, summary, rule_code)
     return df
 
 
@@ -2112,6 +2143,8 @@ def run_cleanser(
     target_object: str | None = None,
     dynamic_rules: list[dict[str, Any]] | None = None,
     dynamic_rule_store_path: str | Path | None = None,
+    standard_rules_config: list[dict[str, Any]] | None = None,
+    excluded_validation_rules: list[str] | None = None,
 ) -> dict[str, Any]:
     if output_csv_path is None:
         raise ValueError("output_csv_path is required.")
@@ -2143,11 +2176,11 @@ def run_cleanser(
     # 1. Execute dynamic fixers FIRST
     df = execute_dynamic_fixers(df, summary.dynamic_fixer_generation, summary.execution_plan, summary)
 
-    # 2. Standard validation fixes (skipping overridden rules)
-    apply_validation_fixes(df, validation_report, summary, summary.execution_plan)
+    # 2. Standard validation fixes (skipping overridden rules or user-excluded rules)
+    apply_validation_fixes(df, validation_report, summary, summary.execution_plan, excluded_validation_rules=excluded_validation_rules)
 
-    # 3. Standard cleanser rules (skipping suppressed rules)
-    apply_cleanser_rules(df, summary, summary.execution_plan)
+    # 3. Standard cleanser rules (skipping suppressed or user-disabled rules)
+    apply_cleanser_rules(df, summary, summary.execution_plan, standard_rules_config=standard_rules_config)
 
     export_cleaned_csv(df, output_csv_path)
 

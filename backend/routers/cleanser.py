@@ -5,6 +5,7 @@ import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from routers.validate import generate_dynamic_rules, GenerateRulesRequest
 from agents.cleanser_agent import run_cleanser
 from services.supabase_client import supabase_service
 
@@ -13,6 +14,9 @@ router = APIRouter()
 class FlowRequest(BaseModel):
     project_id: str
     target_object: str
+    custom_prompts: list[str] | None = None
+    standard_rules_config: list[dict] | None = None
+    excluded_validation_rules: list[str] | None = None
 
 class SaveRequest(BaseModel):
     project_id: str
@@ -24,6 +28,33 @@ def parse_cleaned_csv(csv_path: Path):
     # Convert all possible NaN to empty string just to be safe
     df = df.fillna("")
     return df.to_dict(orient="records")
+
+@router.get("/validation-rules")
+async def get_validation_report_rules(project_id: str, target_object: str):
+    client = supabase_service.get_client()
+    res_obj = client.table("sap_objects").select("id").ilike("name", target_object).execute()
+    if not res_obj.data:
+        return {"rules": []}
+    object_id = res_obj.data[0]["id"]
+    res_val = client.table("validation_report").select("payload").eq("project_id", project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+    validation_payload = res_val.data[0]["payload"] if res_val.data else []
+
+    rules_map = {}
+    issues = validation_payload.get("issues", []) if isinstance(validation_payload, dict) else (validation_payload if isinstance(validation_payload, list) else [])
+    for issue in issues:
+        if isinstance(issue, dict):
+            rule_code = issue.get("rule_code") or issue.get("rule") or "UNKNOWN"
+            if rule_code not in rules_map:
+                rules_map[rule_code] = {
+                    "rule_code": rule_code,
+                    "field": issue.get("field") or "MULTIPLE",
+                    "message": issue.get("message") or issue.get("reason") or "Validation issue",
+                    "count": 0,
+                    "enabled": True,
+                }
+            rules_map[rule_code]["count"] += 1
+
+    return {"rules": list(rules_map.values())}
 
 @router.post("/flow")
 async def cleanser_flow(req: FlowRequest):
@@ -41,14 +72,26 @@ async def cleanser_flow(req: FlowRequest):
         raise HTTPException(status_code=400, detail="No harmonized data found for this project/object")
     harmonized_data = res_harm.data[0]["payload"]
     
-    # 3. Fetch complete Validation Report payload. It contains issue metadata
-    # beyond row/rule/field and must not be reduced before Cleanser receives it.
+    # 3. Fetch complete Validation Report payload.
     res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
     validation_payload = res_val.data[0]["payload"] if res_val.data else []
 
     # 4. Fetch Dynamic Rules from Supabase
     res_rules = client.table("dynamic_rules").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
-    dynamic_rules_payload = res_rules.data[0]["payload"] if res_rules.data else []
+    all_dynamic_rules = list(res_rules.data[0]["payload"]) if res_rules.data else []
+
+    # 5. Compile custom AI dynamic prompts if provided
+    if req.custom_prompts:
+        actual_cols = list(harmonized_data[0].keys()) if harmonized_data and isinstance(harmonized_data[0], dict) else None
+        gen_res = generate_dynamic_rules(
+            GenerateRulesRequest(
+                prompts=req.custom_prompts,
+                target_object=req.target_object,
+                actual_columns=actual_cols,
+            )
+        )
+        compiled = gen_res.get("rules", [])
+        all_dynamic_rules.extend(compiled)
 
     with TemporaryDirectory(prefix="sap_cleanser_") as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -66,7 +109,9 @@ async def cleanser_flow(req: FlowRequest):
                 output_csv_path=output_csv_path,
                 project_id=req.project_id,
                 target_object=req.target_object,
-                dynamic_rules=dynamic_rules_payload,
+                dynamic_rules=all_dynamic_rules,
+                standard_rules_config=req.standard_rules_config,
+                excluded_validation_rules=req.excluded_validation_rules,
             )
             cleaned_data = parse_cleaned_csv(output_csv_path)
         except Exception as exc:
