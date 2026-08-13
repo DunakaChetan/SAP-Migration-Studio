@@ -86,6 +86,30 @@ COUNTRY_MAP: Dict[str, str] = {
     "VIRGIN ISLANDS (U.S.)": "VI", "WESTERN SAHARA": "EH", "YEMEN": "YE", "ZAMBIA": "ZM", "ZIMBABWE": "ZW",
 }
 
+COUNTRY_MAP_3: Dict[str, str] = {
+    "AFGHANISTAN": "AFG", "ALBANIA": "ALB", "ALGERIA": "DZA", "AMERICAN SAMOA": "ASM", "ANDORRA": "AND", "ANGOLA": "AGO",
+    "ARGENTINA": "ARG", "ARMENIA": "ARM", "ARUBA": "ABW", "AUSTRALIA": "AUS", "AUSTRIA": "AUT", "AZERBAIJAN": "AZE",
+    "BAHAMAS": "BHS", "BAHRAIN": "BHR", "BANGLADESH": "BGD", "BARBADOS": "BRB", "BELARUS": "BLR", "BELGIUM": "BEL",
+    "BERMUDA": "BMU", "BHUTAN": "BTN", "BOLIVIA": "BOL", "BRAZIL": "BRA", "BULGARIA": "BGR", "CAMBODIA": "KHM",
+    "CANADA": "CAN", "CHILE": "CHL", "CHINA": "CHN", "COLOMBIA": "COL", "COSTA RICA": "CRI", "CROATIA": "HRV",
+    "CUBA": "CUB", "CYPRUS": "CYP", "CZECH REPUBLIC": "CZE", "DENMARK": "DNK", "EGYPT": "EGY", "ESTONIA": "EST",
+    "FINLAND": "FIN", "FRANCE": "FRA", "GERMANY": "DEU", "GHANA": "GHA", "GREECE": "GRC", "HONG KONG": "HKG",
+    "HUNGARY": "HUN", "ICELAND": "ISL", "INDIA": "IND", "INDONESIA": "IDN", "IRAN": "IRN", "IRAQ": "IRQ",
+    "IRELAND": "IRL", "ISRAEL": "ISR", "ITALY": "ITA", "JAMAICA": "JAM", "JAPAN": "JPN", "JORDAN": "JOR",
+    "KAZAKHSTAN": "KAZ", "KENYA": "KEN", "KOREA": "KOR", "SOUTH KOREA": "KOR", "KUWAIT": "KWT", "LATVIA": "LVA",
+    "LEBANON": "LBN", "LIBYA": "LBY", "LITHUANIA": "LTU", "LUXEMBOURG": "LUX", "MALAYSIA": "MYS", "MALDIVES": "MDV",
+    "MALTA": "MLT", "MEXICO": "MEX", "MONACO": "MCO", "MONGOLIA": "MNG", "MOROCCO": "MAR", "NEPAL": "NPL",
+    "NETHERLANDS": "NLD", "NEW ZEALAND": "NZL", "NIGERIA": "NGA", "NORWAY": "NOR", "OMAN": "OMN", "PAKISTAN": "PAK",
+    "PANAMA": "PAN", "PARAGUAY": "PRY", "PERU": "PER", "PHILIPPINES": "PHL", "POLAND": "POL", "PORTUGAL": "PRT",
+    "QATAR": "QAT", "ROMANIA": "ROU", "RUSSIA": "RUS", "RUSSIAN FEDERATION": "RUS", "SAUDI ARABIA": "SAU",
+    "SINGAPORE": "SGP", "SLOVAKIA": "SVK", "SLOVENIA": "SVN", "SOUTH AFRICA": "ZAF", "SPAIN": "ESP", "SRI LANKA": "LKA",
+    "SUDAN": "SDN", "SWEDEN": "SWE", "SWITZERLAND": "CHE", "TAIWAN": "TWN", "THAILAND": "THA", "TUNISIA": "TUN",
+    "TURKEY": "TUR", "UAE": "ARE", "UNITED ARAB EMIRATES": "ARE", "UNITED KINGDOM": "GBR", "UK": "GBR",
+    "UNITED STATES": "USA", "UNITED STATES OF AMERICA": "USA", "USA": "USA", "URUGUAY": "URY", "VENEZUELA": "VEN",
+    "VIETNAM": "VNM", "ZIMBABWE": "ZWE",
+    "IN": "IND", "US": "USA", "DE": "DEU", "FR": "FRA", "GB": "GBR", "CA": "CAN", "AU": "AUS", "JP": "JPN", "CN": "CHN", "IT": "ITA", "BR": "BRA", "RU": "RUS", "MX": "MEX", "ES": "ESP", "NL": "NLD", "CH": "CHE", "SE": "SWE", "SG": "SGP"
+}
+
 QUANTITY_MAP: Dict[str, str] = {
     "KILOGRAM": "KG", "KILOGRAMS": "KG", "KG": "KG", "KGS": "KG",
     "GRAM": "G", "GRAMS": "G", "G": "G", "GR": "G",
@@ -607,25 +631,42 @@ class HarmonizationAgent:
         self.stats["deduped"] = removed
         return df.reset_index(drop=True)
 
-    def _rule_3_country_iso(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Rule 3: Country → ISO on country fields (Vectorized)."""
-        country_cols = self._find_country_columns(df)
+    def _row_key_info(self, df: pd.DataFrame, idx: Any) -> str:
+        """Find key field name and value for a row (e.g. KUNNR, LIFNR, MATNR) to enrich log messages."""
+        for col in df.columns:
+            base = col.split(".")[-1].upper() if "." in col else col.upper()
+            if base in ["KUNNR", "LIFNR", "MATNR", "ID", "ACCOUNT_NUMBER", "CUSTOMER_NUMBER", "VENDOR_NUMBER", "MATERIAL_NUMBER"]:
+                val = str(df.at[idx, col]).strip()
+                if val and val != "nan":
+                    return f" [{base}: {val}]"
+        return ""
+
+    def _rule_3_country_iso(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None, iso_length: int = 2) -> pd.DataFrame:
+        """Rule 3: Country → ISO on country fields (Vectorized). Supports 2 or 3 letter ISO codes."""
+        country_cols = target_fields if target_fields else self._find_country_columns(df)
         for col in country_cols:
+            if col not in df.columns:
+                continue
             s_clean = df[col].astype(str).str.strip().str.upper()
-            mapped_series = s_clean.map(lambda v: COUNTRY_MAP.get(v, v))
+            lookup_map = COUNTRY_MAP_3 if iso_length == 3 else COUNTRY_MAP
+            tag_label = "Country→ISO3" if iso_length == 3 else "Country→ISO"
+            mapped_series = s_clean.map(lambda v: lookup_map.get(v, v))
             diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN")
             if diff_mask.any():
                 for idx in df.index[diff_mask]:
                     raw = s_clean.at[idx]
                     mapped = mapped_series.at[idx]
-                    self.fix_log.append(f"[Country→ISO] Row {idx + 1} ({col}): '{raw}' → '{mapped}'")
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[{tag_label}] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = mapped_series
         return df
 
-    def _rule_4_currency_iso(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _rule_4_currency_iso(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None) -> pd.DataFrame:
         """Rule 4: Currency → ISO on currency fields (Vectorized)."""
-        currency_cols = self._find_currency_columns(df)
+        currency_cols = target_fields if target_fields else self._find_currency_columns(df)
         for col in currency_cols:
+            if col not in df.columns:
+                continue
             s_clean = df[col].astype(str).str.strip().str.upper()
             mapped_series = s_clean.map(lambda v: CURRENCY_MAP.get(v, v))
             diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN")
@@ -633,14 +674,17 @@ class HarmonizationAgent:
                 for idx in df.index[diff_mask]:
                     raw = s_clean.at[idx]
                     mapped = mapped_series.at[idx]
-                    self.fix_log.append(f"[Currency→ISO] Row {idx + 1} ({col}): '{raw}' → '{mapped}'")
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[Currency→ISO] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = mapped_series
         return df
 
-    def _rule_5_payterms_sap(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _rule_5_payterms_sap(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None) -> pd.DataFrame:
         """Rule 5: Payment Terms → SAP format (Vectorized)."""
-        payterm_cols = self._find_payterm_columns(df)
+        payterm_cols = target_fields if target_fields else self._find_payterm_columns(df)
         for col in payterm_cols:
+            if col not in df.columns:
+                continue
             s_clean = df[col].astype(str).str.strip().str.upper()
             mapped_series = s_clean.map(lambda v: PAYMENT_TERMS_MAP.get(v, v))
             diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN")
@@ -648,14 +692,17 @@ class HarmonizationAgent:
                 for idx in df.index[diff_mask]:
                     raw = s_clean.at[idx]
                     mapped = mapped_series.at[idx]
-                    self.fix_log.append(f"[PayTerms→SAP] Row {idx + 1} ({col}): '{raw}' → '{mapped}'")
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[PayTerms→SAP] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = mapped_series
         return df
 
-    def _rule_6_mattype_sap(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _rule_6_mattype_sap(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None) -> pd.DataFrame:
         """Rule 6: Material Type → SAP format (Vectorized)."""
-        mattype_cols = self._find_mattype_columns(df)
+        mattype_cols = target_fields if target_fields else self._find_mattype_columns(df)
         for col in mattype_cols:
+            if col not in df.columns:
+                continue
             s_clean = df[col].astype(str).str.strip().str.upper()
             mapped_series = s_clean.map(lambda v: MATERIAL_TYPE_MAP.get(v, v))
             diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN")
@@ -663,26 +710,41 @@ class HarmonizationAgent:
                 for idx in df.index[diff_mask]:
                     raw = s_clean.at[idx]
                     mapped = mapped_series.at[idx]
-                    self.fix_log.append(f"[MatType→SAP] Row {idx + 1} ({col}): '{raw}' → '{mapped}'")
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[MatType→SAP] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = mapped_series
         return df
 
-    def _rule_7_whitespace_trim(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Rule 7: Trim whitespace on all fields (Vectorized)."""
+    def _rule_7_whitespace_trim(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None, mode: str = "both") -> pd.DataFrame:
+        """Rule 7: Trim whitespace on fields (Vectorized). Mode: 'both', 'left', 'right'."""
+        cols = target_fields if target_fields else list(df.columns)
         trimmed_count = 0
-        for col in df.columns:
+        for col in cols:
+            if col not in df.columns:
+                continue
             s = df[col].astype(str)
-            s_clean = s.str.strip().replace("nan", "")
-            diff_count = (s != s_clean).sum()
-            if diff_count > 0:
-                trimmed_count += diff_count
+            if mode == "left":
+                s_clean = s.str.lstrip().replace("nan", "")
+            elif mode == "right":
+                s_clean = s.str.rstrip().replace("nan", "")
+            else:
+                s_clean = s.str.strip().replace("nan", "")
+
+            diff_mask = (s != s_clean) & (s != "") & (s != "nan")
+            if diff_mask.any():
+                count_in_col = diff_mask.sum()
+                trimmed_count += count_in_col
+                self.fix_log.append(f"[WhitespaceTrim] Trimmed {count_in_col} values in '{col}'")
+                for idx in df.index[diff_mask]:
+                    raw = s.at[idx]
+                    mapped = s_clean.at[idx]
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[WhitespaceTrim::Detail] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = s_clean
-        if trimmed_count > 0:
-            self.fix_log.append(f"[WhitespaceTrim] Trimmed {trimmed_count} values")
         return df
 
     # ──────────────────────────────────────
-    # Rules 8-11: Date, Phone, UOM, Trunc35
+    # Rules 8-11 Helpers: Date, Phone, UOM, Text
     # ──────────────────────────────────────
 
     def _find_date_columns(self, df: pd.DataFrame) -> List[str]:
@@ -695,15 +757,12 @@ class HarmonizationAgent:
         for col in df.columns:
             col_upper = col.upper()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            # Match known SAP date field names
             if base in DATE_NAME_PATTERNS:
                 target_cols.append(col)
                 continue
-            # Match columns containing DATE, _AT suffix (common timestamp pattern)
             if "DATE" in base or base.endswith("_AT") or base.endswith("_DT") or base.startswith("DT_"):
                 target_cols.append(col)
                 continue
-            # Sample-based detection: check if values look like dates
             sample_vals = [str(v).strip() for v in df[col].dropna().head(15) if str(v).strip() and str(v) != "nan"]
             if len(sample_vals) >= 3:
                 date_pattern = re.compile(r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{4}$|^\d{4}[/\-]\d{2}[/\-]\d{2}$")
@@ -742,7 +801,6 @@ class HarmonizationAgent:
             if any(kw in base for kw in ["_UOM", "UNIT_OF", "_UNIT", "BASE_UNIT", "UOM"]):
                 target_cols.append(col)
                 continue
-            # Sample-based: check if values are common quantity names
             sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(10) if str(v).strip() and str(v) != "nan"]
             if sample_vals and all(v in QUANTITY_MAP for v in sample_vals if v):
                 if len([v for v in sample_vals if v in QUANTITY_MAP]) >= 3:
@@ -764,36 +822,52 @@ class HarmonizationAgent:
                 target_cols.append(col)
         return target_cols
 
-    def _rule_8_date_format(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Rule 8: Date → YYYYMMDD format on date columns."""
-        date_cols = self._find_date_columns(df)
+    def _rule_8_date_format(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None, target_format: str = "YYYYMMDD") -> pd.DataFrame:
+        """Rule 8: Date format on date columns."""
+        date_cols = target_fields if target_fields else self._find_date_columns(df)
         for col in date_cols:
+            if col not in df.columns:
+                continue
             original = df[col].astype(str).str.strip()
             formatted = original.apply(_tf_date8)
             diff_mask = (original != formatted) & (original != "") & (original != "nan")
             if diff_mask.any():
                 changed = diff_mask.sum()
-                self.fix_log.append(f"[Date→YYYYMMDD] Formatted {changed} values in '{col}'")
+                self.fix_log.append(f"[Date→{target_format}] Formatted {changed} values in '{col}'")
+                for idx in df.index[diff_mask]:
+                    raw = original.at[idx]
+                    mapped = formatted.at[idx]
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[Date→{target_format}::Detail] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = formatted
         return df
 
-    def _rule_9_phone_clean(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _rule_9_phone_clean(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None, keep_plus: bool = True) -> pd.DataFrame:
         """Rule 9: Phone/Fax cleanup — remove invalid characters."""
-        phone_cols = self._find_phone_columns(df)
+        phone_cols = target_fields if target_fields else self._find_phone_columns(df)
         for col in phone_cols:
+            if col not in df.columns:
+                continue
             original = df[col].astype(str).str.strip()
             cleaned = original.apply(_tf_phone)
             diff_mask = (original != cleaned) & (original != "") & (original != "nan")
             if diff_mask.any():
                 changed = diff_mask.sum()
                 self.fix_log.append(f"[PhoneClean] Cleaned {changed} values in '{col}'")
+                for idx in df.index[diff_mask]:
+                    raw = original.at[idx]
+                    mapped = cleaned.at[idx]
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[PhoneClean::Detail] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = cleaned
         return df
 
-    def _rule_10_uom_normalize(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _rule_10_uom_normalize(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None) -> pd.DataFrame:
         """Rule 10: UOM → SAP format on unit-of-measure columns."""
-        uom_cols = self._find_uom_columns(df)
+        uom_cols = target_fields if target_fields else self._find_uom_columns(df)
         for col in uom_cols:
+            if col not in df.columns:
+                continue
             s_clean = df[col].astype(str).str.strip().str.upper()
             mapped_series = s_clean.map(lambda v: QUANTITY_MAP.get(v, v))
             diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN")
@@ -801,38 +875,92 @@ class HarmonizationAgent:
                 for idx in df.index[diff_mask]:
                     raw = s_clean.at[idx]
                     mapped = mapped_series.at[idx]
-                    self.fix_log.append(f"[UOM→SAP] Row {idx + 1} ({col}): '{raw}' → '{mapped}'")
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[UOM→SAP] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = mapped_series
         return df
 
-    def _rule_11_trunc35(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Rule 11: Truncate name/address fields to 35 characters (SAP standard)."""
-        text_cols = self._find_text_columns(df)
+    def _rule_11_trunc35(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None, max_length: int = 35) -> pd.DataFrame:
+        """Rule 11: Truncate name/address fields to max_length characters (SAP standard)."""
+        text_cols = target_fields if target_fields else self._find_text_columns(df)
         truncated_count = 0
         for col in text_cols:
+            if col not in df.columns:
+                continue
             original = df[col].astype(str)
-            truncated = original.str[:35]
-            diff_mask = original.str.len() > 35
+            truncated = original.str[:max_length]
+            diff_mask = original.str.len() > max_length
             if diff_mask.any():
-                truncated_count += diff_mask.sum()
+                count_in_col = diff_mask.sum()
+                truncated_count += count_in_col
+                self.fix_log.append(f"[Trunc35] Truncated {count_in_col} values in '{col}' to {max_length} chars")
+                for idx in df.index[diff_mask]:
+                    raw = original.at[idx]
+                    mapped = truncated.at[idx]
+                    key_info = self._row_key_info(df, idx)
+                    self.fix_log.append(f"[Trunc35::Detail] Row {idx + 1}{key_info} ({col}): '{raw}' → '{mapped}'")
             df[col] = truncated
-        if truncated_count > 0:
-            self.fix_log.append(f"[Trunc35] Truncated {truncated_count} values to 35 chars in {len(text_cols)} field(s)")
         return df
 
-    def _apply_rules(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply all 11 harmonization rules in order."""
-        df = self._rule_1_dedup(df)
-        df = self._rule_2_empty_filter(df)
-        df = self._rule_3_country_iso(df)
-        df = self._rule_4_currency_iso(df)
-        df = self._rule_5_payterms_sap(df)
-        df = self._rule_6_mattype_sap(df)
-        df = self._rule_7_whitespace_trim(df)
-        df = self._rule_8_date_format(df)
-        df = self._rule_9_phone_clean(df)
-        df = self._rule_10_uom_normalize(df)
-        df = self._rule_11_trunc35(df)
+    # Default rule configuration
+    DEFAULT_RULE_CONFIG = {
+        "dedup": {"enabled": True},
+        "empty_filter": {"enabled": True},
+        "country_iso": {"enabled": True},
+        "currency_iso": {"enabled": True},
+        "payterms_sap": {"enabled": True},
+        "mattype_sap": {"enabled": True},
+        "whitespace_trim": {"enabled": True},
+        "date_format": {"enabled": True},
+        "phone_clean": {"enabled": True},
+        "uom_normalize": {"enabled": True},
+        "trunc35": {"enabled": True, "params": {"max_length": 35}},
+    }
+
+    def _apply_rules(self, df: pd.DataFrame, rule_config: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        """Apply harmonization rules in order, respecting rule_config toggles and params."""
+        cfg = {**self.DEFAULT_RULE_CONFIG}
+        if rule_config:
+            for k, v in rule_config.items():
+                if k in cfg:
+                    cfg[k] = {**cfg[k], **v}
+
+        if cfg["dedup"].get("enabled", True):
+            df = self._rule_1_dedup(df)
+        if cfg["empty_filter"].get("enabled", True):
+            df = self._rule_2_empty_filter(df)
+        if cfg["country_iso"].get("enabled", True):
+            iso_len = cfg["country_iso"].get("params", {}).get("iso_length", 2)
+            tf = cfg["country_iso"].get("params", {}).get("target_fields")
+            df = self._rule_3_country_iso(df, target_fields=tf, iso_length=iso_len)
+        if cfg["currency_iso"].get("enabled", True):
+            tf = cfg["currency_iso"].get("params", {}).get("target_fields")
+            df = self._rule_4_currency_iso(df, target_fields=tf)
+        if cfg["payterms_sap"].get("enabled", True):
+            tf = cfg["payterms_sap"].get("params", {}).get("target_fields")
+            df = self._rule_5_payterms_sap(df, target_fields=tf)
+        if cfg["mattype_sap"].get("enabled", True):
+            tf = cfg["mattype_sap"].get("params", {}).get("target_fields")
+            df = self._rule_6_mattype_sap(df, target_fields=tf)
+        if cfg["whitespace_trim"].get("enabled", True):
+            mode = cfg["whitespace_trim"].get("params", {}).get("mode", "both")
+            tf = cfg["whitespace_trim"].get("params", {}).get("target_fields")
+            df = self._rule_7_whitespace_trim(df, target_fields=tf, mode=mode)
+        if cfg["date_format"].get("enabled", True):
+            fmt = cfg["date_format"].get("params", {}).get("format", "YYYYMMDD")
+            tf = cfg["date_format"].get("params", {}).get("target_fields")
+            df = self._rule_8_date_format(df, target_fields=tf, target_format=fmt)
+        if cfg["phone_clean"].get("enabled", True):
+            kp = cfg["phone_clean"].get("params", {}).get("keep_plus", True)
+            tf = cfg["phone_clean"].get("params", {}).get("target_fields")
+            df = self._rule_9_phone_clean(df, target_fields=tf, keep_plus=kp)
+        if cfg["uom_normalize"].get("enabled", True):
+            tf = cfg["uom_normalize"].get("params", {}).get("target_fields")
+            df = self._rule_10_uom_normalize(df, target_fields=tf)
+        if cfg["trunc35"].get("enabled", True):
+            max_len = cfg["trunc35"].get("params", {}).get("max_length", 35)
+            tf = cfg["trunc35"].get("params", {}).get("target_fields")
+            df = self._rule_11_trunc35(df, target_fields=tf, max_length=max_len)
         return df
 
     # ──────────────────────────────────────
@@ -856,6 +984,74 @@ class HarmonizationAgent:
     # Public entry points
     # ──────────────────────────────────────
 
+    def apply_dynamic_rules(
+        self,
+        df: pd.DataFrame,
+        dynamic_rules: List[Dict[str, Any]],
+    ) -> pd.DataFrame:
+        """
+        Apply LLM-generated dynamic harmonization rules.
+        Each rule has: {id, label, description, target_field, python_code}.
+        python_code is a function body: `def transform(value, row): -> str`
+        """
+        if not dynamic_rules:
+            return df
+
+        for rule in dynamic_rules:
+            rule_id = rule.get("id", "DYNAMIC")
+            label = rule.get("label", rule_id)
+            target_field = rule.get("target_field", "")
+            python_code = rule.get("python_code", "")
+
+            if not python_code or not target_field:
+                self.fix_log.append(f"[DynamicAI] Skipping rule '{label}' — missing code or target field")
+                continue
+
+            # Find the actual column in df
+            actual_col = None
+            for col in df.columns:
+                if col.upper() == target_field.upper() or col.split('.')[-1].upper() == target_field.upper():
+                    actual_col = col
+                    break
+
+            if actual_col is None:
+                self.fix_log.append(f"[DynamicAI] Skipping rule '{label}' — field '{target_field}' not found in data")
+                continue
+
+            try:
+                # Build the transform function from LLM code
+                exec_globals = {"re": re, "pd": pd}
+                exec(python_code, exec_globals)
+                transform_fn = exec_globals.get("transform")
+                if not callable(transform_fn):
+                    self.fix_log.append(f"[DynamicAI] Skipping rule '{label}' — no callable 'transform' function")
+                    continue
+
+                changed_count = 0
+                for idx in df.index:
+                    old_val = str(df.at[idx, actual_col]) if df.at[idx, actual_col] is not None else ""
+                    row_dict = {k: str(v) if v is not None else "" for k, v in df.iloc[idx].to_dict().items()}
+                    try:
+                        new_val = str(transform_fn(old_val, row_dict))
+                    except Exception:
+                        new_val = old_val
+                    if new_val != old_val:
+                        df.at[idx, actual_col] = new_val
+                        changed_count += 1
+                        if changed_count <= 5:
+                            key_info = self._row_key_info(df, idx)
+                            self.fix_log.append(f"[DynamicAI] Row {idx + 1}{key_info} ({actual_col}): '{old_val[:30]}' → '{new_val[:30]}'")
+
+                if changed_count > 5:
+                    self.fix_log.append(f"[DynamicAI] ... and {changed_count - 5} more changes for '{label}'")
+                elif changed_count == 0:
+                    self.fix_log.append(f"[DynamicAI] Rule '{label}' — no changes needed")
+
+            except Exception as e:
+                self.fix_log.append(f"[DynamicAI] Error executing rule '{label}': {str(e)[:100]}")
+
+        return df
+
     def run_multi_source(
         self,
         primary_df: pd.DataFrame,
@@ -864,16 +1060,15 @@ class HarmonizationAgent:
         secondary_mappings: List[MappingEntry],
         primary_source: str = "SAP_ECC",
         secondary_source: str = "ORACLE_EBS",
+        additional_sources: Optional[List[Dict[str, Any]]] = None,
+        preview_only: bool = False,
+        rule_config: Optional[Dict[str, Any]] = None,
+        dynamic_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> HarmonizationResult:
         """
         Mode 1: Multi-source harmonization pipeline.
-
-        1. Apply mapping 1 → primary data (rename source cols → SAP cols, apply transforms)
-        2. Apply mapping 2 → secondary data (rename source cols → SAP cols, apply transforms)
-        3. Assign SOURCE system identifier column to both tables
-        4. Row-append merge (union all columns, null-fill missing)
-        5. Apply 11 harmonization rules
-        6. Return result
+        Supports N additional sources beyond primary + secondary.
+        preview_only=True returns fix_log without mutating data.
         """
         self.fix_log = []
         self.stats = {}
@@ -888,9 +1083,13 @@ class HarmonizationAgent:
             f"{len(secondary_df)} secondary ({secondary_source}) rows"
         )
 
+        # Work on copies for preview mode
+        work_primary = primary_df.copy() if preview_only else primary_df
+        work_secondary = secondary_df.copy() if preview_only else secondary_df
+
         # Step 1: Apply mappings
-        mapped_primary = self._apply_mapping(primary_df, primary_mappings)
-        mapped_secondary = self._apply_mapping(secondary_df, secondary_mappings)
+        mapped_primary = self._apply_mapping(work_primary, primary_mappings)
+        mapped_secondary = self._apply_mapping(work_secondary, secondary_mappings)
 
         # Step 2: Assign SOURCE tracking column
         mapped_primary["SOURCE"] = primary_source
@@ -907,6 +1106,25 @@ class HarmonizationAgent:
 
         # Step 3: Row-append merge
         merged = self._merge_sources(mapped_primary, mapped_secondary)
+
+        # Merge additional sources
+        if additional_sources:
+            for extra in additional_sources:
+                extra_df = extra["df"]
+                extra_mappings = extra.get("mappings", [])
+                extra_source = extra.get("source_name", "EXTRA")
+                total_input += len(extra_df)
+                self.stats[f"{extra_source.lower()}_rows"] = len(extra_df)
+
+                mapped_extra = self._apply_mapping(extra_df.copy() if preview_only else extra_df, extra_mappings)
+                mapped_extra["SOURCE"] = extra_source
+                self.fix_log.append(
+                    f"[Mapping] Additional ({extra_source}): {len(extra_df.columns)} cols → "
+                    f"{len(mapped_extra.columns)} cols"
+                )
+                merged = self._merge_sources(merged, mapped_extra)
+
+        self.stats["total_input"] = total_input
         self.fix_log.append(
             f"[Merge] Merged table: {len(merged)} rows × {len(merged.columns)} columns"
         )
@@ -920,7 +1138,11 @@ class HarmonizationAgent:
             )
 
         # Step 4: Apply harmonization rules
-        harmonized = self._apply_rules(merged)
+        harmonized = self._apply_rules(merged, rule_config=rule_config)
+
+        # Step 4b: Apply dynamic AI rules
+        if dynamic_rules:
+            harmonized = self.apply_dynamic_rules(harmonized, dynamic_rules)
 
         # Step 5: Format final column headers to short SAP field names (part after dot)
         rename_dict = {col: col.split(".")[-1] for col in harmonized.columns if "." in col}
@@ -936,6 +1158,13 @@ class HarmonizationAgent:
         self.stats["total_output"] = len(harmonized)
         self.stats["columns"] = len(harmonized.columns)
 
+        if preview_only:
+            return HarmonizationResult(
+                final_table=pd.DataFrame(),
+                stats=self.stats,
+                fix_log=self.fix_log,
+            )
+
         return HarmonizationResult(
             final_table=harmonized,
             stats=self.stats,
@@ -947,41 +1176,46 @@ class HarmonizationAgent:
         source_df: pd.DataFrame,
         mappings: Optional[List[MappingEntry]] = None,
         primary_source: str = "SAP_ECC",
+        preview_only: bool = False,
+        rule_config: Optional[Dict[str, Any]] = None,
+        dynamic_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> HarmonizationResult:
         """
         Mode 2: Single-source harmonization pipeline.
-
-        1. Apply 11 harmonization rules directly on the source data (or mapped data)
-        2. Format column headers to short field names (part after dot)
-        3. Return result
+        preview_only=True returns fix_log without mutating data.
         """
         self.fix_log = []
         self.stats = {}
 
-        total_input = len(source_df)
+        work_df = source_df.copy() if preview_only else source_df
+        total_input = len(work_df)
         self.stats["total_input"] = total_input
 
         self.fix_log.append(
             f"[Init] Single-source mode ({primary_source}): {total_input} rows × "
-            f"{len(source_df.columns)} columns"
+            f"{len(work_df.columns)} columns"
         )
 
         if mappings:
-            # Check if first row is accidentally the source headers (often happens with bad CSVs)
-            if not source_df.empty:
-                first_row_vals = set(str(v).strip().lower() for v in source_df.iloc[0].values)
+            # Check if first row is accidentally the source headers
+            if not work_df.empty:
+                first_row_vals = set(str(v).strip().lower() for v in work_df.iloc[0].values)
                 src_names = set(re.sub(r"^\[\d+\]", "", str(m.src)).split(".")[-1].lower() if "." in str(m.src) else re.sub(r"^\[\d+\]", "", str(m.src)).lower() for m in mappings)
                 if len(first_row_vals.intersection(src_names)) >= 2:
-                    source_df = source_df.drop(0).reset_index(drop=True)
+                    work_df = work_df.drop(0).reset_index(drop=True)
                     self.fix_log.append("[HeaderCleanup] Removed first row because it contained source column headers.")
 
-            mapped_df = self._apply_mapping(source_df, mappings)
+            mapped_df = self._apply_mapping(work_df, mappings)
             mapped_df["SOURCE"] = primary_source
-            harmonized = self._apply_rules(mapped_df)
+            harmonized = self._apply_rules(mapped_df, rule_config=rule_config)
         else:
-            df_copy = source_df.copy()
+            df_copy = work_df.copy()
             df_copy["SOURCE"] = primary_source
-            harmonized = self._apply_rules(df_copy)
+            harmonized = self._apply_rules(df_copy, rule_config=rule_config)
+
+        # Apply dynamic AI rules
+        if dynamic_rules:
+            harmonized = self.apply_dynamic_rules(harmonized, dynamic_rules)
 
         # Strip table prefix if present (e.g. HZ_LOCATIONS.COUNTRY -> COUNTRY)
         rename_dict = {col: col.split(".")[-1] for col in harmonized.columns if "." in col}
@@ -996,6 +1230,13 @@ class HarmonizationAgent:
 
         self.stats["total_output"] = len(harmonized)
         self.stats["columns"] = len(harmonized.columns)
+
+        if preview_only:
+            return HarmonizationResult(
+                final_table=pd.DataFrame(),
+                stats=self.stats,
+                fix_log=self.fix_log,
+            )
 
         return HarmonizationResult(
             final_table=harmonized,

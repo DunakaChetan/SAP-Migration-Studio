@@ -2,15 +2,20 @@
 FastAPI Router for the Harmonization Agent.
 
 Provides endpoints to:
-  - POST /harmonize       : Upload files and run harmonization
+  - POST /harmonize       : Upload files and run harmonization (Single & Multi Upload Mode)
+  - POST /harmonize/flow  : Flow mode (data from DB)
+  - POST /harmonize/multi-flow : Multi-source (primary from DB + secondary upload)
+  - POST /harmonize/generate-dynamic-rules : LLM-generate dynamic transform rules (1 call)
   - GET  /harmonize/download/<id> : Download the final CSV result
 """
 
 import io
+import os
+import json
 import uuid
 import logging
 import re
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse
@@ -34,6 +39,18 @@ router = APIRouter()
 _session_store: dict = {}
 
 
+def _collect_custom_prompts(rule_config: Optional[Dict[str, Any]], custom_prompts: Optional[List[str]]) -> List[str]:
+    """Collect custom instructions from rule_config and combine with custom_prompts."""
+    prompts = list(custom_prompts) if custom_prompts else []
+    if rule_config:
+        for rule_key, cfg in rule_config.items():
+            if isinstance(cfg, dict) and cfg.get("enabled", True):
+                cust_inst = cfg.get("custom_instruction")
+                if cust_inst and str(cust_inst).strip():
+                    prompts.append(f"Rule [{rule_key}]: {str(cust_inst).strip()}")
+    return prompts
+
+
 @router.post("/harmonize")
 async def run_harmonization(
     mode: str = Form(...),
@@ -51,33 +68,42 @@ async def run_harmonization(
     secondary_file: Optional[UploadFile] = File(None),
     primary_mapping_file: Optional[UploadFile] = File(None),
     secondary_mapping_file: Optional[UploadFile] = File(None),
+    preview: str = Form("false"),
+    rule_config_json: str = Form(""),
+    custom_prompts_json: str = Form(""),
 ):
-    """
-    Run the harmonization agent on uploaded files.
-
-    Form fields:
-      - mode: "single" or "multi"
-      - sap_object: "CUSTOMER", "VENDOR", or "MATERIAL"
-      - company_code, sales_org, purch_org, plant, dist_channel, division, currency
-      - primary_source: Source system name for primary data (e.g. "SAP_ECC")
-      - secondary_source: Source system name for secondary data (e.g. "ORACLE_EBS")
-      - primary_file: CSV/Excel (required)
-      - secondary_file: CSV/Excel (multi mode only)
-      - primary_mapping_file: CSV (multi mode only)
-      - secondary_mapping_file: CSV (multi mode only)
-    """
     try:
-        # Build config
         config = HarmonizationConfig(
             sap_object=sap_object.upper(),
             company_code=company_code,
         )
-
         agent = HarmonizationAgent(config)
 
-        # Read primary file
+        is_preview = preview.lower() == "true"
+
+        rule_config = None
+        if rule_config_json:
+            try:
+                rule_config = json.loads(rule_config_json)
+            except Exception:
+                pass
+
+        custom_prompts = None
+        if custom_prompts_json:
+            try:
+                custom_prompts = json.loads(custom_prompts_json)
+            except Exception:
+                pass
+
         primary_content = await primary_file.read()
         primary_df = parse_data_from_upload(primary_content, primary_file.filename or "data.csv")
+
+        # Collect custom instructions for fallback LLM generator
+        all_prompts = _collect_custom_prompts(rule_config, custom_prompts)
+        dynamic_rules = None
+        if all_prompts:
+            actual_columns = list(primary_df.columns)
+            dynamic_rules = _generate_dynamic_rules_internal(all_prompts, sap_object, actual_columns)
 
         if mode == "single":
             primary_mappings = None
@@ -86,10 +112,15 @@ async def run_harmonization(
                 primary_mappings = parse_mapping_from_upload(
                     pm_content, primary_mapping_file.filename or "mapping.csv"
                 )
-            result = agent.run_single_source(primary_df, primary_mappings, primary_source=primary_source)
+            result = agent.run_single_source(
+                primary_df, primary_mappings,
+                primary_source=primary_source,
+                preview_only=is_preview,
+                rule_config=rule_config,
+                dynamic_rules=dynamic_rules,
+            )
 
         elif mode == "multi":
-            # Read secondary file
             if not secondary_file or not secondary_file.filename:
                 raise HTTPException(400, "Secondary file is required for multi mode")
             secondary_content = await secondary_file.read()
@@ -97,7 +128,6 @@ async def run_harmonization(
                 secondary_content, secondary_file.filename or "data.csv"
             )
 
-            # Read mapping files
             if not primary_mapping_file or not primary_mapping_file.filename:
                 raise HTTPException(400, "Primary mapping file is required for multi mode")
             pm_content = await primary_mapping_file.read()
@@ -114,18 +144,20 @@ async def run_harmonization(
 
             result = agent.run_multi_source(
                 primary_df, secondary_df, primary_mappings, secondary_mappings,
-                primary_source=primary_source, secondary_source=secondary_source
+                primary_source=primary_source, secondary_source=secondary_source,
+                preview_only=is_preview,
+                rule_config=rule_config,
+                dynamic_rules=dynamic_rules,
             )
         else:
             raise HTTPException(400, f"Invalid mode: {mode}. Must be 'single' or 'multi'")
 
-        # Store result for download
         session_id = str(uuid.uuid4())
-        _session_store[session_id] = result.final_table
+        if not result.final_table.empty:
+            _session_store[session_id] = result.final_table
 
-        # Convert DataFrame to JSON-serializable format
-        final_rows = result.final_table.fillna("").to_dict(orient="records")
-        columns = list(result.final_table.columns)
+        final_rows = result.final_table.fillna("").to_dict(orient="records") if not result.final_table.empty else []
+        columns = list(result.final_table.columns) if not result.final_table.empty else []
 
         return {
             "session_id": session_id,
@@ -133,6 +165,7 @@ async def run_harmonization(
             "columns": columns,
             "stats": result.stats,
             "fix_log": result.fix_log,
+            "is_preview": is_preview,
         }
 
     except HTTPException:
@@ -153,12 +186,14 @@ class HarmonizeFlowRequest(BaseModel):
     division: str = "00"
     currency: str = "INR"
     primary_source: str = "SAP_ECC"
+    preview: bool = False
+    rule_config: Optional[Dict[str, Any]] = None
+    custom_prompts: Optional[List[str]] = None
 
 @router.post("/harmonize/flow")
 def run_harmonization_flow(req: HarmonizeFlowRequest):
     try:
         client = supabase_service.get_client()
-        # Build config
         config = HarmonizationConfig(
             sap_object=req.sap_object.upper(),
             company_code=req.company_code,
@@ -205,15 +240,29 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
         if not primary_mappings:
             raise HTTPException(400, "No valid mappings could be constructed from the database.")
 
-        # 3. Run Agent
-        result = agent.run_single_source(primary_df, primary_mappings, primary_source=req.primary_source)
+        # 3. Generate dynamic rules from custom prompts / custom instructions (single LLM call fallback)
+        all_prompts = _collect_custom_prompts(req.rule_config, req.custom_prompts)
+        dynamic_rules = None
+        if all_prompts:
+            actual_columns = list(primary_df.columns)
+            dynamic_rules = _generate_dynamic_rules_internal(all_prompts, req.sap_object, actual_columns)
+
+        # 4. Run Agent
+        result = agent.run_single_source(
+            primary_df, primary_mappings,
+            primary_source=req.primary_source,
+            preview_only=req.preview,
+            rule_config=req.rule_config,
+            dynamic_rules=dynamic_rules,
+        )
 
         # Store result for download
         session_id = str(uuid.uuid4())
-        _session_store[session_id] = result.final_table
+        if not result.final_table.empty:
+            _session_store[session_id] = result.final_table
 
-        final_rows = result.final_table.fillna("").to_dict(orient="records")
-        columns = list(result.final_table.columns)
+        final_rows = result.final_table.fillna("").to_dict(orient="records") if not result.final_table.empty else []
+        columns = list(result.final_table.columns) if not result.final_table.empty else []
 
         return {
             "session_id": session_id,
@@ -221,6 +270,7 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
             "columns": columns,
             "stats": result.stats,
             "fix_log": result.fix_log,
+            "is_preview": req.preview,
         }
 
     except HTTPException:
@@ -245,12 +295,13 @@ async def run_harmonization_multi_flow(
     secondary_source: str = Form("ORACLE_EBS"),
     secondary_file: UploadFile = File(...),
     secondary_mapping_file: UploadFile = File(...),
+    preview: str = Form("false"),
+    rule_config_json: str = Form(""),
+    custom_prompts_json: str = Form(""),
 ):
     """
     Multi-source harmonization with primary data from DB and secondary data uploaded.
-
-    - Primary data + mappings: fetched from database (extracted_data + user_corrected_mappings)
-    - Secondary data + mapping: uploaded as files
+    Supports preview mode, editable rule config, and dynamic AI rules.
     """
     try:
         client = supabase_service.get_client()
@@ -260,6 +311,22 @@ async def run_harmonization_multi_flow(
             company_code=company_code,
         )
         agent = HarmonizationAgent(config)
+
+        is_preview = preview.lower() == "true"
+
+        rule_config = None
+        if rule_config_json:
+            try:
+                rule_config = json.loads(rule_config_json)
+            except Exception:
+                pass
+
+        custom_prompts = None
+        if custom_prompts_json:
+            try:
+                custom_prompts = json.loads(custom_prompts_json)
+            except Exception:
+                pass
 
         # Get object_id
         res_obj = client.table("sap_objects").select("id").ilike("name", sap_object).execute()
@@ -314,18 +381,29 @@ async def run_harmonization_multi_flow(
         sm_content = await secondary_mapping_file.read()
         secondary_mappings = parse_mapping_from_upload(sm_content, secondary_mapping_file.filename or "mapping.csv")
 
-        # 4. Run Multi-Source Agent
+        # 4. Generate dynamic rules from custom prompts / custom instructions (single LLM call)
+        all_prompts = _collect_custom_prompts(rule_config, custom_prompts)
+        dynamic_rules = None
+        if all_prompts:
+            actual_columns = list(primary_df.columns)
+            dynamic_rules = _generate_dynamic_rules_internal(all_prompts, sap_object, actual_columns)
+
+        # 5. Run Multi-Source Agent
         result = agent.run_multi_source(
             primary_df, secondary_df, primary_mappings, secondary_mappings,
-            primary_source=primary_source, secondary_source=secondary_source
+            primary_source=primary_source, secondary_source=secondary_source,
+            preview_only=is_preview,
+            rule_config=rule_config,
+            dynamic_rules=dynamic_rules,
         )
 
         # Store result for download
         session_id = str(uuid.uuid4())
-        _session_store[session_id] = result.final_table
+        if not result.final_table.empty:
+            _session_store[session_id] = result.final_table
 
-        final_rows = result.final_table.fillna("").to_dict(orient="records")
-        columns = list(result.final_table.columns)
+        final_rows = result.final_table.fillna("").to_dict(orient="records") if not result.final_table.empty else []
+        columns = list(result.final_table.columns) if not result.final_table.empty else []
 
         return {
             "session_id": session_id,
@@ -333,6 +411,7 @@ async def run_harmonization_multi_flow(
             "columns": columns,
             "stats": result.stats,
             "fix_log": result.fix_log,
+            "is_preview": is_preview,
         }
 
     except HTTPException:
@@ -340,6 +419,86 @@ async def run_harmonization_multi_flow(
     except Exception as e:
         logger.exception("Multi-flow harmonization failed")
         raise HTTPException(500, f"Multi-flow harmonization failed: {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════
+# Dynamic AI Harmonization Rules — LLM Generation (Single Call)
+# ══════════════════════════════════════════════════════════
+
+def _generate_dynamic_rules_internal(
+    prompts: List[str],
+    target_object: str,
+    actual_columns: List[str],
+) -> List[Dict[str, Any]]:
+    """
+    Generate dynamic harmonization transform rules from natural language prompts.
+    Uses LLMOrchestrator (Gemini / Groq / OpenRouter fallback chain).
+    Single LLM call for all prompts → returns a JSON array of rules.
+    """
+    from services.llm_orchestrator import llm_orchestrator
+
+    system_prompt = f"""You are a Python code generator for SAP data harmonization transforms.
+
+The dataset has ONLY these exact columns: {actual_columns}
+SAP Object: {target_object}
+
+For each user rule prompt:
+1. First, check if the rule prompt applies to any of the actual dataset columns listed above.
+2. CRITICAL: If the concept, field, or data type described in the rule prompt (e.g. quantity, weight, price, tax number, etc.) DOES NOT exist in the dataset columns ({actual_columns}), DO NOT generate a transform. Set `target_field: ""` and `python_code: ""`.
+3. NEVER map quantity/weight rules to currency (WAERS), country (LAND1), name, or phone columns.
+4. IF a matching column exists in the dataset, generate a Python transform function: `def transform(value, row): -> str`
+   - `value`: the current cell value (string) of the target field
+   - `row`: a dict of ALL columns for the current row (all values are strings)
+   - Returns: the new value (string)
+
+Return a JSON array where each element has:
+{{
+  "id": "DYNAMIC_HARM_<N>",
+  "label": "<short title>",
+  "description": "<what it does>",
+  "target_field": "<EXACT column name from the dataset columns listed above, or empty string if no relevant column exists>",
+  "python_code": "def transform(value, row):\\n    ..."
+}}
+
+CRITICAL RULES:
+1. target_field MUST be an EXACT column name from: {actual_columns}.
+2. If no column in {actual_columns} matches the rule intent (e.g. quantity rule when no quantity/UOM columns exist), set `target_field: ""` and `python_code: ""`.
+3. `python_code` must be a COMPLETE function definition starting with `def transform(value, row):`.
+4. Return ONLY the JSON array, no markdown, no explanation."""
+
+    user_msg = "Generate transform functions for these rules:\n"
+    for i, p in enumerate(prompts, 1):
+        user_msg += f"{i}. {p}\n"
+
+    try:
+        rules = llm_orchestrator.execute_json_prompt(system_prompt, user_msg)
+        if not isinstance(rules, list):
+            rules = [rules]
+
+        logger.info(f"Generated {len(rules)} dynamic harmonization rules from {len(prompts)} prompts via LLMOrchestrator")
+        return rules
+
+    except Exception as e:
+        logger.exception(f"Failed to generate dynamic harmonization rules: {e}")
+        return []
+
+
+class GenerateHarmonizationRulesRequest(BaseModel):
+    prompts: List[str]
+    target_object: str = "CUSTOMER"
+    actual_columns: Optional[List[str]] = None
+
+@router.post("/harmonize/generate-dynamic-rules")
+def generate_dynamic_rules(req: GenerateHarmonizationRulesRequest):
+    """Generate dynamic harmonization rules from natural language prompts (1 LLM call for all)."""
+    if not req.prompts:
+        raise HTTPException(400, "No prompts provided")
+
+    actual_cols = req.actual_columns or []
+    rules = _generate_dynamic_rules_internal(req.prompts, req.target_object, actual_cols)
+
+    return {"rules": rules, "count": len(rules)}
+
 
 @router.get("/harmonize/download/{session_id}")
 async def download_result(session_id: str):
