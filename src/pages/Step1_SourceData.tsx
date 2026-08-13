@@ -44,7 +44,7 @@ export function Step1SourceData() {
   const [isEditing, setIsEditing] = useState(false);
   const [editProjectName, setEditProjectName] = useState('');
   const [editProjectDesc, setEditProjectDesc] = useState('');
-  
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Connection State
@@ -81,7 +81,7 @@ export function Step1SourceData() {
       if (res.ok) {
         const proj = await res.json();
         setProjects([proj, ...projects]);
-        dispatch({ type: 'SET_FIELD', field: 'projectId', value: proj.id });
+        dispatch({ type: 'BATCH_UPDATE', updates: { projectId: proj.id, projectName: proj.name } });
         setNewProjectName('');
         setNewProjectDesc('');
         toast('Project created successfully', 'ok');
@@ -102,7 +102,7 @@ export function Step1SourceData() {
 
     setIsUploading(true);
     showLoad('Uploading File...', `Parsing ${file.name}`, ['Reading columns...']);
-    
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -111,7 +111,7 @@ export function Step1SourceData() {
         method: 'POST',
         body: formData
       });
-      
+
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || 'Failed to upload file');
@@ -136,18 +136,18 @@ export function Step1SourceData() {
     try {
       const response = await fetch('/Oracle.xlsx');
       if (!response.ok) throw new Error('Failed to fetch Oracle.xlsx from public folder');
-      
+
       const blob = await response.blob();
       const file = new File([blob], 'Oracle.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      
+
       const formData = new FormData();
       formData.append('file', file);
-      
+
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, {
         method: 'POST',
         body: formData
       });
-      
+
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || 'Failed to upload file');
@@ -176,6 +176,7 @@ export function Step1SourceData() {
       if (res.ok) {
         const proj = await res.json();
         setProjects(projects.map(p => p.id === proj.id ? proj : p));
+        dispatch({ type: 'BATCH_UPDATE', updates: { projectName: proj.name } });
         toast('Project updated successfully', 'ok');
         setIsEditing(false);
       } else {
@@ -209,7 +210,7 @@ export function Step1SourceData() {
       });
       if (res.ok) {
         setProjects(projects.filter(p => p.id !== state.projectId));
-        dispatch({ type: 'SET_FIELD', field: 'projectId', value: null });
+        dispatch({ type: 'BATCH_UPDATE', updates: { projectId: null, projectName: null } });
         toast('Project deleted successfully', 'ok');
         setIsEditing(false);
         setShowDeleteConfirm(false);
@@ -232,10 +233,10 @@ export function Step1SourceData() {
       toast('Please fill in Base URL, Username, and Password', 'err');
       return;
     }
-    
+
     setIsTestingConn(true);
     toast('Testing connection to SAP...', 'info');
-    
+
     try {
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/connection/test_connection`, {
         method: 'POST',
@@ -263,7 +264,7 @@ export function Step1SourceData() {
 
   const autoLoad = async () => {
     let data: Record<string, string>[] = [];
-    
+
     if (state.src === 'SAP_ECC') {
       if (!state.connUrl || !state.connUser || !state.connPass) {
         toast('Please fill in Base URL, Username, and Password to fetch live data', 'err');
@@ -271,7 +272,7 @@ export function Step1SourceData() {
       }
       setIsFetchingSample(true);
       toast(`Fetching live ${state.obj || 'CUSTOMER'} data from SAP...`, 'info');
-      
+
       try {
         const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/fetch_sample`, {
           method: 'POST',
@@ -289,9 +290,9 @@ export function Step1SourceData() {
         if (res.ok) {
           data = resData.data;
           if (data.length === 0) {
-             toast('No records found in SAP for this object.', 'info');
-             setIsFetchingSample(false);
-             return;
+            toast('No records found in SAP for this object.', 'info');
+            setIsFetchingSample(false);
+            return;
           }
         } else {
           toast(`Fetch failed: ${resData.detail || 'Unknown error'}`, 'err');
@@ -324,7 +325,7 @@ export function Step1SourceData() {
         headers: Object.keys(data[0]),
       },
     });
-    
+
     if (state.src === 'SAP_ECC') {
       toast(`Successfully loaded ${data.length} live records from SAP!`, 'ok');
     } else {
@@ -361,15 +362,8 @@ export function Step1SourceData() {
               ))}
             </CardBody>
           </Card>
-          
-          <Card>
-            <CardHeader title="SAP TARGET OBJECT" />
-            <CardBody className="p-2 space-y-1">
-              {Object.entries(OBJS).map(([k, v]) => (
-                <SidebarItem key={k} active={state.obj === k} onClick={() => pickObj(k)} icon={objIcons[v.icon as keyof typeof objIcons]} title={v.label} subtitle={`${v.module} · ${v.tcode} · ${v.dmc}`} layoutIdGroup="target" />
-              ))}
-            </CardBody>
-          </Card>
+
+          {/* Removed SAP Target Object card */}
         </GridCol>
 
         {/* Middle Column */}
@@ -384,10 +378,10 @@ export function Step1SourceData() {
                   <Select
                     value={state.src}
                     onChange={(val) => pickSrc(val)}
-                    options={[['SAP_ECC','SAP ECC 6.0'],['ORACLE_EBS','Oracle EBS R12'],['EXCEL_CSV','Excel/CSV'],['DYNAMICS','MS Dynamics'],['SALESFORCE','Salesforce'],['LEGACY','Legacy DB']].map(([k,l]) => ({value: k, label: l}))}
+                    options={[['SAP_ECC', 'SAP ECC 6.0'], ['ORACLE_EBS', 'Oracle EBS R12'], ['EXCEL_CSV', 'Excel/CSV'], ['DYNAMICS', 'MS Dynamics'], ['SALESFORCE', 'Salesforce'], ['LEGACY', 'Legacy DB']].map(([k, l]) => ({ value: k, label: l }))}
                   />
                 </div>
-                
+
                 {state.src === 'SAP_ECC' && (
                   <>
                     <div className="grid grid-cols-4 gap-2.5">
@@ -443,12 +437,12 @@ export function Step1SourceData() {
                     <Cloud className="w-8 h-8 text-[var(--text-tertiary)] mb-2" />
                     <p className="text-[12px] text-[var(--text-secondary)] font-medium">Drag and drop file here</p>
                     <p className="text-[11px] text-[var(--text-tertiary)] mb-3">or click to browse (.xlsx, .csv)</p>
-                    <input 
-                      type="file" 
-                      accept=".csv, .xlsx, .xls" 
-                      className="hidden" 
-                      ref={fileInputRef} 
-                      onChange={handleFileUpload} 
+                    <input
+                      type="file"
+                      accept=".csv, .xlsx, .xls"
+                      className="hidden"
+                      ref={fileInputRef}
+                      onChange={handleFileUpload}
                     />
                     <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
                       {isUploading ? 'Uploading...' : 'Choose File'}
@@ -490,11 +484,11 @@ export function Step1SourceData() {
 
                 {(state.src === 'SAP_ECC' || state.src === 'ORACLE_EBS') && (
                   <div className="flex gap-2 pt-1">
-                    <Button 
-                      variant="secondary" 
-                      icon={<Cable className="w-3.5 h-3.5" />} 
-                      className="flex-1 justify-center" 
-                      disabled={isTestingConn || isFetchingSample || isUploading} 
+                    <Button
+                      variant="secondary"
+                      icon={<Cable className="w-3.5 h-3.5" />}
+                      className="flex-1 justify-center"
+                      disabled={isTestingConn || isFetchingSample || isUploading}
                       onClick={() => {
                         if (state.src === 'SAP_ECC') {
                           testConn();
@@ -505,11 +499,11 @@ export function Step1SourceData() {
                     >
                       {isTestingConn ? 'Testing...' : 'Test Connection'}
                     </Button>
-                    <Button 
-                      variant="warning" 
-                      icon={<Zap className="w-3.5 h-3.5" />} 
-                      className="flex-1" 
-                      disabled={isFetchingSample || isTestingConn || isUploading} 
+                    <Button
+                      variant="warning"
+                      icon={<Zap className="w-3.5 h-3.5" />}
+                      className="flex-1"
+                      disabled={isFetchingSample || isTestingConn || isUploading}
                       onClick={() => {
                         if (state.src === 'SAP_ECC') {
                           autoLoad();
@@ -530,22 +524,34 @@ export function Step1SourceData() {
               <CardHeader icon={<FolderGit2 className="w-4 h-4" />} title="Project Workspace" subtitle="Required for mapping" />
               <CardBody className="space-y-4">
                 <div>
+                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5 block">Target Object</label>
+                  <Select
+                    value={state.obj || ''}
+                    onChange={(val) => pickObj(val)}
+                    options={[
+                      { value: '', label: '— Select a target object —' },
+                      ...Object.entries(OBJS).map(([k, v]) => ({ value: k, label: `${v.label} (${v.module})` }))
+                    ]}
+                  />
+                </div>
+                <div>
                   <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5 block">Select Existing Project</label>
                   <div className="flex gap-2">
                     <div className="flex-1">
                       <Select
                         value={state.projectId || ''}
                         onChange={(val) => {
-                          dispatch({ type: 'SET_FIELD', field: 'projectId', value: val });
+                          const p = projects.find(proj => proj.id === val);
+                          dispatch({ type: 'BATCH_UPDATE', updates: { projectId: val, projectName: p ? p.name : null } });
                           setIsEditing(false);
                         }}
                         options={
-                          projects.length === 0 
+                          projects.length === 0
                             ? [{ value: '', label: 'No projects found (Create one below)' }]
                             : [
-                                { value: '', label: '— Select a project —' },
-                                ...projects.map(p => ({ value: p.id, label: p.name }))
-                              ]
+                              { value: '', label: '— Select a project —' },
+                              ...projects.map(p => ({ value: p.id, label: p.name }))
+                            ]
                         }
                       />
                     </div>
@@ -565,19 +571,19 @@ export function Step1SourceData() {
                 {isEditing && state.projectId && (
                   <div className="space-y-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
                     <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] block">Edit Project</label>
-                    <input 
-                      type="text" 
-                      placeholder="Project Name" 
+                    <input
+                      type="text"
+                      placeholder="Project Name"
                       value={editProjectName}
                       onChange={e => setEditProjectName(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" 
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors"
                     />
-                    <input 
-                      type="text" 
-                      placeholder="Description" 
+                    <input
+                      type="text"
+                      placeholder="Description"
                       value={editProjectDesc}
                       onChange={e => setEditProjectDesc(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" 
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors"
                     />
                     <div className="flex gap-2 mt-2">
                       <Button variant="secondary" className="flex-1 justify-center" onClick={() => setIsEditing(false)}>Cancel</Button>
@@ -585,30 +591,30 @@ export function Step1SourceData() {
                     </div>
                   </div>
                 )}
-                
+
                 <Divider />
-                
+
                 {!isEditing && (
                   <div className="space-y-2.5">
                     <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] block">Create New Project</label>
-                    <input 
-                      type="text" 
-                      placeholder="Project Name (e.g. Acme Corp Migration)" 
+                    <input
+                      type="text"
+                      placeholder="Project Name (e.g. Acme Corp Migration)"
                       value={newProjectName}
                       onChange={e => setNewProjectName(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" 
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors"
                     />
-                    <input 
-                      type="text" 
-                      placeholder="Description (Optional)" 
+                    <input
+                      type="text"
+                      placeholder="Description (Optional)"
                       value={newProjectDesc}
                       onChange={e => setNewProjectDesc(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" 
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors"
                     />
-                    <Button 
-                      variant="secondary" 
-                      icon={<Plus className="w-3.5 h-3.5" />} 
-                      className="w-full justify-center mt-2" 
+                    <Button
+                      variant="secondary"
+                      icon={<Plus className="w-3.5 h-3.5" />}
+                      className="w-full justify-center mt-2"
                       onClick={handleCreateProject}
                       disabled={isCreating || !newProjectName.trim()}
                     >

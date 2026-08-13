@@ -395,7 +395,7 @@ export function Step2AIMapping() {
         </GridCol>
 
         {/* Middle Column */}
-        <GridCol span={6}>
+        <GridCol span={9}>
           <PageHeader title="Step 2 — AI-Powered Field Mapping" subtitle="AI Engine semantically maps source fields to SAP S/4HANA fields with confidence scoring">
             <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/')}>Back</Button>
             <div title={state.headers.length === 0 ? "You must load Source Fields in Step 1 before generating an AI Mapping." : ""}>
@@ -597,20 +597,7 @@ export function Step2AIMapping() {
           )}
         </GridCol>
 
-        {/* Right Column */}
-        <GridCol span={3}>
-          <Card>
-            <CardBody className="p-3 space-y-4">
-              <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-1">Transform Rules</div>
-              {Object.entries(TRANSFORMS).map(([k, v]) => (
-                <div key={k} className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
-                  <div className="font-mono text-[10px] text-teal-600 dark:text-teal-400">{k}</div>
-                  <div className="text-[10px] text-[var(--text-tertiary)]">{v.label}</div>
-                </div>
-              ))}
-            </CardBody>
-          </Card>
-        </GridCol>
+
 
       </PageGrid>
     </PageLayout>

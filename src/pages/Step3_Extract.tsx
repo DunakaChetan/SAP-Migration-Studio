@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  CartesianGrid, PieChart, Pie
+  CartesianGrid, ScatterChart, Scatter, ZAxis, Legend,
+  ComposedChart, Line, Area, Brush
 } from 'recharts';
 import { jsPDF } from 'jspdf';
 
@@ -29,11 +30,13 @@ export function Step3Extract() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { showLoad, tick, hideLoad } = useLoading();
-  const [mode, setMode] = useState('full');
-  const [activeTab, setActiveTab] = useState<'completeness' | 'cardinality' | 'table'>('completeness');
+  const [rowLimit, setRowLimit] = useState(5000);
+  const [activeTab, setActiveTab] = useState<'table' | 'completeness' | 'cardinality' | 'raw'>('table');
   const [edaSearch, setEdaSearch] = useState('');
   const [showAllRisks, setShowAllRisks] = useState(false);
   const [showAllActions, setShowAllActions] = useState(false);
+  const [aiSummary, setAiSummary] = useState<any>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const has = state.extracted.length > 0;
 
@@ -66,13 +69,15 @@ export function Step3Extract() {
     }
   };
 
-  async function doExtract() {
-    if (!state.mapping.length) { toast('Generate mapping first', 'err'); return; }
-    dispatch({ type: 'SET_FIELD', field: 'isDataSaved', value: false });
+  const doExtract = async () => {
+    if (!state.src) { toast('Please configure a source first.', 'err'); return; }
+    if (state.mapping.length === 0) { toast('Please map fields before extracting.', 'err'); return; }
 
-    if (state.src === 'SAP_ECC') {
+    setAiSummary(null);
+
+    if (state.src === 'LIVE_SAP') {
       showLoad('Extracting from SAP…', 'Connecting to live system and generating AI Quality Report', [
-        'Connecting source…', 'Running $select query…', 'Applying mapping…', 'Running transforms…', 'AI EDA analysis…',
+        'Connecting source…', 'Running $select query…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
       ]);
       [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 400 + i * 500));
 
@@ -112,7 +117,7 @@ export function Step3Extract() {
       }
     } else if (state.src === 'EXCEL_CSV' || state.src === 'ORACLE_EBS') {
       showLoad('Extracting from File…', 'Processing uploaded data and generating AI Quality Report', [
-        'Reading memory…', 'Applying mapping…', 'Running transforms…', 'AI EDA analysis…',
+        'Reading memory…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
       ]);
       [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 300 + i * 400));
 
@@ -148,7 +153,7 @@ export function Step3Extract() {
       }
     } else {
       showLoad('Extracting…', 'Applying field mapping to source data', [
-        'Connecting source…', 'Reading records…', 'Applying mapping…', 'Running transforms…', 'AI quality analysis…',
+        'Connecting source…', 'Reading records…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
       ]);
       [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 350 + i * 380));
 
@@ -164,37 +169,11 @@ export function Step3Extract() {
       });
 
       try {
-        const aiR = await ai(
-          `Analyze this extracted SAP ${state.obj} data quality. Sample: ${JSON.stringify(extracted.slice(0, 3))}\nIdentify top 5 issues and quality score 0-100. Be specific about SAP field rules.\nRespond JSON: {"score":75,"issues":["issue1","issue2"],"recommendation":"text"}`,
-          state.aiLog
-        );
-        tick(4, 'AI analysis done');
+        tick(4, 'Quality analysis done');
         setTimeout(() => {
           hideLoad();
           dispatch({ type: 'SET_FIELD', field: 'extracted', value: extracted });
-          const res = parseAI(aiR) as Record<string, unknown> | null;
-          if (res) {
-            dispatch({
-              type: 'SET_FIELD', field: 'aiReport', value: {
-                ai_report: {
-                  report_title: `Executive Data Quality Report: ${state.obj} Master Data`,
-                  overall_score: res.score || 80,
-                  health_grade: (res.score as number) >= 85 ? 'A' : (res.score as number) >= 70 ? 'B' : 'C',
-                  executive_summary: String(res.recommendation || 'Data quality analysis completed successfully.'),
-                  critical_warnings: (res.issues as string[]) || [],
-                  recommendations: [String(res.recommendation || 'Review data quality before harmonization')]
-                },
-                eda_stats: Object.keys(extracted[0] || {}).map(k => ({
-                  field: k,
-                  null_percentage: 0,
-                  completeness_pct: 100,
-                  unique_count: extracted.length,
-                  max_length: 20,
-                  status: 'HEALTHY'
-                }))
-              }
-            });
-          }
+          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: null });
           toast(`Extracted ${extracted.length} records`, 'ok');
         }, 1500);
       } catch {
@@ -209,18 +188,18 @@ export function Step3Extract() {
 
   // Prepared data metrics for charts & report
   const edaStats = useMemo(() => {
-    const fromReport = state.aiReport?.eda_stats || state.aiReport?.report?.eda_stats;
-    if (Array.isArray(fromReport) && fromReport.length > 0) return fromReport;
-
-    // Fallback compute EDA stats dynamically from extracted dataset
     if (!state.extracted || state.extracted.length === 0) return [];
     const keys = Object.keys(state.extracted[0] || {});
     const total = state.extracted.length;
 
     return keys.map((field) => {
       let nullCount = 0;
+      let wsCount = 0;
+      let numCount = 0;
+      let strCount = 0;
       const uniqueVals = new Set<string>();
       let maxLen = 0;
+      let minLen = Infinity;
 
       state.extracted.forEach((row: any) => {
         const val = row[field];
@@ -230,57 +209,137 @@ export function Step3Extract() {
           const str = String(val);
           uniqueVals.add(str);
           if (str.length > maxLen) maxLen = str.length;
+          if (str.length < minLen) minLen = str.length;
+          if (str !== str.trim()) wsCount++;
+          if (!isNaN(Number(str))) numCount++;
+          else strCount++;
         }
       });
 
-      const nullPct = Math.round((nullCount / total) * 100);
-      const completePct = 100 - nullPct;
-      const status = nullPct <= 10 ? 'HEALTHY' : nullPct <= 50 ? 'WARNING' : 'CRITICAL';
+      if (minLen === Infinity) minLen = 0;
+      const populatedCount = total - nullCount;
+      const isConstant = (uniqueVals.size === 1 && populatedCount > 0);
+      const isMixedType = (numCount > 0 && strCount > 0 && populatedCount > 0);
+      const isMandatory = !!state.mapping.find(m => m.sap === field)?.req;
+
+      let status = 'HEALTHY';
+      if (isMandatory && nullCount > 0) status = 'CRITICAL';
+      else if (wsCount > 0 || isMixedType || (!isMandatory && nullCount === total)) status = 'WARNING';
 
       return {
         field,
+        is_mandatory: isMandatory,
         null_count: nullCount,
-        null_percentage: nullPct,
-        completeness_pct: completePct,
+        populated_count: populatedCount,
         unique_count: uniqueVals.size,
         max_length: maxLen,
+        min_length: minLen,
+        ws_count: wsCount,
+        is_constant: isConstant,
+        is_mixed_type: isMixedType,
         status
       };
     });
-  }, [state.aiReport, state.extracted]);
+  }, [state.extracted, state.mapping]);
 
   const reportMetrics = useMemo(() => {
-    const aiReportObj = state.aiReport?.ai_report || state.aiReport?.report?.ai_report || (typeof state.aiReport === 'object' && state.aiReport !== null && !state.aiReport.eda_stats ? state.aiReport : {});
-    const healthy = edaStats.filter((f: any) => (f.null_percentage ?? 0) <= 10).length;
-    const warning = edaStats.filter((f: any) => (f.null_percentage ?? 0) > 10 && (f.null_percentage ?? 0) <= 50).length;
-    const critical = edaStats.filter((f: any) => (f.null_percentage ?? 0) > 50).length;
+    const mandatoryFields = edaStats.filter((f: any) => f.is_mandatory);
+    const healthy = edaStats.filter((f: any) => f.status === 'HEALTHY').length;
+    const warning = edaStats.filter((f: any) => f.status === 'WARNING').length;
+    const critical = edaStats.filter((f: any) => f.status === 'CRITICAL').length;
     const totalFields = edaStats.length || 1;
+    const totalRecords = state.extracted.length || 1;
 
-    const calculatedScore = Math.round((healthy / totalFields) * 100);
-    const score = aiReportObj.overall_score ?? calculatedScore ?? 85;
-    const grade = aiReportObj.health_grade ?? (score >= 85 ? 'A' : score >= 70 ? 'B' : 'C');
+    let score = 100;
+    if (mandatoryFields.length > 0) {
+      const mandatoryErrors = mandatoryFields.reduce((sum, f) => sum + f.null_count, 0);
+      const totalMandatoryCells = mandatoryFields.length * totalRecords;
+      score = Math.round(((totalMandatoryCells - mandatoryErrors) / totalMandatoryCells) * 100);
+    } else {
+      const allErrors = edaStats.reduce((sum, f) => sum + f.null_count, 0);
+      const totalCells = totalFields * totalRecords;
+      score = Math.round(((totalCells - allErrors) / totalCells) * 100);
+    }
+
+    const grade = score >= 95 ? 'A' : score >= 80 ? 'B' : 'C';
+    
+    const warnings: string[] = [];
+    edaStats.filter((f: any) => f.is_mandatory && f.null_count > 0).forEach((f: any) => {
+      warnings.push(`Mandatory field [${f.field}] has ${f.null_count} missing values.`);
+    });
+    edaStats.filter((f: any) => f.max_length > 40).forEach((f: any) => {
+      warnings.push(`Field [${f.field}] exceeds SAP standard 40-char limit (Max: ${f.max_length}).`);
+    });
+
+    const recommendations: string[] = [];
+    edaStats.filter((f: any) => f.ws_count > 0).forEach((f: any) => {
+      recommendations.push(`Apply TRIM transform on [${f.field}]: ${f.ws_count} records contain invisible whitespace.`);
+    });
+    edaStats.filter((f: any) => f.is_constant).forEach((f: any) => {
+      recommendations.push(`[${f.field}] is a hardcoded constant. Consider removing from payload and defaulting in SAP.`);
+    });
+    edaStats.filter((f: any) => f.is_mixed_type).forEach((f: any) => {
+      recommendations.push(`[${f.field}] contains both text and numbers. Validate data type mapping.`);
+    });
+    
+    if (warnings.length === 0 && recommendations.length === 0) {
+       recommendations.push('Data quality looks excellent. Proceed to transformation.');
+    }
 
     return {
-      title: aiReportObj.report_title || `Executive Data Quality Report: ${state.obj} Master Data`,
-      summary: aiReportObj.executive_summary || `Automated data quality scan completed across ${state.extracted.length} records and ${totalFields} fields. ${healthy} fields are healthy with high population completeness.`,
+      title: `Deterministic Data Quality Report: ${state.obj} Master Data`,
+      summary: `Automated deterministic quality scan completed across ${totalRecords} records and ${totalFields} fields. Advanced formatting and length checks applied.`,
       score,
       grade,
       healthy,
       warning,
       critical,
       totalFields,
-      warnings: aiReportObj.critical_warnings || (critical > 0 ? [`${critical} field(s) contain high null rates (>50% empty).`] : []),
-      recommendations: aiReportObj.recommendations || ['Review unpopulated mandatory fields before starting harmonization.']
+      warnings,
+      recommendations
     };
-  }, [state.aiReport, edaStats, state.obj, state.extracted.length]);
+  }, [edaStats, state.obj, state.extracted.length]);
 
-  const pieData = useMemo(() => {
+  useEffect(() => {
+    if (edaStats.length > 0 && reportMetrics && !aiLoading && !aiSummary) {
+      console.log('LLM triggered');
+      setAiLoading(true);
+      fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/ai_summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stats: edaStats.slice(0, 50),
+          score: reportMetrics.score,
+          total_records: state.extracted.length,
+          target_object: state.obj
+        })
+      }).then(r => r.json()).then(data => {
+        if (data.aiAnalysis) setAiSummary(data.aiAnalysis);
+      }).catch(e => console.error(e)).finally(() => setAiLoading(false));
+    }
+  }, [edaStats, reportMetrics]);
+
+  const complianceData = useMemo(() => {
+    const mandatory = edaStats.filter((f: any) => f.is_mandatory);
+    const optional = edaStats.filter((f: any) => !f.is_mandatory);
+
     return [
-      { name: 'Healthy (Null ≤ 10%)', value: reportMetrics.healthy, color: '#10b981' },
-      { name: 'Warning (Null 10-50%)', value: reportMetrics.warning, color: '#f59e0b' },
-      { name: 'Critical (Null > 50%)', value: reportMetrics.critical, color: '#ef4444' }
-    ].filter(d => d.value > 0);
-  }, [reportMetrics]);
+      {
+        name: 'Mandatory',
+        Healthy: mandatory.filter((f: any) => f.status === 'HEALTHY').length,
+        Critical: mandatory.filter((f: any) => f.status === 'CRITICAL').length,
+        Warning: 0,
+        Total: mandatory.length
+      },
+      {
+        name: 'Optional',
+        Healthy: optional.filter((f: any) => f.status === 'HEALTHY').length,
+        Warning: optional.filter((f: any) => f.status === 'WARNING').length,
+        Critical: 0,
+        Total: optional.length
+      }
+    ].filter(d => d.Total > 0);
+  }, [edaStats]);
 
   // Clean Vector PDF Generator using jsPDF
   const exportToPDF = () => {
@@ -455,41 +514,13 @@ export function Step3Extract() {
     <PageLayout>
       <PageGrid>
 
-        {/* Left Column */}
-        <GridCol span={3}>
-          <Card>
-            <CardHeader title="Extract Config" />
-            <CardBody className="p-3 space-y-3">
-              <div className="space-y-2.5 px-1">
-                <div>
-                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Extraction Mode</label>
-                  <Select
-                    value={mode}
-                    onChange={setMode}
-                    options={[{ value: 'full', label: 'Full Load' }, { value: 'delta', label: 'Delta Load' }, { value: 'sample', label: 'Sample (100 rows)' }]}
-                  />
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Filter Condition</label>
-                  <input type="text" placeholder="e.g. LAND1='IN'" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12px] text-[var(--text-primary)] outline-none" />
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Row Limit</label>
-                  <input type="text" defaultValue="5000" className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12px] text-[var(--text-primary)] outline-none" />
-                </div>
-              </div>
-              <div className="border-t border-[var(--border)] my-3" />
-              <div className="text-[10.5px] font-semibold text-[var(--text-secondary)] mb-2 px-1">Pipeline Status</div>
-              {[[<Plug className="w-4 h-4 text-blue-500" />, 'Connect Source', 'Establish connection'], [<ClipboardList className="w-4 h-4 text-emerald-500" />, 'Apply Mapping', 'Use field definitions'], [<Filter className="w-4 h-4 text-amber-500" />, 'Apply Filters', 'WHERE conditions'], [<Download className="w-4 h-4 text-violet-500" />, 'Extract Records', 'Pull matching rows'], [<CheckCircle2 className="w-4 h-4 text-teal-500" />, 'Reconcile Count', 'Verify records']].map(([ico, t, s], i) => (
-                <PipelineStep key={i} icon={ico} title={t as string} subtitle={s as string} done={has} />
-              ))}
-            </CardBody>
-          </Card>
-        </GridCol>
-
-        {/* Middle Column */}
-        <GridCol span={6}>
-          <PageHeader title="Step 3 — Data Extraction" subtitle="Pull legacy data and validate against AI Mapping schemas">
+        {/* Main Column */}
+        <GridCol span={12}>
+          <PageHeader title="Step 3 — Data Extraction" subtitle="Pull legacy data and validate against Mapping schemas">
+            <div className="flex items-center gap-2 mr-4">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)]">Row Limit:</span>
+              <input type="number" value={rowLimit} onChange={(e) => setRowLimit(Number(e.target.value))} className="w-20 rounded-md border border-[var(--border)] bg-[var(--bg-tertiary)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none" />
+            </div>
             <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/mapping')}>Back</Button>
             <div title={state.mapping.length === 0 ? "You must complete Step 2 (AI Mapping) before extracting data." : ""}>
               <Button variant="cyan" icon={<RefreshCw className="w-3.5 h-3.5" />} onClick={doExtract} disabled={state.mapping.length === 0}>Run Extraction</Button>
@@ -520,35 +551,12 @@ export function Step3Extract() {
               )}
             </CardHeader>
             <CardBody>
-              {has ? <DataTable rows={state.extracted.slice(0, 8)} cols={Object.keys(state.extracted[0] || {})} /> : <EmptyState icon={<UploadCloud className="w-10 h-10 text-primary-500" />} message="Run extraction to see mapped data" />}
+              {has ? <DataTable rows={state.extracted.slice(0, rowLimit)} cols={Object.keys(state.extracted[0] || {})} /> : <EmptyState icon={<UploadCloud className="w-10 h-10 text-primary-500" />} message="Run extraction to see mapped data" />}
             </CardBody>
           </Card>
         </GridCol>
 
-        {/* Right Column */}
-        <GridCol span={3}>
-          <Card>
-            <CardBody className="p-3 space-y-4">
-              <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-2">SQL Query Preview</div>
-              <CodeBlock>
-                <span className="text-primary-500">SELECT</span><br />
-                &nbsp;&nbsp;<span className="text-teal-500">{(state.headers.slice(0, 5) || ['*']).join(',\n  ')}</span><br />
-                <span className="text-primary-500">FROM</span> <span className="text-emerald-500">SOURCE_TABLE</span><br />
-                <span className="text-primary-500">WHERE</span> 1=1<br />
-                <span className="text-primary-500">FETCH FIRST</span> <span className="text-amber-500">5000</span> <span className="text-primary-500">ROWS</span>
-              </CodeBlock>
-              <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mt-3 mb-2">ABAP RFC Extract</div>
-              <CodeBlock className="text-[9.5px]">
-                <span className="text-[var(--text-tertiary)]">"* SAP ECC RFC</span><br />
-                <span className="text-primary-500">CALL FUNCTION</span> <span className="text-emerald-500">'RFC_READ_TABLE'</span><br />
-                &nbsp;<span className="text-primary-500">EXPORTING</span><br />
-                &nbsp;&nbsp;QUERY_TABLE = <span className="text-emerald-500">'KNA1'</span><br />
-                &nbsp;<span className="text-primary-500">TABLES</span><br />
-                &nbsp;&nbsp;DATA = lt_data.
-              </CodeBlock>
-            </CardBody>
-          </Card>
-        </GridCol>
+
       </PageGrid>
 
       {/* ───────────────────────────────────────────────────── */}
@@ -642,85 +650,36 @@ export function Step3Extract() {
               </div>
             </div>
 
-            {/* ── Main 2-Column Section ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: 20, alignItems: 'start' }}>
+            {/* ── Main Visual Analytics & Summary ── */}
+            <div className="flex flex-col lg:flex-row gap-5 items-start">
 
-              {/* LEFT COLUMN: Narrative & Donut */}
-              <div className="space-y-4">
+              {/* LEFT MAIN: Data Table & Scatter Plot */}
+              <div className="flex-1 space-y-4 min-w-0">
 
-                {/* Executive Summary Card */}
-                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
-                  <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)] mb-2.5">
-                    <ClipboardList className="w-4 h-4 text-indigo-500" /> Executive Summary
-                  </div>
-                  <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
-                    {reportMetrics.summary}
-                  </p>
-                </div>
-
-                {/* Field Health Donut Gauge */}
-                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)] mb-3">
-                    Field Health Breakdown
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div style={{ width: 130, height: 130, position: 'relative', flexShrink: 0 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Tooltip
-                            contentStyle={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '11px' }}
-                          />
-                          <Pie data={pieData} cx="50%" cy="50%" innerRadius={38} outerRadius={58} paddingAngle={3} dataKey="value" stroke="none">
-                            {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                          </Pie>
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <span className="text-base font-black font-mono text-[var(--text-primary)]">{reportMetrics.score}%</span>
-                        <span className="text-[8px] text-[var(--text-tertiary)] uppercase font-mono tracking-wider">Health</span>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 space-y-2 text-[11.5px]">
-                      <div className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--bg-tertiary)]/50">
-                        <span className="flex items-center gap-1.5 text-[var(--text-secondary)]"><span className="w-2 h-2 rounded-full bg-emerald-500"/>Healthy</span>
-                        <span className="font-bold font-mono text-emerald-500">{reportMetrics.healthy}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--bg-tertiary)]/50">
-                        <span className="flex items-center gap-1.5 text-[var(--text-secondary)]"><span className="w-2 h-2 rounded-full bg-amber-500"/>Warning</span>
-                        <span className="font-bold font-mono text-amber-500">{reportMetrics.warning}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--bg-tertiary)]/50">
-                        <span className="flex items-center gap-1.5 text-[var(--text-secondary)]"><span className="w-2 h-2 rounded-full bg-red-500"/>Critical</span>
-                        <span className="font-bold font-mono text-red-500">{reportMetrics.critical}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* RIGHT COLUMN: Visual Analytics + Risks & Action Plan Dropdowns */}
-              <div className="space-y-4">
-
-                {/* Card 1: Exploratory Visual Analytics */}
+                {/* Visual Analytics Container */}
                 <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-5 shadow-sm space-y-4">
-
+                  
                   {/* Tab Header Bar */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
                     <div className="flex items-center gap-2">
                       <BarChart2 className="w-4 h-4 text-indigo-500" />
                       <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                        Exploratory Visual Analytics
+                        Field-Level Analytics
                       </span>
                     </div>
 
                     <div className="flex bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg p-1 gap-1 text-[11px]">
                       <button
+                        onClick={() => setActiveTab('table')}
+                        className={`px-3 py-1 rounded-md font-medium transition-all ${activeTab === 'table' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                      >
+                        Data Table
+                      </button>
+                      <button
                         onClick={() => setActiveTab('completeness')}
                         className={`px-3 py-1 rounded-md font-medium transition-all ${activeTab === 'completeness' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                       >
-                        Completeness %
+                        Populated vs Null
                       </button>
                       <button
                         onClick={() => setActiveTab('cardinality')}
@@ -728,107 +687,10 @@ export function Step3Extract() {
                       >
                         Cardinality
                       </button>
-                      <button
-                        onClick={() => setActiveTab('table')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all ${activeTab === 'table' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                      >
-                        Data Table
-                      </button>
                     </div>
                   </div>
 
-                  {/* Chart 1: Field Completeness % */}
-                  {activeTab === 'completeness' && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] text-[var(--text-secondary)]">Percentage of non-null populated values across mapped fields</div>
-                      <div style={{ width: '100%', height: 320 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={edaStats.slice(0, 18)}
-                            margin={{ top: 12, right: 12, bottom: 60, left: 0 }}
-                            barCategoryGap="30%"
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.5} />
-                            <XAxis
-                              dataKey="field"
-                              tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
-                              tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 10) + '…' : v}
-                              axisLine={false}
-                              tickLine={false}
-                              interval={0}
-                              angle={-40}
-                              textAnchor="end"
-                              height={65}
-                            />
-                            <YAxis
-                              tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
-                              axisLine={false}
-                              tickLine={false}
-                              domain={[0, 100]}
-                              tickFormatter={(v: number) => `${v}%`}
-                              width={38}
-                            />
-                            <Tooltip
-                              cursor={{ fill: 'var(--bg-secondary)', opacity: 0.35 }}
-                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-                              formatter={(value: any, _n: any, props: any) => [`${value}% Completeness`, `${props.payload?.field}`]}
-                              labelFormatter={() => ''}
-                            />
-                            <Bar dataKey="completeness_pct" radius={[4, 4, 0, 0]} maxBarSize={36}>
-                              {edaStats.slice(0, 18).map((entry: any, i: number) => {
-                                const np = entry.null_percentage ?? 0;
-                                return <Cell key={i} fill={np <= 10 ? '#10b981' : np <= 50 ? '#f59e0b' : '#ef4444'} />;
-                              })}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Chart 2: Field Cardinality */}
-                  {activeTab === 'cardinality' && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] text-[var(--text-secondary)]">Number of unique distinct values per field</div>
-                      <div style={{ width: '100%', height: 320 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={edaStats.slice(0, 18)}
-                            margin={{ top: 12, right: 12, bottom: 60, left: 0 }}
-                            barCategoryGap="30%"
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.5} />
-                            <XAxis
-                              dataKey="field"
-                              tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
-                              tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 10) + '…' : v}
-                              axisLine={false}
-                              tickLine={false}
-                              interval={0}
-                              angle={-40}
-                              textAnchor="end"
-                              height={65}
-                            />
-                            <YAxis
-                              tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
-                              axisLine={false}
-                              tickLine={false}
-                              width={38}
-                            />
-                            <Tooltip
-                              cursor={{ fill: 'var(--bg-secondary)', opacity: 0.35 }}
-                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-                              formatter={(value: any, _n: any, props: any) => [`${value} Unique Values`, `${props.payload?.field}`]}
-                              labelFormatter={() => ''}
-                            />
-                            <Bar dataKey="unique_count" fill="#06b6d4" radius={[4, 4, 0, 0]} maxBarSize={36} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* View 3: Statistical Data Table */}
+                  {/* Primary Data Table */}
                   {activeTab === 'table' && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-3">
@@ -846,17 +708,16 @@ export function Step3Extract() {
                           Showing {edaStats.filter((r: any) => String(r.field || '').toLowerCase().includes(edaSearch.toLowerCase())).length} of {edaStats.length} fields
                         </span>
                       </div>
-
-                      <div className="overflow-x-auto rounded-lg border border-[var(--border)] max-h-[300px] overflow-y-auto">
+                      
+                      <div className="overflow-x-auto rounded-lg border border-[var(--border)] max-h-[400px] overflow-y-auto">
                         <table className="w-full text-left text-[11.5px]">
                           <thead className="bg-[var(--bg-tertiary)] sticky top-0 border-b border-[var(--border)] text-[var(--text-tertiary)] font-mono uppercase text-[9.5px]">
                             <tr>
                               <th className="py-2.5 px-3">Field</th>
-                              <th className="py-2.5 px-3">Null #</th>
-                              <th className="py-2.5 px-3">Null %</th>
-                              <th className="py-2.5 px-3">Complete %</th>
+                              <th className="py-2.5 px-3 w-16">Mandatory</th>
+                              <th className="py-2.5 px-3 min-w-[120px]">Populated vs Null</th>
                               <th className="py-2.5 px-3">Uniques</th>
-                              <th className="py-2.5 px-3">Max Len</th>
+                              <th className="py-2.5 px-3 min-w-[120px]">Format Anomalies</th>
                               <th className="py-2.5 px-3">Status</th>
                             </tr>
                           </thead>
@@ -864,106 +725,264 @@ export function Step3Extract() {
                             {edaStats
                               .filter((r: any) => String(r.field || '').toLowerCase().includes(edaSearch.toLowerCase()))
                               .map((row: any, i: number) => {
-                                const np = row.null_percentage ?? 0;
-                                const st = row.status || (np <= 10 ? 'HEALTHY' : np <= 50 ? 'WARNING' : 'CRITICAL');
-                                const bc = st === 'HEALTHY' ? { bg: '#10b98115', txt: '#10b981', brd: '#10b98130' }
-                                  : st === 'WARNING' ? { bg: '#f59e0b15', txt: '#f59e0b', brd: '#f59e0b30' }
-                                  : { bg: '#ef444415', txt: '#ef4444', brd: '#ef444430' };
-                                return (
-                                  <tr key={i} className="hover:bg-[var(--bg-tertiary)]/50 transition-colors">
-                                    <td className="py-2 px-3 font-semibold text-[var(--text-primary)] whitespace-nowrap">{row.field}</td>
-                                    <td className="py-2 px-3 text-[var(--text-secondary)]">{row.null_count ?? Math.round((np / 100) * state.extracted.length)}</td>
-                                    <td className="py-2 px-3 text-[var(--text-secondary)]">{np}%</td>
-                                    <td className="py-2 px-3 text-[var(--text-secondary)]">{row.completeness_pct ?? (100 - np).toFixed(1)}%</td>
-                                    <td className="py-2 px-3 text-[var(--text-secondary)]">{row.unique_count}</td>
-                                    <td className="py-2 px-3 text-[var(--text-secondary)]">{row.max_length}</td>
-                                    <td className="py-2 px-3">
-                                      <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 20, fontWeight: 700, background: bc.bg, color: bc.txt, border: `1px solid ${bc.brd}` }}>
-                                        {st}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
+                              const st = row.status || 'HEALTHY';
+                              const bc = st === 'HEALTHY' ? { bg: '#10b98115', txt: '#10b981', brd: '#10b98130' }
+                                : st === 'WARNING' ? { bg: '#f59e0b15', txt: '#f59e0b', brd: '#f59e0b30' }
+                                : { bg: '#ef444415', txt: '#ef4444', brd: '#ef444430' };
+                              
+                              const total = state.extracted.length || 1;
+                              const popPct = (row.populated_count / total) * 100;
+                              const nullPct = (row.null_count / total) * 100;
+
+                              return (
+                                <tr key={i} className="hover:bg-[var(--bg-tertiary)]/50 transition-colors">
+                                  <td className="py-2 px-3 font-semibold text-[var(--text-primary)] whitespace-nowrap">{row.field}</td>
+                                  <td className="py-2 px-3 text-[var(--text-secondary)]">{row.is_mandatory ? 'Yes' : 'No'}</td>
+                                  <td className="py-2 px-3">
+                                    <div className="flex flex-col gap-1 w-full max-w-[120px]">
+                                      <div className="flex justify-between text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider">
+                                        <span>{row.populated_count} Pop</span>
+                                        <span>{row.null_count} Null</span>
+                                      </div>
+                                      <div className="w-full h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden flex">
+                                        <div className="h-full bg-emerald-500" style={{ width: `${popPct}%` }} />
+                                        <div className="h-full bg-red-500" style={{ width: `${nullPct}%` }} />
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-2 px-3 text-[var(--text-secondary)]">{row.unique_count}</td>
+                                  <td className="py-2 px-3">
+                                    <div className="flex gap-1 flex-wrap max-w-[150px]">
+                                      {row.ws_count > 0 && <span className="bg-amber-500/20 text-amber-600 px-1.5 py-0.5 rounded text-[9px] border border-amber-500/30">Whitespace</span>}
+                                      {row.is_mixed_type && <span className="bg-purple-500/20 text-purple-600 px-1.5 py-0.5 rounded text-[9px] border border-purple-500/30">Mixed Type</span>}
+                                      {row.is_constant && <span className="bg-blue-500/20 text-blue-600 px-1.5 py-0.5 rounded text-[9px] border border-blue-500/30">Constant</span>}
+                                      {row.max_length > 40 && <span className="bg-red-500/20 text-red-600 px-1.5 py-0.5 rounded text-[9px] border border-red-500/30">Len &gt; 40</span>}
+                                      {!(row.ws_count > 0 || row.is_mixed_type || row.is_constant || row.max_length > 40) && <span className="text-[var(--text-tertiary)] text-[9px]">—</span>}
+                                    </div>
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 20, fontWeight: 700, background: bc.bg, color: bc.txt, border: `1px solid ${bc.brd}` }}>
+                                      {st}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
                     </div>
                   )}
 
+                  {/* Chart 1: Populated vs Null Composed */}
+                  {activeTab === 'completeness' && (
+                    <div className="space-y-2">
+                      <div className="text-[11px] text-[var(--text-secondary)]">Distribution of Populated vs Null records (Use the brush below to zoom/pan)</div>
+                      <div style={{ width: '100%', height: 350 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart
+                            data={edaStats}
+                            margin={{ top: 20, right: 20, bottom: 20, left: 0 }}
+                          >
+                            <defs>
+                              <linearGradient id="popColor" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
+                                <stop offset="95%" stopColor="#10b981" stopOpacity={0.1}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.5} />
+                            <XAxis
+                              dataKey="field"
+                              tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
+                              tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 10) + '…' : v}
+                              axisLine={false}
+                              tickLine={false}
+                              height={60}
+                              angle={-45}
+                              textAnchor="end"
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
+                              axisLine={false}
+                              tickLine={false}
+                              width={40}
+                            />
+                            <Tooltip
+                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                              labelFormatter={(lbl) => `Field: ${lbl}`}
+                            />
+                            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
+                            <Area type="monotone" dataKey="populated_count" name="Populated" fillOpacity={1} fill="url(#popColor)" stroke="#10b981" />
+                            <Line type="monotone" dataKey="null_count" name="Null" stroke="#ef4444" strokeWidth={2} dot={{ r: 3, fill: '#ef4444' }} activeDot={{ r: 6 }} />
+                            <Brush dataKey="field" height={25} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(15, edaStats.length - 1)} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Chart 2: Cardinality Composed */}
+                  {activeTab === 'cardinality' && (
+                    <div className="space-y-2">
+                      <div className="text-[11px] text-[var(--text-secondary)]">Unique distinct values per field (Constants highlighted in purple)</div>
+                      <div style={{ width: '100%', height: 350 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart
+                            data={edaStats}
+                            margin={{ top: 20, right: 20, bottom: 20, left: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.5} />
+                            <XAxis
+                              dataKey="field"
+                              tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
+                              tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 10) + '…' : v}
+                              axisLine={false}
+                              tickLine={false}
+                              height={60}
+                              angle={-45}
+                              textAnchor="end"
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
+                              axisLine={false}
+                              tickLine={false}
+                              width={40}
+                            />
+                            <Tooltip
+                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                              labelFormatter={(lbl) => `Field: ${lbl}`}
+                              formatter={(value: any, name: any, props: any) => [
+                                value, 
+                                props.payload.is_constant ? 'Constant Value' : 'Unique Values'
+                              ]}
+                            />
+                            <Bar dataKey="unique_count" name="Unique Values" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                              {edaStats.map((entry: any, index: number) => (
+                                <Cell key={`cell-${index}`} fill={entry.is_constant ? '#8b5cf6' : '#06b6d4'} />
+                              ))}
+                            </Bar>
+                            <Brush dataKey="field" height={25} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(15, edaStats.length - 1)} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* End Tabs */}
                 </div>
 
-                {/* Card 2: Critical Migration Risks (Collapsible Dropdown) */}
-                {reportMetrics.warnings.length > 0 && (
-                  <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 shadow-sm space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-red-500">
-                        <ShieldAlert className="w-4 h-4" /> Critical Migration Risks ({reportMetrics.warnings.length})
-                      </div>
-                      {reportMetrics.warnings.length > 2 && (
-                        <button
-                          onClick={() => setShowAllRisks(!showAllRisks)}
-                          className="flex items-center gap-1 text-[10.5px] font-semibold text-red-500 hover:text-red-400 transition-colors cursor-pointer bg-red-500/10 px-2.5 py-1 rounded-md"
-                        >
-                          {showAllRisks ? (
-                            <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
-                          ) : (
-                            <>Show All ({reportMetrics.warnings.length - 2} more) <ChevronDown className="w-3.5 h-3.5" /></>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      {(showAllRisks ? reportMetrics.warnings : reportMetrics.warnings.slice(0, 2)).map((w: string, i: number) => (
-                        <div key={i} className="flex gap-2 text-[11.5px] text-red-400 leading-snug bg-red-500/5 p-2.5 rounded-lg border border-red-500/10">
-                          <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-                          <span>{w.replace(/^\*\*(.*?)\*\*/, '$1').replace(/^\*/, '').trim()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Card 3: Action Plan & Recommended Fixes (Collapsible Dropdown) */}
-                {reportMetrics.recommendations.length > 0 && (
-                  <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                        <Zap className="w-4 h-4 text-amber-500" /> Action Plan & Recommended Fixes ({reportMetrics.recommendations.length})
-                      </div>
-                      {reportMetrics.recommendations.length > 2 && (
-                        <button
-                          onClick={() => setShowAllActions(!showAllActions)}
-                          className="flex items-center gap-1 text-[10.5px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-500 transition-colors cursor-pointer bg-amber-500/10 px-2.5 py-1 rounded-md"
-                        >
-                          {showAllActions ? (
-                            <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
-                          ) : (
-                            <>Show All ({reportMetrics.recommendations.length - 2} more) <ChevronDown className="w-3.5 h-3.5" /></>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      {(showAllActions ? reportMetrics.recommendations : reportMetrics.recommendations.slice(0, 2)).map((r: string, i: number) => {
-                        const match = r.match(/^([^:]+):(.*)/);
-                        const title = match ? match[1].replace(/^\d+\.\s*/, '').replace(/^\*\*(.*?)\*\*/, '$1') : `Action ${i + 1}`;
-                        const desc = match ? match[2] : r;
-                        return (
-                          <div key={i} className="p-2.5 rounded-lg bg-[var(--bg-tertiary)]/60 border border-[var(--border)]">
-                            <div className="text-[11px] font-semibold text-[var(--text-primary)] flex items-center gap-1.5 mb-1">
-                              <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                              {title.trim()}
-                            </div>
-                            <div className="text-[10.5px] text-[var(--text-secondary)] leading-relaxed pl-5">{desc.trim()}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
               </div>
+
+              {/* RIGHT COLUMN: Mandatory Stacked Bar */}
+              <div className="w-full lg:w-[320px] flex flex-col gap-4 shrink-0">
+                {/* Mandatory Compliance Chart */}
+                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
+                    Mandatory vs Optional Compliance
+                  </div>
+                  <div style={{ width: '100%', height: 180 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={complianceData}
+                        layout="vertical"
+                        margin={{ top: 0, right: 10, bottom: 0, left: 0 }}
+                        barSize={32}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--border)" opacity={0.5} />
+                        <XAxis type="number" hide />
+                        <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: 'var(--text-primary)', fontWeight: 600 }} axisLine={false} tickLine={false} width={65} />
+                        <Tooltip
+                          cursor={{ fill: 'var(--bg-secondary)', opacity: 0.2 }}
+                          contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 10, paddingTop: 10 }} />
+                        <Bar dataKey="Healthy" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="Warning" stackId="a" fill="#f59e0b" radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="Critical" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="text-[10px] text-[var(--text-tertiary)] text-center">
+                    Red indicates critical blockers in mandatory fields.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* BOTTOM FULL-WIDTH: Exec Summary, Risks, Actions */}
+            <div className="flex flex-col gap-4 mt-5">
+              
+              {/* Executive Summary Card */}
+              <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
+                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)] mb-2.5">
+                  <ClipboardList className="w-4 h-4 text-indigo-500" /> {aiSummary ? 'AI Executive Summary' : 'Executive Summary'}
+                </div>
+                <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                  {aiSummary?.summary || reportMetrics.summary}
+                </p>
+              </div>
+
+              {/* Critical Migration Risks */}
+              {(aiSummary?.warnings || reportMetrics.warnings).length > 0 && (
+                <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 shadow-sm space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-red-500">
+                      <ShieldAlert className="w-4 h-4" /> {aiSummary ? 'AI Assessed Risks' : 'Critical Migration Risks'} ({(aiSummary?.warnings || reportMetrics.warnings).length})
+                    </div>
+                    {(aiSummary?.warnings || reportMetrics.warnings).length > 2 && (
+                      <button
+                        onClick={() => setShowAllRisks(!showAllRisks)}
+                        className="flex items-center gap-1 text-[10.5px] font-semibold text-red-500 hover:text-red-400 transition-colors cursor-pointer bg-red-500/10 px-2.5 py-1 rounded-md"
+                      >
+                        {showAllRisks ? (
+                          <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
+                        ) : (
+                          <>Show All <ChevronDown className="w-3.5 h-3.5" /></>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {(showAllRisks ? (aiSummary?.warnings || reportMetrics.warnings) : (aiSummary?.warnings || reportMetrics.warnings).slice(0, 2)).map((w: string, i: number) => (
+                      <div key={i} className="flex gap-2 text-[11.5px] text-red-400 leading-snug bg-red-500/5 p-2.5 rounded-lg border border-red-500/10">
+                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                        <span>{w}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Plan & Recommended Fixes */}
+              {(aiSummary?.recommendations || reportMetrics.recommendations).length > 0 && (
+                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
+                      <Zap className="w-4 h-4 text-amber-500" /> {aiSummary ? 'AI Strategic Plan' : 'Action Plan'} ({(aiSummary?.recommendations || reportMetrics.recommendations).length})
+                    </div>
+                    {(aiSummary?.recommendations || reportMetrics.recommendations).length > 2 && (
+                      <button
+                        onClick={() => setShowAllActions(!showAllActions)}
+                        className="flex items-center gap-1 text-[10.5px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-500 transition-colors cursor-pointer bg-amber-500/10 px-2.5 py-1 rounded-md"
+                      >
+                        {showAllActions ? (
+                          <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
+                        ) : (
+                          <>Show All <ChevronDown className="w-3.5 h-3.5" /></>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {(showAllActions ? (aiSummary?.recommendations || reportMetrics.recommendations) : (aiSummary?.recommendations || reportMetrics.recommendations).slice(0, 2)).map((r: string, i: number) => (
+                      <div key={i} className="p-2.5 rounded-lg bg-[var(--bg-tertiary)]/60 border border-[var(--border)] text-[10.5px] text-[var(--text-secondary)] flex items-start gap-2">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                        {r}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             </div>
 

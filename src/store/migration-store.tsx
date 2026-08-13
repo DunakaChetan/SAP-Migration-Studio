@@ -25,6 +25,7 @@ export interface ValidationEntry {
 
 export interface MigrationState {
   projectId: string | null;
+  projectName: string | null;
   connUrl: string;
   connClient: string;
   connUser: string;
@@ -66,6 +67,7 @@ export interface MigrationState {
 
 const defaultState: MigrationState = {
   projectId: null,
+  projectName: null,
   connUrl: '',
   connClient: '100',
   connUser: '',

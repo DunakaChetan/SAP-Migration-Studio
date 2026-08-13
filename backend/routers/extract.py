@@ -326,3 +326,43 @@ def save_extraction(req: SaveExtractionRequest):
     except Exception as e:
         logger.error(f"Failed to save extraction: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save extraction: {str(e)}")
+
+class AISummaryRequest(BaseModel):
+    stats: list
+    score: int
+    total_records: int
+    target_object: str
+
+@router.post("/ai_summary")
+def generate_ai_summary(req: AISummaryRequest):
+    try:
+        from services.llm_orchestrator import llm_orchestrator
+        import re
+        
+        system_prompt = "You are an expert SAP Data Migration Architect. Generate a professional summary from the exact algorithmic stats provided. Respond ONLY with valid JSON."
+        user_prompt = f"""
+        Algorithm Results for {req.target_object}:
+        Records: {req.total_records}
+        Score: {req.score}/100
+        Field Analytics: {json.dumps(req.stats)}
+
+        Based STRICTLY on the numbers provided, generate:
+        {{
+          "summary": "Executive summary paragraph...",
+          "warnings": ["Critical warning 1", "Critical warning 2"],
+          "recommendations": ["Action plan step 1", "Action plan step 2"]
+        }}
+        """
+        
+        result_str = llm_orchestrator.generate_generic(system_prompt, user_prompt)
+        
+        json_match = re.search(r"\{.*\}", result_str, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group(0))
+        else:
+            data = json.loads(result_str)
+            
+        return {"status": "success", "aiAnalysis": data}
+    except Exception as e:
+        logger.error(f"Failed to generate AI summary: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

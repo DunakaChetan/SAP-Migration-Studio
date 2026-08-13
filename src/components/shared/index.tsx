@@ -462,13 +462,13 @@ interface ConfirmModalProps {
   onCancel: () => void;
   isDestructive?: boolean;
 }
-export function ConfirmModal({ 
-  isOpen, 
-  title, 
-  message, 
-  confirmText = 'Confirm', 
-  cancelText = 'Cancel', 
-  onConfirm, 
+export function ConfirmModal({
+  isOpen,
+  title,
+  message,
+  confirmText = 'Confirm',
+  cancelText = 'Cancel',
+  onConfirm,
   onCancel,
   isDestructive = false
 }: ConfirmModalProps) {
