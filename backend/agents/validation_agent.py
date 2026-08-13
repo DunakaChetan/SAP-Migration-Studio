@@ -306,6 +306,7 @@ class ValidationAgent:
         obj: str,
         rows: List[Dict[str, Any]],
         dynamic_rules: Optional[List[Dict[str, Any]]] = None,
+        selected_standard_rules: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         fields = OBJS.get(obj)
         if not fields:
@@ -343,8 +344,12 @@ class ValidationAgent:
                 })
         
         for r in RULES:
-            if r["id"] not in overridden_rule_ids:
-                all_rules.append(r)
+            # Only include standard rule when not overridden and when selected by user (if provided)
+            if r["id"] in overridden_rule_ids:
+                continue
+            if selected_standard_rules is not None and r["id"] not in selected_standard_rules:
+                continue
+            all_rules.append(r)
 
         validated = []
         rule_failures: Dict[str, List[Dict[str, Any]]] = {r["id"]: [] for r in all_rules}
@@ -352,18 +357,29 @@ class ValidationAgent:
         for idx, row in enumerate(rows):
             smart_row = SmartRow(row)
             result = self.validate_row(smart_row, fields, dynamic_rules)
-            validated.append({"idx": idx, "row": row, "errs": result["errs"], "warns": result["warns"], "st": result["st"]})
-            for issue in result["errs"] + result["warns"]:
-                if issue["rule"] in rule_failures:
-                    actual_f = issue["f"]
-                    val = smart_row.get(actual_f, "")
-                    rule_failures[issue["rule"]].append({
-                        "idx": idx,
-                        "field": actual_f,
-                        "value": val,
-                        "message": issue["m"],
-                        "severity": issue["sev"],
-                    })
+            # Filter row-level issues so only those for active (included) rules are kept
+            active_errs = [issue for issue in result.get("errs", []) if issue.get("rule") in rule_failures]
+            active_warns = [issue for issue in result.get("warns", []) if issue.get("rule") in rule_failures]
+            # Recompute overall row status after filtering
+            if active_errs:
+                st = "ERROR"
+            elif active_warns:
+                st = "WARN"
+            else:
+                st = "PASS"
+
+            validated.append({"idx": idx, "row": row, "errs": active_errs, "warns": active_warns, "st": st})
+
+            for issue in active_errs + active_warns:
+                actual_f = issue["f"]
+                val = smart_row.get(actual_f, "")
+                rule_failures[issue["rule"]].append({
+                    "idx": idx,
+                    "field": actual_f,
+                    "value": val,
+                    "message": issue["m"],
+                    "severity": issue["sev"],
+                })
 
         total = len(rows)
         report = []
@@ -389,7 +405,8 @@ class ValidationAgent:
             "overridden_rules": list(overridden_rule_ids)
         }
 
-        return {"validated": validated, "report": report, "stats": stats}
+        applied_standard = [r["id"] for r in all_rules if not r.get("is_dynamic")]
+        return {"validated": validated, "report": report, "stats": stats, "applied_standard_rules": applied_standard}
 
 # Generator for Sample CSV
 _VALID_COUNTRIES = ["IN", "US", "DE", "GB", "FR", "SG", "AU", "CA", "JP", "AE"]

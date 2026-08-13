@@ -51,6 +51,27 @@ export function Step5Validate() {
   const [newPromptInput, setNewPromptInput] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
+  // Standard rule selection + overrides
+  const STANDARD_RULES = [
+    { id: 'REQUIRED_FIELDS', label: 'Required Fields', description: 'Must not be empty' },
+    { id: 'FIELD_LENGTH', label: 'Field Length', description: 'Max char enforcement' },
+    { id: 'COUNTRY_ISO', label: 'Country ISO', description: '2-3 letter format' },
+    { id: 'CURRENCY_ISO', label: 'Currency ISO', description: '3-letter ISO 4217' },
+    { id: 'NUMERIC_ID', label: 'Numeric IDs', description: 'KUNNR/LIFNR digits' },
+    { id: 'EMAIL_FORMAT', label: 'Email Format', description: 'Valid @ format' },
+    { id: 'DATE_FORMAT', label: 'Date Format', description: 'YYYYMMDD 8 digits' },
+    { id: 'PAYMENT_TERMS', label: 'Payment Terms', description: 'SAP NT30/NT45 format' }
+  ];
+
+  const [selectedRules, setSelectedRules] = useState<Record<string, boolean>>(
+    Object.fromEntries(STANDARD_RULES.map((r) => [r.id, true]))
+  );
+  const [standardEditingId, setStandardEditingId] = useState<string | null>(null);
+  const [standardEditLabel, setStandardEditLabel] = useState('');
+  const [standardEditDesc, setStandardEditDesc] = useState('');
+  const [savedDynamicRules, setSavedDynamicRules] = useState<any[]>(state.dynamicRules || []);
+  const [appliedStandardRules, setAppliedStandardRules] = useState<string[] | null>(null);
+  const [selectedRulesReceived, setSelectedRulesReceived] = useState<string[] | null>(null);
 
   const handleAddPrompt = () => {
     if (!newPromptInput.trim()) return;
@@ -133,6 +154,9 @@ export function Step5Validate() {
         if (customPrompts.length > 0) {
           fd.append('custom_prompts_json', JSON.stringify(customPrompts));
         }
+        // include selected standard rules
+        const selectedList = Object.keys(selectedRules).filter((k) => selectedRules[k]);
+        fd.append('selected_rules_json', JSON.stringify(selectedList));
         const res = await fetch(`${VALIDATE_API}/api/validate/upload-csv`, { method: 'POST', body: fd });
         if (!res.ok) {
           const e = await res.json().catch(() => ({}));
@@ -147,7 +171,8 @@ export function Step5Validate() {
           body: JSON.stringify({
             project_id: state.projectId,
             target_object: state.obj,
-            custom_prompts: customPrompts
+            custom_prompts: customPrompts,
+            selected_rules: Object.keys(selectedRules).filter((k) => selectedRules[k])
           }),
         });
         if (!res.ok) {
@@ -167,6 +192,10 @@ export function Step5Validate() {
           stats: { ...state.stats, errors: data.stats.errors, warns: data.stats.warns, passed: data.stats.passed },
         },
       });
+      // debug: show what server received and what it applied
+      setSelectedRulesReceived(Array.isArray(data.selected_rules_received) ? data.selected_rules_received : null);
+      setAppliedStandardRules(Array.isArray(data.applied_standard_rules) ? data.applied_standard_rules : null);
+      console.debug('validate response selected_rules_received=', data.selected_rules_received, 'applied_standard_rules=', data.applied_standard_rules);
       hideLoad();
       toast(`Validation Complete: ${data.stats.passed} PASS · ${data.stats.errors} ERROR · ${data.stats.warns} WARN`, 'ok');
     } catch (err) {
@@ -175,6 +204,82 @@ export function Step5Validate() {
       toast(`${msg}`, 'err');
     }
   }
+
+
+  const toggleSelectRule = (id: string) => setSelectedRules((s) => ({ ...s, [id]: !s[id] }));
+
+  const startEditStandard = (id: string, label: string, desc: string) => {
+    setStandardEditingId(id);
+    setStandardEditLabel(label);
+    setStandardEditDesc(desc);
+  };
+
+  const saveEditStandard = (id: string) => {
+    // convert standard rule edit into a dynamic override rule and keep locally
+    const dyn = {
+      id: `OVERRIDE_${id}_${Date.now()}`,
+      label: standardEditLabel || id,
+      description: standardEditDesc || '',
+      field: 'GENERAL',
+      python_code: 'False',
+      error_message: standardEditDesc || standardEditLabel || id,
+      severity: 'ERROR',
+    };
+    setSavedDynamicRules((d) => [...d.filter((r) => r.id !== dyn.id), dyn]);
+    setStandardEditingId(null);
+  };
+
+  const deleteDynamicRule = (rid: string) => {
+    setSavedDynamicRules((d) => d.filter((r) => r.id !== rid));
+  };
+
+  const saveRulesToDB = async () => {
+    if (!state.projectId) {
+      toast('No project selected to save rules', 'err');
+      return;
+    }
+    try {
+      // Compile custom prompts into executable rules first (if any)
+      let compiled: any[] = [];
+      if (customPrompts.length > 0) {
+        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/generate-rules`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompts: customPrompts, target_object: state.obj })
+        });
+        if (!res.ok) throw new Error('Failed to compile prompts');
+        const json = await res.json();
+        compiled = json.rules || [];
+      }
+
+      const payloadRules = [
+        ...savedDynamicRules,
+        ...compiled
+      ];
+
+      const res2 = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules })
+      });
+      const resJson = await res2.json().catch(() => (null));
+      console.debug('save rules response:', resJson, 'status', res2.status);
+      if (!res2.ok) {
+        let msg = 'Failed to save rules';
+        try {
+          msg = (resJson && (resJson.detail || resJson.message)) || JSON.stringify(resJson) || msg;
+        } catch (e) {}
+        throw new Error(msg);
+      }
+      // update local saved rules state and migration store
+      setSavedDynamicRules(payloadRules || []);
+      dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: payloadRules || [] });
+      const info = resJson ? (resJson.inserted || resJson.message || resJson) : 'Rules saved to project';
+      toast(typeof info === 'string' ? info : 'Rules saved to project', 'ok');
+    } catch (err: any) {
+      toast(err.message || 'Failed to save rules', 'err');
+    }
+  };
 
   const saveDataToDB = async () => {
     if (!state.projectId) {
@@ -252,24 +357,7 @@ export function Step5Validate() {
     <PageLayout>
       <PageGrid>
 
-      {/* Left Column */}
-      <GridCol span={3}>
-        <Card>
-          <CardHeader title="Field Rules" subtitle={`${state.obj} validation`} />
-          <CardBody className="p-3 space-y-3">
-            {(OBJS[state.obj]?.fields || []).map((f) => (
-              <div key={f.n} className="px-2.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="font-mono text-[10px] text-teal-600 dark:text-teal-400">{f.n}</span>
-                  {f.req && <Badge variant="red" className="text-[8px]">REQ</Badge>}
-                </div>
-                <div className="text-[10px] text-[var(--text-secondary)]">{f.l}</div>
-                <div className="font-mono text-[9px] text-[var(--text-tertiary)]">{f.t} | max:{f.len}</div>
-              </div>
-            ))}
-          </CardBody>
-        </Card>
-      </GridCol>
+      
 
       {/* Middle Column */}
       <GridCol span={6}>
@@ -346,9 +434,15 @@ export function Step5Validate() {
         {report.length > 0 && (
           <Card className="mb-4">
             <CardHeader title="Validation Report — Active Rules" subtitle="Executed Dynamic AI Rules & Standard SAP Rules" icon={<ListChecks className="w-4 h-4" />}>
-              <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>
-                Export Report
-              </Button>
+                  <div className="flex items-center gap-2">
+                    <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>Export Report</Button>
+                    {selectedRulesReceived && (
+                      <div className="text-[12px] text-[var(--text-tertiary)] px-2 py-1 rounded bg-[var(--bg-tertiary)]/60">Received: {selectedRulesReceived.join(', ')}</div>
+                    )}
+                    {appliedStandardRules && (
+                      <div className="text-[12px] text-[var(--text-tertiary)] px-2 py-1 rounded bg-[var(--bg-tertiary)]/60">Applied: {appliedStandardRules.join(', ')}</div>
+                    )}
+                  </div>
             </CardHeader>
             <CardBody className="space-y-2">
               {report.map((r) => (
@@ -428,37 +522,40 @@ export function Step5Validate() {
         <Card>
           <CardHeader title="Standard SAP Rules" subtitle="Built-in field validations" icon={<ListChecks className="w-4 h-4" />} />
           <CardBody className="p-3 space-y-2.5">
-            {[
-              ['Required Fields','Must not be empty'],
-              ['Field Length','Max char enforcement'],
-              ['Country ISO','2-3 letter format'],
-              ['Currency ISO','3-letter ISO 4217'],
-              ['Numeric IDs','KUNNR/LIFNR digits'],
-              ['Email Format','Valid @ format'],
-              ['Date Format','YYYYMMDD 8 digits'],
-              ['Payment Terms','SAP NT30/NT45 format']
-            ].map(([t,d]) => {
-              const isOverridden = isRuleOverridden(t);
+            {STANDARD_RULES.map((r) => {
+              const isOverridden = isRuleOverridden(r.label);
+              const checked = selectedRules[r.id] !== false;
               return (
-                <div key={t} className={`flex items-start justify-between px-3 py-2 rounded-xl border transition-all ${
+                <div key={r.id} className={`flex items-start justify-between px-3 py-2 rounded-xl border transition-all ${
                   isOverridden
                     ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-70'
                     : 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
                 }`}>
-                  <div className="flex items-start gap-2">
-                    <span className={isOverridden ? "text-amber-500 mt-0.5 text-[11px]" : "text-primary-500 mt-0.5 text-[11px]"}>◆</span>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={!!checked} onChange={() => toggleSelectRule(r.id)} className="w-4 h-4 mt-0.5" />
                     <div>
-                      <div className={`text-[11.5px] font-bold ${isOverridden ? 'line-through text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'}`}>
-                        {t}
-                      </div>
-                      <div className="text-[10px] text-[var(--text-tertiary)]">{d}</div>
+                      {standardEditingId === r.id ? (
+                        <div className="flex flex-col gap-1">
+                          <input value={standardEditLabel} onChange={(e) => setStandardEditLabel(e.target.value)} className="px-2 py-1 rounded border" />
+                          <input value={standardEditDesc} onChange={(e) => setStandardEditDesc(e.target.value)} className="px-2 py-1 rounded border" />
+                          <div className="flex gap-2">
+                            <button onClick={() => saveEditStandard(r.id)} className="text-emerald-600">Save</button>
+                            <button onClick={() => setStandardEditingId(null)} className="text-[var(--text-tertiary)]">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className={`text-[11.5px] font-bold ${isOverridden ? 'line-through text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'}`}>
+                            {r.label}
+                          </div>
+                          <div className="text-[10px] text-[var(--text-tertiary)]">{r.description}</div>
+                        </>
+                      )}
                     </div>
                   </div>
-                  {isOverridden && (
-                    <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[8px] font-bold shrink-0 ml-1">
-                      ⚡ Overridden
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => startEditStandard(r.id, r.label, r.description)} className="p-1 text-[var(--text-tertiary)] hover:text-violet-500" title="Edit rule"><Pencil className="w-3.5 h-3.5" /></button>
+                  </div>
                 </div>
               );
             })}
@@ -471,7 +568,9 @@ export function Step5Validate() {
             title="Dynamic AI Rules"
             subtitle="Custom business rules"
             icon={<Sparkles className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
-          />
+          >
+            <Button variant="secondary" size="sm" icon={<Save className="w-3 h-3" />} onClick={saveRulesToDB}>Save Rules</Button>
+          </CardHeader>
           <CardBody className="p-3 space-y-3">
             {/* Input & Add Prompt */}
             <div className="flex items-center gap-1.5">
