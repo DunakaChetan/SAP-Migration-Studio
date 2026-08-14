@@ -2,14 +2,14 @@ import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
-import { dl, expCSV } from '@/lib/utils';
+import { dl } from '@/lib/utils';
 import {
   PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button,
   StatBox, StatsGrid, DataTable, PageHeader, EmptyState
 } from '@/components/shared';
 import {
   FlaskConical, Upload, FileSpreadsheet, MapPin, Download,
-  Play, Trash2, CheckCircle2, AlertCircle, FileText, ArrowLeft, ArrowRight, Save, Database, Plus, Sparkles, Eye, Zap, X, Check, Pencil, ChevronDown, ChevronUp, Layers
+  Play, Trash2, CheckCircle2, AlertCircle, FileText, ArrowLeft, ArrowRight, Save, Database, Plus, Sparkles, Eye, Zap, X, Check, Pencil, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
@@ -33,18 +33,11 @@ interface HarmonizationStats {
   [key: string]: number | undefined;
 }
 
-interface HarmonizedTable {
-  table_name: string;
-  columns: string[];
-  row_count?: number;
-}
-
 interface HarmonizationResult {
   stats: HarmonizationStats;
   fix_log: string[];
   final_table: Record<string, any>[];
   columns: string[];
-  tables?: HarmonizedTable[];
   session_id?: string;
   is_preview?: boolean;
 }
@@ -582,13 +575,12 @@ function PreviewCard({
             return (
               <div
                 key={grp.id}
-                className={`rounded-lg border transition-all ${
-                  isDynamic
+                className={`rounded-lg border transition-all ${isDynamic
                     ? 'border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/20 text-purple-800 dark:text-purple-300'
                     : isInit
                       ? 'border-gray-200 dark:border-gray-800 bg-[var(--bg-tertiary)]/50 text-[var(--text-tertiary)]'
                       : 'border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-950/15 text-[var(--text-primary)]'
-                }`}
+                  }`}
               >
                 {/* Summary Header Line */}
                 <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-mono">
@@ -666,33 +658,6 @@ export function Step4Harmonize() {
   const result: HarmonizationResult | null = state.harmonizationResult;
   const setResult = (val: any) => dispatch({ type: 'SET_FIELD', field: 'harmonizationResult', value: val });
   const [previewData, setPreviewData] = useState<{ fixLog: string[]; stats: any } | null>(null);
-  const [activeTableTab, setActiveTableTab] = useState<string>('all');
-  const [rowLimit, setRowLimit] = useState<number>(50);
-
-  const harmonizedTables: HarmonizedTable[] = useMemo(() => {
-    if (result?.tables && result.tables.length > 0) {
-      return result.tables;
-    }
-    if (state.extractedTables && state.extractedTables.length > 0 && result?.final_table) {
-      const resultCols = new Set(result.columns || Object.keys(result.final_table[0] || {}));
-      const matched = state.extractedTables.map((t: any) => ({
-        table_name: t.table_name,
-        columns: t.columns.filter((c: string) => resultCols.has(c)),
-        row_count: result.final_table.length
-      })).filter((t: any) => t.columns.length > 0);
-
-      if (matched.length > 0) return matched;
-    }
-    if (result?.final_table && result.final_table.length > 0) {
-      const allCols = result.columns || Object.keys(result.final_table[0] || {});
-      return [{
-        table_name: 'General Data',
-        columns: allCols,
-        row_count: result.final_table.length
-      }];
-    }
-    return [];
-  }, [result, state.extractedTables]);
 
   // Editable Rule Config (Inline box per rule)
   const [ruleConfig, setRuleConfig] = useState<Record<string, RuleItemConfig>>({ ...DEFAULT_RULE_CONFIG });
@@ -760,7 +725,7 @@ export function Step4Harmonize() {
       return;
     }
     if (!result?.final_table) return;
-    
+
     showLoad('Saving data...', 'Persisting harmonized records to database');
     try {
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/save`, {
@@ -769,15 +734,13 @@ export function Step4Harmonize() {
         body: JSON.stringify({
           project_id: state.projectId,
           target_object: state.obj,
-          payload: result.final_table,
-          tables: harmonizedTables
+          payload: result.final_table
         })
       });
-      
+
       if (!res.ok) throw new Error('Failed to save data');
-      
+
       hideLoad();
-      dispatch({ type: 'SET_FIELD', field: 'harmonized', value: result.final_table });
       dispatch({ type: 'SET_FIELD', field: 'isHarmonizedSaved', value: true });
       toast('Harmonized data saved to database successfully!', 'ok');
     } catch (err: any) {
@@ -812,7 +775,7 @@ export function Step4Harmonize() {
     setter(dropped);
   };
 
-  const canRun = mode === 'flow' 
+  const canRun = mode === 'flow'
     ? true
     : mode === 'single'
       ? !!primaryFile
@@ -841,7 +804,7 @@ export function Step4Harmonize() {
         if (!state.projectId) {
           throw new Error("No Project ID found. Please extract and save data in Step 3 first.");
         }
-        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/flow`, { 
+        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/flow`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1263,127 +1226,35 @@ export function Step4Harmonize() {
             <PreviewCard fixLog={previewData.fixLog} stats={previewData.stats} ruleConfig={ruleConfig} onProceed={handleProceed} />
           )}
 
-          {/* Harmonized Multi-Table Output */}
+          {/* Results Table */}
           {result && (
-            <div className="space-y-4">
-              {/* Header card with Stats & Table Selector Tabs */}
-              <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-purple-600" />
-                      <h2 className="text-base font-bold text-[var(--text-primary)]">
-                        Harmonized Data Structures ({harmonizedTables.length} Tables)
-                      </h2>
-                    </div>
-                    <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                      {result.stats.total_output} records harmonized · Segmented into SAP target structures
-                    </p>
+            <Card>
+              <CardHeader
+                title="Harmonized Output"
+                subtitle={`${result.stats.total_output} rows × ${result.columns.length} columns`}
+              >
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<Download className="w-3 h-3" />}
+                  onClick={downloadResult}
+                  className="ml-auto"
+                >
+                  Export CSV
+                </Button>
+              </CardHeader>
+              <CardBody>
+                <DataTable
+                  rows={result.final_table.slice(0, 15)}
+                  cols={result.columns}
+                />
+                {result.final_table.length > 15 && (
+                  <div className="text-[10px] text-[var(--text-tertiary)] text-center py-2 border-t border-[var(--border)]">
+                    Showing 15 of {result.final_table.length} rows · Download CSV for full data
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 mr-2">
-                      <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)]">Rows:</span>
-                      <input
-                        type="number"
-                        value={rowLimit}
-                        onChange={(e) => setRowLimit(Number(e.target.value) || 15)}
-                        className="w-16 rounded-md border border-[var(--border)] bg-[var(--bg-tertiary)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none text-center font-mono"
-                      />
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon={<Download className="w-3.5 h-3.5" />}
-                      onClick={downloadResult}
-                      title="Download complete harmonized dataset"
-                    >
-                      Export All CSV
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Table selector tab pills */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-                  <button
-                    onClick={() => setActiveTableTab('all')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
-                      activeTableTab === 'all'
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]'
-                    }`}
-                  >
-                    <span>All Tables ({harmonizedTables.length})</span>
-                  </button>
-                  {harmonizedTables.map((t) => (
-                    <button
-                      key={t.table_name}
-                      onClick={() => setActiveTableTab(t.table_name)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
-                        activeTableTab === t.table_name
-                          ? 'bg-purple-600 text-white shadow-sm'
-                          : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]'
-                      }`}
-                    >
-                      <span>{t.table_name}</span>
-                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                        activeTableTab === t.table_name ? 'bg-white/20 text-white' : 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
-                      }`}>
-                        {t.columns.length} fields
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Render Selected Table or All Tables */}
-              {(activeTableTab === 'all' ? harmonizedTables : harmonizedTables.filter(t => t.table_name === activeTableTab)).map((t) => {
-                const tableData = result.final_table.map((row: any) => {
-                  const sub: Record<string, any> = {};
-                  t.columns.forEach((c: string) => {
-                    sub[c] = row[c] !== undefined ? row[c] : '';
-                  });
-                  return sub;
-                });
-
-                const handleExportTableCSV = () => {
-                  const csv = expCSV(tableData);
-                  const filename = `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_harmonized.csv`;
-                  dl(csv, filename, 'text/csv');
-                };
-
-                return (
-                  <Card key={t.table_name} className="shadow-xs border-[var(--border)]">
-                    <CardHeader
-                      title={`Harmonized Structure: ${t.table_name}`}
-                      subtitle={`${t.columns.length} columns · ${Math.min(rowLimit, result.final_table.length)} of ${result.final_table.length} rows displayed`}
-                    >
-                      <div className="ml-auto flex items-center gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon={<Download className="w-3 h-3" />}
-                          onClick={handleExportTableCSV}
-                        >
-                          Export {t.table_name}
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardBody className="p-0">
-                      <DataTable
-                        rows={tableData.slice(0, rowLimit)}
-                        cols={t.columns}
-                      />
-                      {tableData.length > rowLimit && (
-                        <div className="text-[10.5px] text-[var(--text-tertiary)] text-center py-2.5 border-t border-[var(--border)] font-mono">
-                          Showing first {rowLimit} of {tableData.length} rows · Adjust limit or export CSV for full data
-                        </div>
-                      )}
-                    </CardBody>
-                  </Card>
-                );
-              })}
-            </div>
+                )}
+              </CardBody>
+            </Card>
           )}
 
           {/* Harmonization Changes & Audit Report */}
@@ -1403,7 +1274,7 @@ export function Step4Harmonize() {
 
         {/* ─── Right Column: Cleansing Rules UI Redesign (Inline Parameter Box) ─── */}
         <GridCol span={3} className="space-y-4">
-          
+
           {/* Cleansing Rules Card (Redesigned with Inline Parameter Boxes — No Popups!) */}
           <Card className="shadow-xs border-[var(--border)]">
             <CardHeader
@@ -1464,11 +1335,10 @@ export function Step4Harmonize() {
                       <button
                         onClick={() => setExpandedRuleKey(isExpanded ? null : rule.key)}
                         title={`Configure parameters for ${rule.title}`}
-                        className={`p-1.5 rounded-lg transition-colors ml-2 cursor-pointer shrink-0 ${
-                          isExpanded
+                        className={`p-1.5 rounded-lg transition-colors ml-2 cursor-pointer shrink-0 ${isExpanded
                             ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300'
                             : 'hover:bg-purple-100 dark:hover:bg-purple-900/40 text-gray-400 hover:text-purple-600'
-                        }`}
+                          }`}
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>

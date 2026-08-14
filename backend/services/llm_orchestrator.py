@@ -71,7 +71,6 @@ def _call_openai_compatible(url: str, api_key: str, model: str, system_prompt: s
 
 
 def _route_provider(provider: str, model: str, system_prompt: str, user_prompt: str) -> str:
-    print(f"\n🚀 [LLM ENGINE] LLM triggered -> Routing Request to Provider: {provider.upper()} | Model: {model}\n")
     provider_lower = provider.lower()
     if "gemini" in provider_lower:
         return _call_gemini(model, system_prompt, user_prompt)
