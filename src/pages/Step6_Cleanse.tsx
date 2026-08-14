@@ -13,6 +13,8 @@ import {
   ChevronDown, ChevronUp, Check, X, Trash2, Plus, RefreshCw, ListFilter,
   Search, FileText, Sliders, FileJson, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
+import type { TableInfo } from '@/components/shared/TableFilterToolbar';
 
 /* ─── Types & Interfaces ─── */
 type Source = 'harmonized' | 'upload';
@@ -217,6 +219,17 @@ export function Step6Cleanse() {
   const [auditPhaseFilter, setAuditPhaseFilter] = useState<string>('ALL');
   const [auditPage, setAuditPage] = useState(1);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  // Table filter state for cleansed output
+  const extractedTables = state.extractedTables || [];
+  const [selectedCleanseTables, setSelectedCleanseTables] = useState<Set<string>>(new Set());
+  const [cleanseKeyFilter, setCleanseKeyFilter] = useState('');
+
+  useEffect(() => {
+    if (extractedTables.length > 0) {
+      setSelectedCleanseTables(new Set(extractedTables.map((t: any) => t.table_name)));
+    }
+  }, [extractedTables.length]);
 
   const csvInputRef = useRef<HTMLInputElement>(null);
   const valCsvInputRef = useRef<HTMLInputElement>(null);
@@ -1307,7 +1320,7 @@ export function Step6Cleanse() {
             </Card>
           )}
 
-          {/* Cleansed Data Preview (Collapsible) */}
+          {/* Cleansed Data Preview (Multi-Table Display) */}
           <Card>
             <CardHeader
               title="Cleansed Data Preview"
@@ -1316,7 +1329,7 @@ export function Step6Cleanse() {
               <div className="flex items-center gap-2">
                 {has && (
                   <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(cleanedRows), 'cleaned.csv', 'text/csv')}>
-                    Export CSV
+                    Export All CSV
                   </Button>
                 )}
                 <button
@@ -1330,9 +1343,57 @@ export function Step6Cleanse() {
             </CardHeader>
             {openPreviewAccordion && (
               <CardBody>
-                {has ? (
-                  <DataTable rows={cleanedRows.slice(0, 15)} cols={Object.keys(cleanedRows[0] || {})} />
-                ) : (
+                {has ? (() => {
+                  const allTables: TableInfo[] = extractedTables.length > 0
+                    ? extractedTables
+                    : [{ table_name: 'Cleansed Records', columns: Object.keys(cleanedRows[0] || {}) }];
+                  const visibleTables = allTables.filter((t: any) => selectedCleanseTables.size === 0 || selectedCleanseTables.has(t.table_name));
+                  const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
+                  const filteredRows = filterRowsByKey(cleanedRows, cleanseKeyFilter, allKeyColumns);
+
+                  return (
+                    <div className="space-y-4">
+                      <TableFilterToolbar
+                        tables={allTables}
+                        selectedTables={selectedCleanseTables.size === 0 ? new Set(allTables.map((t: any) => t.table_name)) : selectedCleanseTables}
+                        onSelectedTablesChange={setSelectedCleanseTables}
+                        keyFilterValue={cleanseKeyFilter}
+                        onKeyFilterChange={setCleanseKeyFilter}
+                        keyColumns={allKeyColumns}
+                        accentColor="violet"
+                      />
+                      {visibleTables.map((t: any) => {
+                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                        return (
+                          <div key={t.table_name} className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3 shadow-xs">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-[12px] text-[var(--text-primary)]">{t.table_name}</span>
+                                <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                                  ({tableCols.length} columns · {tableRows.length} rows{cleanseKeyFilter ? ' filtered' : ''})
+                                </span>
+                              </div>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<Download className="w-3 h-3" />}
+                                onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_cleansed.csv`, 'text/csv')}
+                              >
+                                Export {t.table_name}
+                              </Button>
+                            </div>
+                            <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} />
+                            {tableRows.length > 15 && (
+                              <div className="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-[var(--border)]">
+                                Showing 15 of {tableRows.length} rows · Export CSV for full table
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })() : (
                   <EmptyState icon={<Sparkles className="w-10 h-10 text-violet-500" />} message="Run cleansing to auto-fix data issues and view cleansed output" />
                 )}
               </CardBody>

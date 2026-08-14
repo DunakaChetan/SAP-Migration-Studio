@@ -300,7 +300,21 @@ class ValidationAgent:
 
         st = "ERROR" if errs else ("WARN" if warns else "PASS")
         return {"errs": errs, "warns": warns, "st": st}
+    def _primary_key_field(self, obj: str) -> str:
+        key_map = {
+            "CUSTOMER": "KUNNR",
+            "VENDOR": "LIFNR",
+            "MATERIAL": "MATNR",
+        }
+        return key_map.get(obj.upper(), "")
 
+    def _primary_key_value(self, row: Dict[str, Any], obj: str) -> str:
+        pk_field = self._primary_key_field(obj)
+        if not pk_field:
+            return ""
+        smart_row = row if isinstance(row, SmartRow) else SmartRow(row)
+        value = smart_row.get(pk_field, "")
+        return str(value).strip() if value is not None else ""
     def run_validation(
         self,
         obj: str,
@@ -332,6 +346,47 @@ class ValidationAgent:
                 elif f_name in ("ZTERM", "PAYMENT_TERMS", "PAYTERMS") or f_label.startswith("payment"):
                     overridden_rule_ids.add("PAYMENT_TERMS")
 
+        present_field_keys = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for key in row.keys():
+                present_field_keys.add(str(key).upper().replace(" ", "").replace("_", ""))
+
+        def normalize_field_name(name: str) -> str:
+            return str(name).upper().replace(" ", "").replace("_", "")
+
+        def has_field(*candidates: str) -> bool:
+            target_keys = {normalize_field_name(c) for c in candidates if c}
+            if not target_keys:
+                return False
+            for normalized in target_keys:
+                if normalized in present_field_keys:
+                    return True
+                for present in present_field_keys:
+                    if present.endswith(normalized) or normalized.endswith(present):
+                        return True
+            return False
+
+        def applies_to_standard_rule(rule_id: str) -> bool:
+            if rule_id == "REQUIRED_FIELDS":
+                return any(f.get("req") is True for f in fields) and any(has_field(f["n"]) for f in fields if f.get("req") is True)
+            if rule_id == "FIELD_LENGTH":
+                return any(f.get("len") for f in fields) and any(has_field(f["n"]) for f in fields if f.get("len"))
+            if rule_id == "COUNTRY_ISO":
+                return has_field("LAND1", "COUNTRY", "COUNTRYKEY", "COUNTRY_KEY")
+            if rule_id == "CURRENCY_ISO":
+                return has_field("WAERS", "CURRENCY", "CUKY")
+            if rule_id == "NUMERIC_ID":
+                return has_field("KUNNR", "LIFNR", "CUSTOMER", "VENDOR")
+            if rule_id == "EMAIL_FORMAT":
+                return has_field("SMTP_ADDR", "EMAIL", "EMAILADDRESS")
+            if rule_id == "DATE_FORMAT":
+                return any(f.get("t") == "DATS" for f in fields) and any(has_field(f["n"]) for f in fields if f.get("t") == "DATS")
+            if rule_id == "PAYMENT_TERMS":
+                return has_field("ZTERM", "PAYMENT_TERMS", "PAYTERMS")
+            return True
+
         # Place dynamic rules at TOP, and EXCLUDE overridden default rules from report
         all_rules = []
         if dynamic_rules:
@@ -344,6 +399,8 @@ class ValidationAgent:
                 })
         
         for r in RULES:
+            if not applies_to_standard_rule(r["id"]):
+                continue
             # Only include standard rule when not overridden and when selected by user (if provided)
             if r["id"] in overridden_rule_ids:
                 continue
@@ -368,7 +425,14 @@ class ValidationAgent:
             else:
                 st = "PASS"
 
-            validated.append({"idx": idx, "row": row, "errs": active_errs, "warns": active_warns, "st": st})
+            validated.append({
+                "idx": idx,
+                "row": row,
+                "primary_key": self._primary_key_value(row, obj),
+                "errs": active_errs,
+                "warns": active_warns,
+                "st": st,
+            })
 
             for issue in active_errs + active_warns:
                 actual_f = issue["f"]

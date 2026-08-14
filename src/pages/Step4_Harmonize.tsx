@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
-import { dl } from '@/lib/utils';
+import { dl, expCSV } from '@/lib/utils';
 import {
   PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button,
   StatBox, StatsGrid, DataTable, PageHeader, EmptyState
@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
+import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
+import type { TableInfo } from '@/components/shared/TableFilterToolbar';
 
 /* ─── Types ─── */
 interface DroppedFile {
@@ -235,14 +237,11 @@ const DEFAULT_RULE_CONFIG: Record<string, RuleItemConfig> = {
   whitespace_trim: { enabled: true, params: { mode: 'both' } },
   country_iso: { enabled: true, params: { iso_length: 2 } },
   currency_iso: { enabled: true },
-  payterms_sap: { enabled: true },
-  mattype_sap: { enabled: true },
   dedup: { enabled: true },
   empty_filter: { enabled: true },
   date_format: { enabled: true, params: { format: 'YYYYMMDD' } },
   phone_clean: { enabled: true, params: { keep_plus: true } },
   uom_normalize: { enabled: true },
-  trunc35: { enabled: true, params: { max_length: 35 } },
 };
 
 /* ─── Rule Definitions (Matched to Screenshot UI Layout) ─── */
@@ -259,13 +258,10 @@ const RULE_LIST: RuleDef[] = [
   { key: 'empty_filter', title: 'Empty Row Filter', sub: 'Remove 100% empty records', emoji: '🗑️', logKey: 'EmptyFilter' },
   { key: 'country_iso', title: 'Country → ISO', sub: 'Full names to 2-3 letter ISO', emoji: '🌍', logKey: 'Country' },
   { key: 'currency_iso', title: 'Currency → ISO', sub: 'Map to ISO 4217 3-letter', emoji: '💱', logKey: 'Currency' },
-  { key: 'payterms_sap', title: 'PayTerms → SAP', sub: 'Convert text to NT30/NT45 etc', emoji: '💳', logKey: 'PayTerms' },
-  { key: 'mattype_sap', title: 'MatType → SAP', sub: 'Convert to ROH/FERT/HALB etc', emoji: '📦', logKey: 'MatType' },
   { key: 'whitespace_trim', title: 'Whitespace Trim', sub: 'All fields trimmed', emoji: '✂️', logKey: 'WhitespaceTrim' },
   { key: 'date_format', title: 'Date → YYYYMMDD', sub: 'SAP 8-digit date format', emoji: '📅', logKey: 'Date' },
   { key: 'phone_clean', title: 'Phone Cleanup', sub: 'Remove invalid characters', emoji: '📞', logKey: 'PhoneClean' },
   { key: 'uom_normalize', title: 'UOM → SAP', sub: 'Normalize unit of measure', emoji: '📐', logKey: 'UOM' },
-  { key: 'trunc35', title: 'Truncate 35', sub: 'Name/address field limit', emoji: '✏️', logKey: 'Trunc35' },
 ];
 
 /* ─── Harmonization Report Card ─── */
@@ -294,8 +290,6 @@ function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
       items: fixLog.filter((l) =>
         l.includes('[Country→ISO]') ||
         l.includes('[Currency→ISO]') ||
-        l.includes('[PayTerms→SAP]') ||
-        l.includes('[MatType→SAP]') ||
         l.includes('[UOM→SAP]')
       ),
     },
@@ -305,9 +299,9 @@ function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
       items: fixLog.filter((l) => l.includes('[Date→YYYYMMDD]') || l.includes('[PhoneClean]')),
     },
     {
-      title: 'Text & Field Length Adjustments',
+      title: 'Text & Field Adjustments',
       icon: '✂️',
-      items: fixLog.filter((l) => l.includes('[WhitespaceTrim]') || l.includes('[Trunc35]') || l.includes('[UPPER]') || l.includes('[Pad10]') || l.includes('[Trim]') || l.includes('[Transform:')),
+      items: fixLog.filter((l) => l.includes('[WhitespaceTrim]') || l.includes('[UPPER]') || l.includes('[Pad10]') || l.includes('[Trim]') || l.includes('[Transform:')),
     },
     {
       title: 'Dynamic AI & Fallback Rules',
@@ -324,7 +318,7 @@ function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
     <Card className="mt-4 border-purple-200 dark:border-purple-900/40 bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-secondary)] to-purple-50/20 dark:to-purple-950/10 shadow-sm">
       <CardHeader
         title="Harmonization Changes & Audit Report"
-        subtitle="Summary of transformations and source origins"
+        subtitle="Summary of standardized fields, rule fixes and source origins"
       />
       <CardBody className="p-4 space-y-4">
         {/* Metric Cards Grid */}
@@ -351,7 +345,7 @@ function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
           </div>
 
           <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
-            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Rule Transformations</div>
+            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Standardization Fixes</div>
             <div className="mt-1 flex items-baseline gap-1.5">
               <span className="text-xl font-extrabold text-purple-600 dark:text-purple-400">{totalFixEvents}</span>
               <span className="text-[10px] text-[var(--text-tertiary)]">field fixes</span>
@@ -370,10 +364,10 @@ function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
           </div>
         </div>
 
-        {/* Transformation Categories Grid */}
+        {/* Harmonization Categories Grid */}
         <div className="space-y-2">
           <div className="text-[11.5px] font-bold text-[var(--text-primary)]">
-            Harmonization Transformation Breakdown
+            Harmonization Breakdown
           </div>
           <div className="grid grid-cols-2 gap-3">
             {categories.filter(c => c.items.length > 0).map((cat, i) => (
@@ -631,7 +625,7 @@ export function Step4Harmonize() {
   const { state, dispatch } = useMigration();
 
   // State
-  const [mode, setMode] = useState<'flow' | 'single' | 'multi'>('flow');
+  const [mode, setMode] = useState<'flow' | 'multi'>('flow');
   const [sapObject, setSapObject] = useState(state.obj || 'CUSTOMER');
   const [companyCode, setCompanyCode] = useState(state.cc || '1000');
   const [plant, setPlant] = useState(state.plant || '1000');
@@ -645,10 +639,8 @@ export function Step4Harmonize() {
   const [primarySource, setPrimarySource] = useState(state.src || 'SAP_ECC');
   const [secondarySource, setSecondarySource] = useState('');
 
-  // Files
-  const [primaryFile, setPrimaryFile] = useState<DroppedFile | null>(null);
+  // Files for Multi-Source
   const [secondaryFile, setSecondaryFile] = useState<DroppedFile | null>(null);
-  const [primaryMappingFile, setPrimaryMappingFile] = useState<DroppedFile | null>(null);
   const [secondaryMappingFile, setSecondaryMappingFile] = useState<DroppedFile | null>(null);
 
   // Additional Sources (N-source)
@@ -659,6 +651,18 @@ export function Step4Harmonize() {
   const setResult = (val: any) => dispatch({ type: 'SET_FIELD', field: 'harmonizationResult', value: val });
   const [previewData, setPreviewData] = useState<{ fixLog: string[]; stats: any } | null>(null);
 
+  // Table filter state for output display
+  const [selectedOutputTables, setSelectedOutputTables] = useState<Set<string>>(new Set());
+  const [outputKeyFilter, setOutputKeyFilter] = useState('');
+  const extractedTables = state.extractedTables || [];
+
+  // Initialize selectedOutputTables when extractedTables are available
+  useEffect(() => {
+    if (extractedTables.length > 0) {
+      setSelectedOutputTables(new Set(extractedTables.map((t: any) => t.table_name)));
+    }
+  }, [extractedTables.length]);
+
   // Editable Rule Config (Inline box per rule)
   const [ruleConfig, setRuleConfig] = useState<Record<string, RuleItemConfig>>({ ...DEFAULT_RULE_CONFIG });
   const [expandedRuleKey, setExpandedRuleKey] = useState<string | null>(null);
@@ -667,7 +671,7 @@ export function Step4Harmonize() {
   const [customPrompts, setCustomPrompts] = useState<string[]>([]);
   const [newPromptInput, setNewPromptInput] = useState('');
 
-  const enabledRuleCount = Object.values(ruleConfig).filter(r => r.enabled).length;
+  const enabledRuleCount = RULE_LIST.filter(r => (ruleConfig[r.key] !== undefined ? ruleConfig[r.key].enabled : true)).length;
   const totalRuleCount = RULE_LIST.length;
 
   const handleAddPrompt = () => {
@@ -728,19 +732,22 @@ export function Step4Harmonize() {
 
     showLoad('Saving data...', 'Persisting harmonized records to database');
     try {
+      const currentTables = extractedTables.length > 0 ? extractedTables : (state.extractedTables || []);
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: state.projectId,
           target_object: state.obj,
-          payload: result.final_table
+          payload: result.final_table,
+          tables: currentTables
         })
       });
 
       if (!res.ok) throw new Error('Failed to save data');
 
       hideLoad();
+      dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: currentTables });
       dispatch({ type: 'SET_FIELD', field: 'isHarmonizedSaved', value: true });
       toast('Harmonized data saved to database successfully!', 'ok');
     } catch (err: any) {
@@ -777,13 +784,10 @@ export function Step4Harmonize() {
 
   const canRun = mode === 'flow'
     ? true
-    : mode === 'single'
-      ? !!primaryFile
-      : !!(secondarySource && secondaryFile && secondaryMappingFile);
+    : !!(secondarySource && secondaryFile && secondaryMappingFile);
 
   async function runHarmonization(isPreview: boolean = true, silent: boolean = false) {
     if (!canRun) return;
-    if (mode === 'single' && !primaryFile) return;
     dispatch({ type: 'SET_FIELD', field: 'isHarmonizedSaved', value: false });
 
     if (!silent) {
@@ -823,9 +827,10 @@ export function Step4Harmonize() {
             custom_prompts: customPrompts.length > 0 ? customPrompts : null,
           })
         });
-      } else if (mode === 'multi') {
-        if (!state.projectId && mode === 'multi') {
-          // If multi mode with uploads
+      } else {
+        // Multi mode
+        if (!state.projectId) {
+          // If multi mode with standalone uploads
           const formData = new FormData();
           formData.append('mode', 'multi');
           formData.append('sap_object', sapObject);
@@ -838,9 +843,7 @@ export function Step4Harmonize() {
           formData.append('currency', currency);
           formData.append('primary_source', primarySource);
           formData.append('secondary_source', secondarySource);
-          formData.append('primary_file', primaryFile?.file || secondaryFile!.file);
           formData.append('secondary_file', secondaryFile!.file);
-          if (primaryMappingFile) formData.append('primary_mapping_file', primaryMappingFile.file);
           if (secondaryMappingFile) formData.append('secondary_mapping_file', secondaryMappingFile.file);
           formData.append('preview', isPreview ? 'true' : 'false');
           formData.append('rule_config_json', JSON.stringify(ruleConfig));
@@ -868,27 +871,6 @@ export function Step4Harmonize() {
 
           res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/multi-flow`, { method: 'POST', body: formData });
         }
-      } else {
-        // Single mode upload
-        const formData = new FormData();
-        formData.append('mode', 'single');
-        formData.append('sap_object', sapObject);
-        formData.append('company_code', companyCode);
-        formData.append('sales_org', salesOrg);
-        formData.append('purch_org', purchOrg);
-        formData.append('plant', plant);
-        formData.append('dist_channel', distChannel);
-        formData.append('division', division);
-        formData.append('currency', currency);
-        formData.append('primary_source', primarySource);
-        formData.append('primary_file', primaryFile!.file);
-        if (primaryMappingFile) formData.append('primary_mapping_file', primaryMappingFile.file);
-
-        formData.append('preview', isPreview ? 'true' : 'false');
-        formData.append('rule_config_json', JSON.stringify(ruleConfig));
-        if (customPrompts.length > 0) formData.append('custom_prompts_json', JSON.stringify(customPrompts));
-
-        res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize`, { method: 'POST', body: formData });
       }
 
       if (!res.ok) {
@@ -916,6 +898,9 @@ export function Step4Harmonize() {
           } else {
             setPreviewData(null);
             setResult(data);
+            if (data.tables && data.tables.length > 0 && (!state.extractedTables || state.extractedTables.length === 0)) {
+              dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables });
+            }
             toast(
               `Harmonized: ${data.stats.total_output} rows from ${data.stats.total_input} input rows`,
               'ok'
@@ -967,9 +952,9 @@ export function Step4Harmonize() {
               <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">Upload files, configure rules, and test the harmonization pipeline</p>
             </div>
 
-            {/* Three mode options below subtitle */}
+            {/* Two mode options: Flow & Multi */}
             <div className="flex items-center gap-2">
-              {(['flow', 'single', 'multi'] as const).map(m => (
+              {(['flow', 'multi'] as const).map(m => (
                 <button
                   key={m}
                   onClick={() => { setMode(m); setResult(null); setPreviewData(null); }}
@@ -980,7 +965,7 @@ export function Step4Harmonize() {
                       : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border-[var(--border)] hover:border-purple-300'}
                   `}
                 >
-                  {m === 'flow' ? '⚡ Flow' : m === 'single' ? '📄 Single' : '🔗 Multi'}
+                  {m === 'flow' ? '⚡ Flow' : '🔗 Multi'}
                 </button>
               ))}
             </div>
@@ -1022,62 +1007,6 @@ export function Step4Harmonize() {
               </div>
             </div>
           </div>
-
-          {/* Drop Zones / DB Fetch */}
-          {mode === 'single' && (
-            <Card>
-              <CardHeader
-                title="Upload Files (Single-Source)"
-                subtitle="Data file + optional Mapping CSV"
-              />
-              <CardBody className="p-4">
-                {/* Primary Data Source Selector */}
-                <div className="mb-3 px-3 py-2.5 rounded-xl border border-purple-300 dark:border-purple-600 bg-purple-50/40 dark:bg-purple-900/15">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11.5px] font-semibold text-purple-800 dark:text-purple-300">Data Source System</div>
-                      <div className="text-[10px] text-purple-600/80 dark:text-purple-400/80">Select system origin for your data file</div>
-                    </div>
-                    <select
-                      value={primarySource}
-                      onChange={(e) => setPrimarySource(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg text-[11.5px] font-bold bg-[var(--bg-primary)] border border-purple-400 dark:border-purple-500 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-sm"
-                    >
-                      {SOURCE_OPTIONS.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label} ({s.value})</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <DropZone
-                    id="drop-primary"
-                    label="Data File"
-                    subtitle="Drag & drop CSV or Excel"
-                    icon={FileSpreadsheet}
-                    accept=".csv,.xlsx,.xls"
-                    file={primaryFile}
-                    onDrop={handleFileDrop(setPrimaryFile)}
-                    onClear={() => setPrimaryFile(null)}
-                    accentColor="primary"
-                  />
-
-                  <DropZone
-                    id="drop-primary-mapping"
-                    label="Mapping CSV (Optional)"
-                    subtitle="Columns: src, sap, transform, confidence"
-                    icon={MapPin}
-                    accept=".csv"
-                    file={primaryMappingFile}
-                    onDrop={handleFileDrop(setPrimaryMappingFile)}
-                    onClear={() => setPrimaryMappingFile(null)}
-                    accentColor="violet"
-                  />
-                </div>
-              </CardBody>
-            </Card>
-          )}
 
           {mode === 'multi' && (
             <Card>
@@ -1226,36 +1155,62 @@ export function Step4Harmonize() {
             <PreviewCard fixLog={previewData.fixLog} stats={previewData.stats} ruleConfig={ruleConfig} onProceed={handleProceed} />
           )}
 
-          {/* Results Table */}
-          {result && (
-            <Card>
-              <CardHeader
-                title="Harmonized Output"
-                subtitle={`${result.stats.total_output} rows × ${result.columns.length} columns`}
-              >
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={<Download className="w-3 h-3" />}
-                  onClick={downloadResult}
-                  className="ml-auto"
-                >
-                  Export CSV
-                </Button>
-              </CardHeader>
-              <CardBody>
-                <DataTable
-                  rows={result.final_table.slice(0, 15)}
-                  cols={result.columns}
+          {/* Results Table — Multi-Table Display */}
+          {result && (() => {
+            const outputRows = result.final_table || [];
+            const allTables: TableInfo[] = extractedTables.length > 0
+              ? extractedTables
+              : [{ table_name: 'Harmonized Output', columns: result.columns }];
+            const visibleTables = allTables.filter((t: any) => selectedOutputTables.size === 0 || selectedOutputTables.has(t.table_name));
+            const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
+            const filteredRows = filterRowsByKey(outputRows, outputKeyFilter, allKeyColumns);
+
+            return (
+              <div className="space-y-4">
+                <TableFilterToolbar
+                  tables={allTables}
+                  selectedTables={selectedOutputTables.size === 0 ? new Set(allTables.map((t: any) => t.table_name)) : selectedOutputTables}
+                  onSelectedTablesChange={setSelectedOutputTables}
+                  keyFilterValue={outputKeyFilter}
+                  onKeyFilterChange={setOutputKeyFilter}
+                  keyColumns={allKeyColumns}
+                  accentColor="purple"
                 />
-                {result.final_table.length > 15 && (
-                  <div className="text-[10px] text-[var(--text-tertiary)] text-center py-2 border-t border-[var(--border)]">
-                    Showing 15 of {result.final_table.length} rows · Download CSV for full data
-                  </div>
-                )}
-              </CardBody>
-            </Card>
-          )}
+                {visibleTables.map((t: any) => {
+                  const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                  return (
+                    <Card key={t.table_name}>
+                      <CardHeader
+                        title={`Harmonized: ${t.table_name}`}
+                        subtitle={`${tableRows.length} rows × ${tableCols.length} columns${outputKeyFilter ? ' (filtered)' : ''}`}
+                      >
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={<Download className="w-3 h-3" />}
+                          onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_harmonized.csv`, 'text/csv')}
+                          className="ml-auto"
+                        >
+                          Export {t.table_name}
+                        </Button>
+                      </CardHeader>
+                      <CardBody>
+                        <DataTable
+                          rows={tableRows.slice(0, 15)}
+                          cols={tableCols}
+                        />
+                        {tableRows.length > 15 && (
+                          <div className="text-[10px] text-[var(--text-tertiary)] text-center py-2 border-t border-[var(--border)]">
+                            Showing 15 of {tableRows.length} rows · Download CSV for full data
+                          </div>
+                        )}
+                      </CardBody>
+                    </Card>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* Harmonization Changes & Audit Report */}
           {result && <HarmonizationReportCard result={result} />}
@@ -1275,17 +1230,17 @@ export function Step4Harmonize() {
         {/* ─── Right Column: Cleansing Rules UI Redesign (Inline Parameter Box) ─── */}
         <GridCol span={3} className="space-y-4">
 
-          {/* Cleansing Rules Card (Redesigned with Inline Parameter Boxes — No Popups!) */}
+          {/* Harmonization Rules Card (Redesigned with Inline Parameter Boxes — No Popups!) */}
           <Card className="shadow-xs border-[var(--border)]">
             <CardHeader
-              title="Cleansing Rules"
+              title="Harmonization Rules"
               subtitle={`${enabledRuleCount}/${totalRuleCount} enabled`}
             />
             <CardBody className="p-3 space-y-2">
               {RULE_LIST.map((rule) => {
                 const cfg = ruleConfig[rule.key] || { enabled: true };
                 const isExpanded = expandedRuleKey === rule.key;
-                const isEdited = !!cfg.custom_instruction || !!cfg.params?.target_fields || (rule.key === 'country_iso' && cfg.params?.iso_length === 3) || (rule.key === 'trunc35' && cfg.params?.max_length !== 35);
+                const isEdited = !!cfg.custom_instruction || !!cfg.params?.target_fields || (rule.key === 'country_iso' && cfg.params?.iso_length === 3);
 
                 return (
                   <div
@@ -1353,18 +1308,6 @@ export function Step4Harmonize() {
                         className="px-3 pb-3 pt-1 border-t border-[var(--border)] bg-[var(--bg-tertiary)]/50 space-y-2 text-[11px]"
                       >
                         {/* Specific parameters */}
-                        {rule.key === 'trunc35' && (
-                          <div className="flex items-center justify-between gap-2 pt-1">
-                            <span className="font-semibold text-[var(--text-secondary)]">Max Length:</span>
-                            <input
-                              type="number"
-                              value={cfg.params?.max_length ?? 35}
-                              onChange={(e) => updateRuleParamInline(rule.key, 'max_length', parseInt(e.target.value) || 35)}
-                              className="w-16 px-2 py-0.5 rounded text-xs font-mono bg-[var(--bg-primary)] border border-[var(--border)] text-center text-[var(--text-primary)]"
-                            />
-                          </div>
-                        )}
-
                         {rule.key === 'country_iso' && (
                           <div className="flex items-center justify-between gap-2 pt-1">
                             <span className="font-semibold text-[var(--text-secondary)]">ISO Format:</span>
