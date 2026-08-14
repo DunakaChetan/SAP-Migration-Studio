@@ -911,7 +911,6 @@ class HarmonizationAgent:
         "whitespace_trim": {"enabled": True},
         "date_format": {"enabled": True},
         "phone_clean": {"enabled": True},
-        "uom_normalize": {"enabled": True},
     }
 
     def _apply_rules(self, df: pd.DataFrame, rule_config: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
@@ -945,9 +944,6 @@ class HarmonizationAgent:
             kp = cfg["phone_clean"].get("params", {}).get("keep_plus", True)
             tf = cfg["phone_clean"].get("params", {}).get("target_fields")
             df = self._rule_9_phone_clean(df, target_fields=tf, keep_plus=kp)
-        if cfg.get("uom_normalize", {}).get("enabled", True):
-            tf = cfg["uom_normalize"].get("params", {}).get("target_fields")
-            df = self._rule_10_uom_normalize(df, target_fields=tf)
         return df
 
     # ──────────────────────────────────────

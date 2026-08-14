@@ -88,21 +88,15 @@ interface CleanserSummary {
 }
 
 /* ─── Default Configurations ─── */
-const DEFAULT_CLEANSER_DYNAMIC_RULES: DynamicRuleItem[] = [
-  { id: 'DYN_1', prompt: 'Postal code (PSTLZ) must be exactly 5 digits when country (LAND1) is US', enabled: true },
-  { id: 'DYN_2', prompt: 'Customer email (SMTP_ADDR) must not be empty when country (LAND1) is US', enabled: true },
-];
+const DEFAULT_CLEANSER_DYNAMIC_RULES: DynamicRuleItem[] = [];
 
 const DEFAULT_STANDARD_RULES: StandardRuleState[] = [
   { code: 'CL_TRIM_WHITESPACE', name: 'Trim Whitespace', description: 'Leading/trailing spaces', enabled: true },
   { code: 'CL_COUNTRY_TO_ISO', name: 'Country→ISO', description: 'Full names to 2-3 char', enabled: true },
   { code: 'CL_CURRENCY_TO_ISO', name: 'Currency→ISO', description: 'Map to ISO 4217', enabled: true },
-  { code: 'CL_PAYMENT_TERMS_TO_SAP', name: 'PayTerms→SAP', description: 'Text to NT30/NT45/NT90 keys', enabled: true },
-  { code: 'CL_MATERIAL_TYPE_TO_SAP', name: 'MatType→SAP', description: 'ROH/FERT/HALB/HAWA', enabled: true },
   { code: 'CL_PAD_NUMERIC_IDENTIFIER', name: 'Pad Numeric IDs', description: 'KUNNR/LIFNR 10 digits', enabled: true },
   { code: 'CL_UPPERCASE_CODE_FIELDS', name: 'UPPERCASE Codes', description: 'Org & code fields', enabled: true },
   { code: 'CL_CLEAN_TAX_NUMBER', name: 'Clean Tax Numbers', description: 'Remove special chars', enabled: true },
-  { code: 'CL_TRUNCATE_OVERLENGTH', name: 'Truncate Overlength', description: 'SAP max field length', enabled: true },
   { code: 'CL_FILL_EMPTY_FIELDS', name: 'Fill Empty Fields', description: 'Set null to blank', enabled: true },
 ];
 
@@ -1347,7 +1341,7 @@ export function Step6Cleanse() {
                   const allTables: TableInfo[] = extractedTables.length > 0
                     ? extractedTables
                     : [{ table_name: 'Cleansed Records', columns: Object.keys(cleanedRows[0] || {}) }];
-                  const visibleTables = allTables.filter((t: any) => selectedCleanseTables.size === 0 || selectedCleanseTables.has(t.table_name));
+                  const visibleTables = allTables.filter((t: any) => selectedCleanseTables.has(t.table_name));
                   const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
                   const filteredRows = filterRowsByKey(cleanedRows, cleanseKeyFilter, allKeyColumns);
 
@@ -1355,42 +1349,48 @@ export function Step6Cleanse() {
                     <div className="space-y-4">
                       <TableFilterToolbar
                         tables={allTables}
-                        selectedTables={selectedCleanseTables.size === 0 ? new Set(allTables.map((t: any) => t.table_name)) : selectedCleanseTables}
+                        selectedTables={selectedCleanseTables}
                         onSelectedTablesChange={setSelectedCleanseTables}
                         keyFilterValue={cleanseKeyFilter}
                         onKeyFilterChange={setCleanseKeyFilter}
                         keyColumns={allKeyColumns}
                         accentColor="violet"
                       />
-                      {visibleTables.map((t: any) => {
-                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
-                        return (
-                          <div key={t.table_name} className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3 shadow-xs">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-[12px] text-[var(--text-primary)]">{t.table_name}</span>
-                                <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                                  ({tableCols.length} columns · {tableRows.length} rows{cleanseKeyFilter ? ' filtered' : ''})
-                                </span>
+                      {visibleTables.length === 0 ? (
+                        <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
+                          No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                        </div>
+                      ) : (
+                        visibleTables.map((t: any) => {
+                          const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                          return (
+                            <div key={t.table_name} className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3 shadow-xs">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-[12px] text-[var(--text-primary)]">{t.table_name}</span>
+                                  <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                                    ({tableCols.length} columns · {tableRows.length} rows{cleanseKeyFilter ? ' filtered' : ''})
+                                  </span>
+                                </div>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon={<Download className="w-3 h-3" />}
+                                  onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_cleansed.csv`, 'text/csv')}
+                                >
+                                  Export {t.table_name}
+                                </Button>
                               </div>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                icon={<Download className="w-3 h-3" />}
-                                onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_cleansed.csv`, 'text/csv')}
-                              >
-                                Export {t.table_name}
-                              </Button>
+                              <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} />
+                              {tableRows.length > 15 && (
+                                <div className="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-[var(--border)]">
+                                  Showing 15 of {tableRows.length} rows · Export CSV for full table
+                                </div>
+                              )}
                             </div>
-                            <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} />
-                            {tableRows.length > 15 && (
-                              <div className="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-[var(--border)]">
-                                Showing 15 of {tableRows.length} rows · Export CSV for full table
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                          );
+                        })
+                      )}
                     </div>
                   );
                 })() : (

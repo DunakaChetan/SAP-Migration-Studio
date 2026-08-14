@@ -390,17 +390,17 @@ export function TableFilterToolbar({
   };
 
   return (
-    <div className="rounded-2xl bg-[var(--bg-primary)] border border-[var(--border)] p-3.5 shadow-sm space-y-2.5">
+    <div className="rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-3.5 shadow-sm space-y-2.5">
       
       {/* Main Controls Row */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         
-        {/* Left: Table Selector & Table Chips */}
+        {/* Left: Table Selector */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
             <button
               onClick={() => setIsTableDropdownOpen(!isTableDropdownOpen)}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[11.5px] font-bold bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] hover:border-indigo-500/60 transition-all cursor-pointer shadow-xs"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[11.5px] font-bold bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 hover:border-indigo-500/60 transition-all cursor-pointer shadow-xs"
             >
               <Layers className="w-3.5 h-3.5 text-indigo-500" />
               <span>Tables Selected</span>
@@ -408,27 +408,27 @@ export function TableFilterToolbar({
                 {selectedTables.size} / {tables.length}
               </span>
               {isTableDropdownOpen
-                ? <ChevronUp className="w-3.5 h-3.5 text-[var(--text-tertiary)] ml-0.5" />
-                : <ChevronDown className="w-3.5 h-3.5 text-[var(--text-tertiary)] ml-0.5" />
+                ? <ChevronUp className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 ml-0.5" />
+                : <ChevronDown className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 ml-0.5" />
               }
             </button>
 
-            {/* Table Dropdown Popover */}
+            {/* Table Dropdown Popover (Solid White Background, No Blur) */}
             {isTableDropdownOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setIsTableDropdownOpen(false)} />
-                <div className="absolute left-0 top-full mt-2 z-50 bg-[var(--bg-primary)] border border-[var(--border)] rounded-2xl shadow-2xl p-2.5 min-w-[280px] max-h-[360px] overflow-y-auto space-y-1 backdrop-blur-md">
+                <div className="absolute left-0 top-full mt-2 z-50 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl p-2.5 min-w-[300px] max-h-[380px] overflow-y-auto space-y-1">
                   
                   {/* Select / Deselect All Bar */}
-                  <div className="flex items-center justify-between pb-2 mb-1 border-b border-[var(--border)] px-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                  <div className="flex items-center justify-between pb-2 mb-1 border-b border-gray-100 dark:border-gray-800 px-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                       SAP Target Tables ({tables.length})
                     </span>
                     <button
                       onClick={toggleAllTables}
                       className="text-[10.5px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
                     >
-                      <CheckCheck className="w-3 h-3" />
+                      <CheckCheck className="w-3.5 h-3.5" />
                       {allSelected ? 'Deselect All' : 'Select All'}
                     </button>
                   </div>
@@ -442,20 +442,20 @@ export function TableFilterToolbar({
                         onClick={() => toggleTable(t.table_name)}
                         className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-[11.5px] transition-all cursor-pointer text-left ${
                           checked
-                            ? 'bg-indigo-500/10 dark:bg-indigo-950/30 text-[var(--text-primary)] border border-indigo-500/20'
-                            : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-transparent'
+                            ? 'bg-indigo-50 dark:bg-indigo-950/40 text-gray-900 dark:text-gray-100 border border-indigo-200 dark:border-indigo-800'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300 border border-transparent'
                         }`}
                       >
                         <div className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 transition-all ${
                           checked
                             ? 'bg-indigo-600 text-white shadow-xs'
-                            : 'border-2 border-gray-300 dark:border-gray-600 bg-transparent'
+                            : 'border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800'
                         }`}>
                           {checked && <Check className="w-3 h-3 stroke-[3]" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-bold truncate">{t.table_name}</div>
-                          <div className="text-[9.5px] text-[var(--text-tertiary)] font-mono">
+                          <div className="font-bold text-gray-900 dark:text-gray-100 truncate">{t.table_name}</div>
+                          <div className="text-[9.5px] text-gray-500 dark:text-gray-400 font-mono">
                             {t.columns.length} columns {t.row_count ? `· ${t.row_count} rows` : ''}
                           </div>
                         </div>
@@ -465,31 +465,6 @@ export function TableFilterToolbar({
                 </div>
               </>
             )}
-          </div>
-
-          {/* Quick Table Chips */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {tables.map(t => {
-              const active = selectedTables.has(t.table_name);
-              return (
-                <button
-                  key={t.table_name}
-                  onClick={() => toggleTable(t.table_name)}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10.5px] font-bold transition-all cursor-pointer border ${
-                    active
-                      ? `${colorTheme.activeBtn} shadow-xs scale-[1.01]`
-                      : 'bg-[var(--bg-secondary)] text-[var(--text-tertiary)] border-[var(--border)] hover:border-indigo-400 opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  {active ? (
-                    <Check className="w-3 h-3 stroke-[3] shrink-0 text-white" />
-                  ) : (
-                    <span className="w-2.5 h-2.5 rounded-full border border-gray-400 shrink-0 opacity-60" />
-                  )}
-                  <span className="truncate max-w-[150px]">{t.table_name}</span>
-                </button>
-              );
-            })}
           </div>
         </div>
 

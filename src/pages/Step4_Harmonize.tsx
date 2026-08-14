@@ -241,7 +241,6 @@ const DEFAULT_RULE_CONFIG: Record<string, RuleItemConfig> = {
   empty_filter: { enabled: true },
   date_format: { enabled: true, params: { format: 'YYYYMMDD' } },
   phone_clean: { enabled: true, params: { keep_plus: true } },
-  uom_normalize: { enabled: true },
 };
 
 /* ─── Rule Definitions (Matched to Screenshot UI Layout) ─── */
@@ -261,7 +260,6 @@ const RULE_LIST: RuleDef[] = [
   { key: 'whitespace_trim', title: 'Whitespace Trim', sub: 'All fields trimmed', emoji: '✂️', logKey: 'WhitespaceTrim' },
   { key: 'date_format', title: 'Date → YYYYMMDD', sub: 'SAP 8-digit date format', emoji: '📅', logKey: 'Date' },
   { key: 'phone_clean', title: 'Phone Cleanup', sub: 'Remove invalid characters', emoji: '📞', logKey: 'PhoneClean' },
-  { key: 'uom_normalize', title: 'UOM → SAP', sub: 'Normalize unit of measure', emoji: '📐', logKey: 'UOM' },
 ];
 
 /* ─── Harmonization Report Card ─── */
@@ -289,8 +287,7 @@ function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
       icon: '🌍',
       items: fixLog.filter((l) =>
         l.includes('[Country→ISO]') ||
-        l.includes('[Currency→ISO]') ||
-        l.includes('[UOM→SAP]')
+        l.includes('[Currency→ISO]')
       ),
     },
     {
@@ -1161,7 +1158,7 @@ export function Step4Harmonize() {
             const allTables: TableInfo[] = extractedTables.length > 0
               ? extractedTables
               : [{ table_name: 'Harmonized Output', columns: result.columns }];
-            const visibleTables = allTables.filter((t: any) => selectedOutputTables.size === 0 || selectedOutputTables.has(t.table_name));
+            const visibleTables = allTables.filter((t: any) => selectedOutputTables.has(t.table_name));
             const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
             const filteredRows = filterRowsByKey(outputRows, outputKeyFilter, allKeyColumns);
 
@@ -1169,45 +1166,51 @@ export function Step4Harmonize() {
               <div className="space-y-4">
                 <TableFilterToolbar
                   tables={allTables}
-                  selectedTables={selectedOutputTables.size === 0 ? new Set(allTables.map((t: any) => t.table_name)) : selectedOutputTables}
+                  selectedTables={selectedOutputTables}
                   onSelectedTablesChange={setSelectedOutputTables}
                   keyFilterValue={outputKeyFilter}
                   onKeyFilterChange={setOutputKeyFilter}
                   keyColumns={allKeyColumns}
                   accentColor="purple"
                 />
-                {visibleTables.map((t: any) => {
-                  const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
-                  return (
-                    <Card key={t.table_name}>
-                      <CardHeader
-                        title={`Harmonized: ${t.table_name}`}
-                        subtitle={`${tableRows.length} rows × ${tableCols.length} columns${outputKeyFilter ? ' (filtered)' : ''}`}
-                      >
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          icon={<Download className="w-3 h-3" />}
-                          onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_harmonized.csv`, 'text/csv')}
-                          className="ml-auto"
+                {visibleTables.length === 0 ? (
+                  <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
+                    No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                  </div>
+                ) : (
+                  visibleTables.map((t: any) => {
+                    const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                    return (
+                      <Card key={t.table_name}>
+                        <CardHeader
+                          title={`Harmonized: ${t.table_name}`}
+                          subtitle={`${tableRows.length} rows × ${tableCols.length} columns${outputKeyFilter ? ' (filtered)' : ''}`}
                         >
-                          Export {t.table_name}
-                        </Button>
-                      </CardHeader>
-                      <CardBody>
-                        <DataTable
-                          rows={tableRows.slice(0, 15)}
-                          cols={tableCols}
-                        />
-                        {tableRows.length > 15 && (
-                          <div className="text-[10px] text-[var(--text-tertiary)] text-center py-2 border-t border-[var(--border)]">
-                            Showing 15 of {tableRows.length} rows · Download CSV for full data
-                          </div>
-                        )}
-                      </CardBody>
-                    </Card>
-                  );
-                })}
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon={<Download className="w-3 h-3" />}
+                            onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_harmonized.csv`, 'text/csv')}
+                            className="ml-auto"
+                          >
+                            Export {t.table_name}
+                          </Button>
+                        </CardHeader>
+                        <CardBody>
+                          <DataTable
+                            rows={tableRows.slice(0, 15)}
+                            cols={tableCols}
+                          />
+                          {tableRows.length > 15 && (
+                            <div className="text-[10px] text-[var(--text-tertiary)] text-center py-2 border-t border-[var(--border)]">
+                              Showing 15 of {tableRows.length} rows · Download CSV for full data
+                            </div>
+                          )}
+                        </CardBody>
+                      </Card>
+                    );
+                  })
+                )}
               </div>
             );
           })()}
