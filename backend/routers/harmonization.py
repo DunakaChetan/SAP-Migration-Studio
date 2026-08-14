@@ -215,7 +215,19 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
         if not extracted_payload:
             raise HTTPException(400, "Extracted data payload is empty.")
             
-        primary_df = pd.DataFrame(extracted_payload)
+        if isinstance(extracted_payload, dict):
+            extracted_rows = extracted_payload.get("rows", [])
+            extracted_tables = extracted_payload.get("tables", [])
+        elif isinstance(extracted_payload, list):
+            extracted_rows = extracted_payload
+            extracted_tables = []
+        else:
+            raise HTTPException(400, "Invalid extracted data format in database.")
+            
+        if not extracted_rows:
+            raise HTTPException(400, "Extracted data records are empty.")
+
+        primary_df = pd.DataFrame(extracted_rows)
 
         # 2. Fetch User Corrected Mappings from DB
         res_map = client.table("user_corrected_mappings").select("source_field_name, transform_rule, confidence, sap_fields(sap_structure, field_name)").eq("project_id", req.project_id).execute()
@@ -268,6 +280,7 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
             "session_id": session_id,
             "final_table": final_rows,
             "columns": columns,
+            "tables": extracted_tables,
             "stats": result.stats,
             "fix_log": result.fix_log,
             "is_preview": req.preview,
@@ -343,7 +356,19 @@ async def run_harmonization_multi_flow(
         if not extracted_payload:
             raise HTTPException(400, "Extracted data payload is empty.")
 
-        primary_df = pd.DataFrame(extracted_payload)
+        if isinstance(extracted_payload, dict):
+            extracted_rows = extracted_payload.get("rows", [])
+            extracted_tables = extracted_payload.get("tables", [])
+        elif isinstance(extracted_payload, list):
+            extracted_rows = extracted_payload
+            extracted_tables = []
+        else:
+            raise HTTPException(400, "Invalid extracted data format in database.")
+
+        if not extracted_rows:
+            raise HTTPException(400, "Extracted data records are empty.")
+
+        primary_df = pd.DataFrame(extracted_rows)
 
         # 2. Fetch Primary Mappings from DB
         res_map = client.table("user_corrected_mappings").select(
@@ -409,6 +434,7 @@ async def run_harmonization_multi_flow(
             "session_id": session_id,
             "final_table": final_rows,
             "columns": columns,
+            "tables": extracted_tables,
             "stats": result.stats,
             "fix_log": result.fix_log,
             "is_preview": is_preview,
@@ -522,6 +548,7 @@ class SaveHarmonizedRequest(BaseModel):
     project_id: str
     target_object: str
     payload: list
+    tables: Optional[list] = None
 
 @router.post("/harmonize/save")
 def save_harmonized_data(req: SaveHarmonizedRequest):
@@ -529,7 +556,10 @@ def save_harmonized_data(req: SaveHarmonizedRequest):
         client = supabase_service.get_client()
         res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
         if not res_obj.data:
-            raise HTTPException(400, f"SAP object '{req.target_object}' not found")
+            clean_name = "Customer" if "CUSTOMER" in req.target_object.upper() else ("Vendor" if "VENDOR" in req.target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+            if not res_obj.data:
+                raise HTTPException(400, f"SAP object '{req.target_object}' not found")
         
         obj_id = res_obj.data[0]["id"]
         
@@ -540,10 +570,15 @@ def save_harmonized_data(req: SaveHarmonizedRequest):
             .eq("object_id", obj_id) \
             .execute()
         
+        stored_payload = {
+            "rows": req.payload,
+            "tables": req.tables or []
+        } if req.tables else req.payload
+
         client.table("harmonized_data").insert({
             "project_id": req.project_id,
             "object_id": obj_id,
-            "payload": req.payload
+            "payload": stored_payload
         }).execute()
         
         return {"status": "success"}

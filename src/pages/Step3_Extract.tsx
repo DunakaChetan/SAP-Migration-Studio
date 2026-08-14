@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
@@ -19,6 +19,8 @@ import {
   CartesianGrid, Legend, Brush
 } from 'recharts';
 import { jsPDF } from 'jspdf';
+import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
+import type { TableInfo } from '@/components/shared/TableFilterToolbar';
 
 export function Step3Extract() {
   const reportRef = useRef<HTMLDivElement>(null);
@@ -32,6 +34,10 @@ export function Step3Extract() {
   const [edaSort, setEdaSort] = useState<'default' | 'null_desc' | 'anomalies_desc' | 'name'>('default');
   const [showAllRisks, setShowAllRisks] = useState(false);
   const [showAllActions, setShowAllActions] = useState(false);
+
+  // Table filter state
+  const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
+  const [keyFilterValue, setKeyFilterValue] = useState('');
 
   // Persistent data from global migration state
   const extractedTables = state.extractedTables || [];
@@ -57,6 +63,13 @@ export function Step3Extract() {
   const aiSummary = state.aiReport || null;
 
   const has = state.extracted.length > 0 || extractedTables.length > 0;
+
+  // Initialize selectedTables when extractedTables change
+  useEffect(() => {
+    if (extractedTables.length > 0) {
+      setSelectedTables(new Set(extractedTables.map((t: any) => t.table_name)));
+    }
+  }, [extractedTables.length]);
 
   // Auto-hydrate EDA stats and tables if state has extracted data but missing metrics on page switch
   useEffect(() => {
@@ -435,35 +448,55 @@ export function Step3Extract() {
 
           {has ? (
             <div className="space-y-6">
-              {(extractedTables.length > 0 
-                ? extractedTables 
-                : [{ table_name: 'Extracted Records', columns: Object.keys(state.extracted[0] || {}) }]
-              ).map((t: any) => (
-                <Card key={t.table_name}>
-                  <CardHeader title={`Extracted Records: ${t.table_name}`}>
-                    <div className="ml-auto flex items-center gap-2">
-                      <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
-                        {t.columns.length} fields · {Math.min(rowLimit, state.extracted.length)} rows
-                      </span>
-                      <Button 
-                        variant="secondary" 
-                        size="sm" 
-                        icon={<Download className="w-3 h-3" />} 
-                        onClick={() => dl(expCSV(state.extracted.map(r => {
-                          const sub: Record<string, any> = {};
-                          t.columns.forEach((c: string) => sub[c] = r[c]);
-                          return sub;
-                        })), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
-                      >
-                        Export {t.table_name}
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardBody>
-                    <DataTable rows={state.extracted.slice(0, rowLimit)} cols={t.columns} />
-                  </CardBody>
-                </Card>
-              ))}
+              {/* Table Filter Toolbar */}
+              {(() => {
+                const allTables: TableInfo[] = extractedTables.length > 0 
+                  ? extractedTables 
+                  : [{ table_name: 'Extracted Records', columns: Object.keys(state.extracted[0] || {}) }];
+                const visibleTables = allTables.filter((t: any) => selectedTables.size === 0 || selectedTables.has(t.table_name));
+                // Collect all key columns across all tables for filtering
+                const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
+                const filteredRows = filterRowsByKey(state.extracted, keyFilterValue, allKeyColumns).slice(0, rowLimit);
+
+                return (
+                  <>
+                    <TableFilterToolbar
+                      tables={allTables}
+                      selectedTables={selectedTables.size === 0 ? new Set(allTables.map((t: any) => t.table_name)) : selectedTables}
+                      onSelectedTablesChange={setSelectedTables}
+                      keyFilterValue={keyFilterValue}
+                      onKeyFilterChange={setKeyFilterValue}
+                      keyColumns={allKeyColumns}
+                      accentColor="cyan"
+                    />
+                    {visibleTables.map((t: any) => {
+                      const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                      return (
+                        <Card key={t.table_name}>
+                          <CardHeader title={`Extracted Records: ${t.table_name}`}>
+                            <div className="ml-auto flex items-center gap-2">
+                              <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
+                                {tableCols.length} fields · {tableRows.length} rows{keyFilterValue ? ' (filtered)' : ''}
+                              </span>
+                              <Button 
+                                variant="secondary" 
+                                size="sm" 
+                                icon={<Download className="w-3 h-3" />} 
+                                onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
+                              >
+                                Export {t.table_name}
+                              </Button>
+                            </div>
+                          </CardHeader>
+                          <CardBody>
+                            <DataTable rows={tableRows} cols={tableCols} />
+                          </CardBody>
+                        </Card>
+                      );
+                    })}
+                  </>
+                );
+              })()}
             </div>
           ) : (
             <Card>

@@ -908,13 +908,10 @@ class HarmonizationAgent:
         "empty_filter": {"enabled": True},
         "country_iso": {"enabled": True},
         "currency_iso": {"enabled": True},
-        "payterms_sap": {"enabled": True},
-        "mattype_sap": {"enabled": True},
         "whitespace_trim": {"enabled": True},
         "date_format": {"enabled": True},
         "phone_clean": {"enabled": True},
         "uom_normalize": {"enabled": True},
-        "trunc35": {"enabled": True, "params": {"max_length": 35}},
     }
 
     def _apply_rules(self, df: pd.DataFrame, rule_config: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
@@ -925,42 +922,32 @@ class HarmonizationAgent:
                 if k in cfg:
                     cfg[k] = {**cfg[k], **v}
 
-        if cfg["dedup"].get("enabled", True):
+        if cfg.get("dedup", {}).get("enabled", True):
             df = self._rule_1_dedup(df)
-        if cfg["empty_filter"].get("enabled", True):
+        if cfg.get("empty_filter", {}).get("enabled", True):
             df = self._rule_2_empty_filter(df)
-        if cfg["country_iso"].get("enabled", True):
+        if cfg.get("country_iso", {}).get("enabled", True):
             iso_len = cfg["country_iso"].get("params", {}).get("iso_length", 2)
             tf = cfg["country_iso"].get("params", {}).get("target_fields")
             df = self._rule_3_country_iso(df, target_fields=tf, iso_length=iso_len)
-        if cfg["currency_iso"].get("enabled", True):
+        if cfg.get("currency_iso", {}).get("enabled", True):
             tf = cfg["currency_iso"].get("params", {}).get("target_fields")
             df = self._rule_4_currency_iso(df, target_fields=tf)
-        if cfg["payterms_sap"].get("enabled", True):
-            tf = cfg["payterms_sap"].get("params", {}).get("target_fields")
-            df = self._rule_5_payterms_sap(df, target_fields=tf)
-        if cfg["mattype_sap"].get("enabled", True):
-            tf = cfg["mattype_sap"].get("params", {}).get("target_fields")
-            df = self._rule_6_mattype_sap(df, target_fields=tf)
-        if cfg["whitespace_trim"].get("enabled", True):
+        if cfg.get("whitespace_trim", {}).get("enabled", True):
             mode = cfg["whitespace_trim"].get("params", {}).get("mode", "both")
             tf = cfg["whitespace_trim"].get("params", {}).get("target_fields")
             df = self._rule_7_whitespace_trim(df, target_fields=tf, mode=mode)
-        if cfg["date_format"].get("enabled", True):
+        if cfg.get("date_format", {}).get("enabled", True):
             fmt = cfg["date_format"].get("params", {}).get("format", "YYYYMMDD")
             tf = cfg["date_format"].get("params", {}).get("target_fields")
             df = self._rule_8_date_format(df, target_fields=tf, target_format=fmt)
-        if cfg["phone_clean"].get("enabled", True):
+        if cfg.get("phone_clean", {}).get("enabled", True):
             kp = cfg["phone_clean"].get("params", {}).get("keep_plus", True)
             tf = cfg["phone_clean"].get("params", {}).get("target_fields")
             df = self._rule_9_phone_clean(df, target_fields=tf, keep_plus=kp)
-        if cfg["uom_normalize"].get("enabled", True):
+        if cfg.get("uom_normalize", {}).get("enabled", True):
             tf = cfg["uom_normalize"].get("params", {}).get("target_fields")
             df = self._rule_10_uom_normalize(df, target_fields=tf)
-        if cfg["trunc35"].get("enabled", True):
-            max_len = cfg["trunc35"].get("params", {}).get("max_length", 35)
-            tf = cfg["trunc35"].get("params", {}).get("target_fields")
-            df = self._rule_11_trunc35(df, target_fields=tf, max_length=max_len)
         return df
 
     # ──────────────────────────────────────
