@@ -102,12 +102,19 @@ class LLMOrchestrator:
             try:
                 result = _route_provider(provider, model, system_prompt, user_prompt)
                 
-                # Try parsing as JSON array
-                import re
-                json_str = re.search(r'\[.*\]', result, re.DOTALL)
-                if json_str:
-                    return json.loads(json_str.group())
-                return json.loads(result)
+                # Clean markdown formatting if present
+                clean_result = result.replace("```json", "").replace("```", "").strip()
+                
+                try:
+                    return json.loads(clean_result)
+                except json.JSONDecodeError:
+                    # Fallback to regex extraction if there's surrounding text
+                    import re
+                    # Try to match object or array
+                    json_match = re.search(r'(\{.*\}|\[.*\])', clean_result, re.DOTALL)
+                    if json_match:
+                        return json.loads(json_match.group(1))
+                    raise
             except Exception as e:
                 logger.warning(f"Failed using {provider.upper()} ({model}). Reason: {e}")
                 

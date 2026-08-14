@@ -67,6 +67,8 @@ export interface MigrationState {
   dynamicRules: any[];
   isCleansedSaved: boolean;
   cleansingSummary: any;
+  transformSummary: any;
+  isTransformedSaved: boolean;
 }
 
 const defaultState: MigrationState = {
@@ -113,6 +115,8 @@ const defaultState: MigrationState = {
   dynamicRules: [],
   isCleansedSaved: false,
   cleansingSummary: null,
+  transformSummary: null,
+  isTransformedSaved: false,
 };
 
 const getInitialState = (): MigrationState => {
