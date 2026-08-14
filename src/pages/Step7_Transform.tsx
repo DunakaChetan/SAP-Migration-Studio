@@ -94,79 +94,58 @@ export function Step7Transform() {
     <PageLayout>
       <PageGrid>
 
-      {/* Left Column */}
-      <GridCol span={3}>
-        <Card>
-          <CardHeader title="Transform Config" />
-          <CardBody className="p-3 space-y-3">
-        <div className="space-y-2.5 px-1">
-          {[['Company Code','cc','1000'],['Sales Org','so','1000'],['Purch Org','po','1000'],['Plant','plant','1000'],['Dist Channel','distch','10'],['Division (Spart)','spart','00'],['Currency','curr','INR']].map(([l,k,d]) => (
-            <div key={k}>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">{l}</label>
-              <input type="text" value={(state as unknown as Record<string, unknown>)[k] as string || d} onChange={(e) => updateField(k, e.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12px] text-[var(--text-primary)] outline-none focus:border-primary-500 transition-colors" />
-            </div>
-          ))}
-        </div>
-        <div className="border-t border-[var(--border)] my-3" />
-        <div className="text-[10px] text-[var(--text-tertiary)] px-1 whitespace-pre-wrap">
-          {sidebarRules || 'Click AI Rules for custom transforms'}
-        </div>
-          </CardBody>
-        </Card>
-      </GridCol>
+        {/* Main Content */}
+        <GridCol span={9}>
+          <PageHeader title="Step 7 — Data Transformation" subtitle="Apply org defaults, derive missing values, format to SAP S/4HANA standard">
+            <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/cleanse')}>Back</Button>
+            <Button variant="cyan" icon={<Bot className="w-3.5 h-3.5" />} onClick={doAITransform}>AI Transform Rules</Button>
+            <Button variant="success" icon={<Cog className="w-3.5 h-3.5" />} onClick={doTransform}>Run Transform</Button>
+            <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/export')} disabled={!has}>Next: DMC Export</Button>
+          </PageHeader>
 
-      {/* Middle Column */}
-      <GridCol span={6}>
-        <PageHeader title="Step 7 — Data Transformation" subtitle="Apply org defaults, derive missing values, format to SAP S/4HANA standard">
-          <Button variant="secondary" icon={<ArrowLeft className="w-3.5 h-3.5" />} onClick={() => navigate('/cleanse')}>Back</Button>
-          <Button variant="cyan" icon={<Bot className="w-3.5 h-3.5" />} onClick={doAITransform}>AI Transform Rules</Button>
-          <Button variant="success" icon={<Cog className="w-3.5 h-3.5" />} onClick={doTransform}>Run Transform</Button>
-          <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/export')} disabled={!has}>Next: DMC Export</Button>
-        </PageHeader>
+          {has && (
+            <StatsGrid>
+              <StatBox value={state.transformed.length} label="Transformed" color="var(--color-success)" />
+              <StatBox value={Object.keys(state.transformed[0] || {}).length} label="SAP Fields" color="var(--color-primary-500)" />
+              <StatBox value={state.mapping.filter((m) => m.tr && m.tr !== 'none').length} label="Transforms" color="var(--color-teal)" />
+              <StatBox value="✓" label="DMC Ready" color="var(--color-warning)" />
+            </StatsGrid>
+          )}
 
-        {has && (
-          <StatsGrid>
-            <StatBox value={state.transformed.length} label="Transformed" color="var(--color-success)" />
-            <StatBox value={Object.keys(state.transformed[0] || {}).length} label="SAP Fields" color="var(--color-primary-500)" />
-            <StatBox value={state.mapping.filter((m) => m.tr && m.tr !== 'none').length} label="Transforms" color="var(--color-teal)" />
-            <StatBox value="✓" label="DMC Ready" color="var(--color-warning)" />
-          </StatsGrid>
-        )}
-
-        <Card>
-          <CardHeader title="Final SAP-Format Data">
-            {has && <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(state.transformed), 'transformed.csv', 'text/csv')} className="ml-auto">Export</Button>}
-          </CardHeader>
-          <CardBody>
-            {has ? <DataTable rows={state.transformed.slice(0, 8)} cols={(OBJS[state.obj]?.fields || []).map((f) => f.n)} /> : <EmptyState icon={<Cog className="w-10 h-10 text-primary-500" />} message="Run transformation to generate SAP-format data" />}
-          </CardBody>
-        </Card>
-
-        {aiRules && (
           <Card>
-            <CardHeader title="AI Transform Rules" />
-            <CardBody><AIResponse>{aiRules}</AIResponse></CardBody>
+            <CardHeader title="Final SAP-Format Data">
+              {has && <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(state.transformed), 'transformed.csv', 'text/csv')} className="ml-auto">Export</Button>}
+            </CardHeader>
+            <CardBody>
+              {has ? <DataTable rows={state.transformed.slice(0, 8)} cols={(OBJS[state.obj]?.fields || []).map((f) => f.n)} /> : <EmptyState icon={<Cog className="w-10 h-10 text-primary-500" />} message="Run transformation to generate SAP-format data" />}
+            </CardBody>
           </Card>
-        )}
-      </GridCol>
 
-      {/* Right Column */}
-      <GridCol span={3}>
-        <Card>
-          <CardBody className="p-3 space-y-4">
-        {[['1. Org defaults','BUKRS/VKORG/WERKS'],['2. SAP defaults','VTWEG=10 SPART=00'],['3. AI custom rules','Pattern derivations'],['4. DMC-ready flag','Mark for export']].map(([n,d]) => (
-          <div key={n} className="flex gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
-            <span className="font-mono text-[10px] text-primary-500 shrink-0 mt-0.5">{n.split('.')[0]}.</span>
-            <div>
-              <div className="text-[11.5px] font-bold text-[var(--text-primary)]">{n.split('. ')[1]}</div>
-              <div className="text-[10px] text-[var(--text-tertiary)]">{d}</div>
-            </div>
-          </div>
-        ))}
-          </CardBody>
-        </Card>
-      </GridCol>
-          
+          {aiRules && (
+            <Card>
+              <CardHeader title="AI Transform Rules" />
+              <CardBody><AIResponse>{aiRules}</AIResponse></CardBody>
+            </Card>
+          )}
+        </GridCol>
+
+        {/* Right Column */}
+        <GridCol span={3}>
+          <Card>
+            <CardBody className="p-3 space-y-4">
+              {[['1. Org defaults', 'BUKRS/VKORG/WERKS'], ['2. SAP defaults', 'VTWEG=10 SPART=00'], ['3. AI custom rules', 'Pattern derivations'], ['4. DMC-ready flag', 'Mark for export']].map(([n, d]) => (
+                <div key={n} className="flex gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/50">
+                  <span className="font-mono text-[10px] text-primary-500 shrink-0 mt-0.5">{n.split('.')[0]}.</span>
+                  <div>
+                    <div className="text-[11.5px] font-bold text-[var(--text-primary)]">{n.split('. ')[1]}</div>
+                    <div className="text-[10px] text-[var(--text-tertiary)]">{d}</div>
+                  </div>
+                </div>
+              ))}
+            </CardBody>
+          </Card>
+        </GridCol>
+
       </PageGrid>
     </PageLayout>
   );

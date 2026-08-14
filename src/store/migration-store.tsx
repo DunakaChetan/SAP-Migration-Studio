@@ -44,6 +44,7 @@ export interface MigrationState {
   headers: string[];
   mapping: MappingEntry[];
   extracted: Record<string, string>[];
+  extractedTables: any[];
   harmonized: Record<string, string>[];
   validated: ValidationEntry[];
   cleaned: Record<string, string>[];
@@ -56,6 +57,9 @@ export interface MigrationState {
   isMappingSaved: boolean;
   isDataSaved: boolean;
   aiReport: any;
+  edaStats: any[];
+  reportMetrics: any;
+  complianceData: any[];
   isHarmonizedSaved: boolean;
   harmonizationResult: any;
   isValidatedSaved: boolean;
@@ -86,6 +90,7 @@ const defaultState: MigrationState = {
   headers: [],
   mapping: [],
   extracted: [],
+  extractedTables: [],
   harmonized: [],
   validated: [],
   cleaned: [],
@@ -98,6 +103,9 @@ const defaultState: MigrationState = {
   isMappingSaved: false,
   isDataSaved: false,
   aiReport: null,
+  edaStats: [],
+  reportMetrics: null,
+  complianceData: [],
   isHarmonizedSaved: false,
   harmonizationResult: null,
   isValidatedSaved: false,

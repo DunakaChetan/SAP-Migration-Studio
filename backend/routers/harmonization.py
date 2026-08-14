@@ -23,6 +23,7 @@ from pydantic import BaseModel
 import pandas as pd
 
 from services.supabase_client import supabase_service
+from agents.extract_agent import ExtractAgent
 from agents.harmonization_agent import (
     HarmonizationAgent,
     HarmonizationConfig,
@@ -159,10 +160,19 @@ async def run_harmonization(
         final_rows = result.final_table.fillna("").to_dict(orient="records") if not result.final_table.empty else []
         columns = list(result.final_table.columns) if not result.final_table.empty else []
 
+        extract_agent = ExtractAgent()
+        map_dicts = [{"src": m.src, "sap": m.sap, "tr": m.transform} for m in primary_mappings] if primary_mappings else []
+        tables = extract_agent.group_records_by_sap_structure(
+            harmonized_results=final_rows,
+            target_object=sap_object,
+            mappings=map_dicts
+        )
+
         return {
             "session_id": session_id,
             "final_table": final_rows,
             "columns": columns,
+            "tables": tables,
             "stats": result.stats,
             "fix_log": result.fix_log,
             "is_preview": is_preview,
@@ -215,7 +225,14 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
         if not extracted_payload:
             raise HTTPException(400, "Extracted data payload is empty.")
             
-        primary_df = pd.DataFrame(extracted_payload)
+        if isinstance(extracted_payload, dict) and "rows" in extracted_payload:
+            extracted_rows = extracted_payload["rows"]
+        elif isinstance(extracted_payload, list):
+            extracted_rows = extracted_payload
+        else:
+            extracted_rows = []
+
+        primary_df = pd.DataFrame(extracted_rows)
 
         # 2. Fetch User Corrected Mappings from DB
         res_map = client.table("user_corrected_mappings").select("source_field_name, transform_rule, confidence, sap_fields(sap_structure, field_name)").eq("project_id", req.project_id).execute()
@@ -264,10 +281,19 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
         final_rows = result.final_table.fillna("").to_dict(orient="records") if not result.final_table.empty else []
         columns = list(result.final_table.columns) if not result.final_table.empty else []
 
+        extract_agent = ExtractAgent()
+        map_dicts = [{"src": m.src, "sap": m.sap, "tr": m.transform} for m in primary_mappings] if primary_mappings else []
+        tables = extract_agent.group_records_by_sap_structure(
+            harmonized_results=final_rows,
+            target_object=req.sap_object,
+            mappings=map_dicts
+        )
+
         return {
             "session_id": session_id,
             "final_table": final_rows,
             "columns": columns,
+            "tables": tables,
             "stats": result.stats,
             "fix_log": result.fix_log,
             "is_preview": req.preview,
@@ -343,7 +369,14 @@ async def run_harmonization_multi_flow(
         if not extracted_payload:
             raise HTTPException(400, "Extracted data payload is empty.")
 
-        primary_df = pd.DataFrame(extracted_payload)
+        if isinstance(extracted_payload, dict) and "rows" in extracted_payload:
+            extracted_rows = extracted_payload["rows"]
+        elif isinstance(extracted_payload, list):
+            extracted_rows = extracted_payload
+        else:
+            extracted_rows = []
+
+        primary_df = pd.DataFrame(extracted_rows)
 
         # 2. Fetch Primary Mappings from DB
         res_map = client.table("user_corrected_mappings").select(
@@ -405,10 +438,19 @@ async def run_harmonization_multi_flow(
         final_rows = result.final_table.fillna("").to_dict(orient="records") if not result.final_table.empty else []
         columns = list(result.final_table.columns) if not result.final_table.empty else []
 
+        extract_agent = ExtractAgent()
+        map_dicts = [{"src": m.src, "sap": m.sap, "tr": m.transform} for m in primary_mappings] if primary_mappings else []
+        tables = extract_agent.group_records_by_sap_structure(
+            harmonized_results=final_rows,
+            target_object=sap_object,
+            mappings=map_dicts
+        )
+
         return {
             "session_id": session_id,
             "final_table": final_rows,
             "columns": columns,
+            "tables": tables,
             "stats": result.stats,
             "fix_log": result.fix_log,
             "is_preview": is_preview,
@@ -521,13 +563,18 @@ async def download_result(session_id: str):
 class SaveHarmonizedRequest(BaseModel):
     project_id: str
     target_object: str
-    payload: list
+    payload: list = []
+    tables: Optional[list] = None
 
 @router.post("/harmonize/save")
 def save_harmonized_data(req: SaveHarmonizedRequest):
     try:
         client = supabase_service.get_client()
         res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
+        if not res_obj.data:
+            clean_name = "Customer" if "CUSTOMER" in req.target_object.upper() else ("Vendor" if "VENDOR" in req.target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+
         if not res_obj.data:
             raise HTTPException(400, f"SAP object '{req.target_object}' not found")
         
@@ -540,10 +587,15 @@ def save_harmonized_data(req: SaveHarmonizedRequest):
             .eq("object_id", obj_id) \
             .execute()
         
+        stored_payload = {
+            "rows": req.payload,
+            "tables": req.tables or []
+        } if req.tables else req.payload
+
         client.table("harmonized_data").insert({
             "project_id": req.project_id,
             "object_id": obj_id,
-            "payload": req.payload
+            "payload": stored_payload
         }).execute()
         
         return {"status": "success"}

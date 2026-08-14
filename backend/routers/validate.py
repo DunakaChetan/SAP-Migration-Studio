@@ -179,6 +179,8 @@ def validate_flow(req: ValidateFlowRequest):
             raise HTTPException(400, "No harmonized data found for this project and object in the database.")
         
         harmonized_payload = res_data.data[0]["payload"]
+        if isinstance(harmonized_payload, dict) and "rows" in harmonized_payload:
+            harmonized_payload = harmonized_payload["rows"]
         if not harmonized_payload:
             raise HTTPException(400, "Harmonized data payload is empty.")
 

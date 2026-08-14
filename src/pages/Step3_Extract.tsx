@@ -3,24 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
-import { OBJS } from '@/data/sap-schemas';
-import { TRANSFORMS } from '@/data/lookup-maps';
-import { ai, parseAI } from '@/services/ai-service';
 import { dl, expCSV } from '@/lib/utils';
 import {
   PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button,
-  StatBox, StatsGrid, DataTable, PipelineStep, PageHeader, EmptyState,
-  CodeBlock, Select
+  StatBox, StatsGrid, DataTable, PageHeader, EmptyState
 } from '@/components/shared';
 import {
-  ArrowLeft, ArrowRight, Zap, Download, Plug, ClipboardList, Filter,
-  UploadCloud, CheckCircle2, RefreshCw, AlertTriangle, Activity, CheckCircle, Save,
-  BarChart2, ShieldAlert, Search, FileSpreadsheet, Layers, ChevronDown, ChevronUp
+  ArrowLeft, ArrowRight, Zap, Download, ClipboardList,
+  UploadCloud, AlertTriangle, Activity, CheckCircle, Save,
+  BarChart2, ShieldAlert, Search, FileSpreadsheet, Layers, ChevronDown, ChevronUp,
+  RefreshCw, CheckCircle2
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  CartesianGrid, ScatterChart, Scatter, ZAxis, Legend,
-  ComposedChart, Line, Area, Brush
+  CartesianGrid, Legend, Brush
 } from 'recharts';
 import { jsPDF } from 'jspdf';
 
@@ -31,14 +27,67 @@ export function Step3Extract() {
   const { toast } = useToast();
   const { showLoad, tick, hideLoad } = useLoading();
   const [rowLimit, setRowLimit] = useState(5000);
-  const [activeTab, setActiveTab] = useState<'table' | 'completeness' | 'cardinality' | 'raw'>('table');
+  const [activeTab, setActiveTab] = useState<'table' | 'completeness' | 'cardinality'>('table');
   const [edaSearch, setEdaSearch] = useState('');
+  const [edaSort, setEdaSort] = useState<'default' | 'null_desc' | 'anomalies_desc' | 'name'>('default');
   const [showAllRisks, setShowAllRisks] = useState(false);
   const [showAllActions, setShowAllActions] = useState(false);
-  const [aiSummary, setAiSummary] = useState<any>(null);
-  const [aiLoading, setAiLoading] = useState(false);
 
-  const has = state.extracted.length > 0;
+  // Persistent data from global migration state
+  const extractedTables = state.extractedTables || [];
+  const edaStats = state.edaStats || [];
+  const reportMetrics = state.reportMetrics || {
+    score: 100,
+    grade: 'A',
+    healthy: 0,
+    warning: 0,
+    critical: 0,
+    total_anomalies: 0,
+    totalFields: edaStats.length || 0,
+    totalRecords: state.extracted.length || 0,
+    title: `Data Quality Intelligence Report: ${state.obj} Master Data`,
+    summary: 'Exploratory Data Analysis and validation report.',
+    warnings: [],
+    recommendations: []
+  };
+  const complianceData = state.complianceData || [
+    { name: 'Mandatory', Healthy: 0, Warning: 0, Critical: 0, Total: 0 },
+    { name: 'Optional', Healthy: 0, Warning: 0, Critical: 0, Total: 0 }
+  ];
+  const aiSummary = state.aiReport || null;
+
+  const has = state.extracted.length > 0 || extractedTables.length > 0;
+
+  // Auto-hydrate EDA stats and tables if state has extracted data but missing metrics on page switch
+  useEffect(() => {
+    if (state.extracted && state.extracted.length > 0 && (!state.edaStats || state.edaStats.length === 0)) {
+      const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+      fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/execute_file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_object: objName,
+          mappings: state.mapping,
+          raw_data: state.extracted
+        })
+      })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data) {
+          dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
+          dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
+          dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
+          if (data.tables && (!state.extractedTables || state.extractedTables.length === 0)) {
+            dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables });
+          }
+          if (data.aiAnalysis?.report && !state.aiReport) {
+            dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis.report });
+          }
+        }
+      })
+      .catch(err => console.error('Failed to auto-hydrate EDA stats:', err));
+    }
+  }, [state.extracted, state.edaStats, state.mapping, state.obj, dispatch, state.extractedTables, state.aiReport]);
 
   const saveDataToDB = async () => {
     if (!state.projectId) {
@@ -48,19 +97,22 @@ export function Step3Extract() {
 
     showLoad('Saving data...', 'Persisting extracted records to database');
     try {
+      const currentTables = extractedTables.length > 0 ? extractedTables : (state.extractedTables || []);
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: state.projectId,
           target_object: state.obj,
-          payload: state.extracted
+          payload: state.extracted,
+          tables: currentTables
         })
       });
 
       if (!res.ok) throw new Error('Failed to save data');
 
       hideLoad();
+      dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: currentTables });
       dispatch({ type: 'SET_FIELD', field: 'isDataSaved', value: true });
       toast('Extracted data saved to database successfully!', 'ok');
     } catch (err: any) {
@@ -73,7 +125,7 @@ export function Step3Extract() {
     if (!state.src) { toast('Please configure a source first.', 'err'); return; }
     if (state.mapping.length === 0) { toast('Please map fields before extracting.', 'err'); return; }
 
-    setAiSummary(null);
+    dispatch({ type: 'SET_FIELD', field: 'aiReport', value: null });
 
     if (state.src === 'LIVE_SAP') {
       showLoad('Extracting from SAP…', 'Connecting to live system and generating AI Quality Report', [
@@ -108,34 +160,40 @@ export function Step3Extract() {
         setTimeout(() => {
           hideLoad();
           dispatch({ type: 'SET_FIELD', field: 'extracted', value: data.data || [] });
-          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || 'No quality report generated.' });
+          dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables || [] });
+          dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
+          dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
+          dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
+          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || null });
           toast(`Extracted ${data.data?.length || 0} records from live SAP`, 'ok');
         }, 1200);
       } catch (err: any) {
         hideLoad();
         toast(err.message, 'err');
       }
-    } else if (state.src === 'EXCEL_CSV' || state.src === 'ORACLE_EBS') {
-      showLoad('Extracting from File…', 'Processing uploaded data and generating AI Quality Report', [
-        'Reading memory…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
+    } else {
+      // EXCEL_CSV, ORACLE_EBS, or other data sources
+      showLoad('Extracting Data…', 'Processing source records and generating Quality Report', [
+        'Reading records…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
       ]);
       [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 300 + i * 400));
 
       try {
         const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+        const rawPayload = (state.uploadedData && state.uploadedData.length > 0) ? state.uploadedData : (state.rawData || []);
         const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/execute_file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             target_object: objName,
             mappings: state.mapping,
-            raw_data: state.uploadedData || []
+            raw_data: rawPayload
           })
         });
 
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.detail || 'File extraction failed');
+          throw new Error(err.detail || 'Extraction failed');
         }
 
         const data = await res.json();
@@ -144,202 +202,35 @@ export function Step3Extract() {
         setTimeout(() => {
           hideLoad();
           dispatch({ type: 'SET_FIELD', field: 'extracted', value: data.data || [] });
-          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || 'No quality report generated.' });
-          toast(`Processed ${data.data?.length || 0} records from file`, 'ok');
+          dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables || [] });
+          dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
+          dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
+          dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
+          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || null });
+          toast(`Processed ${data.data?.length || 0} records`, 'ok');
         }, 1200);
       } catch (err: any) {
         hideLoad();
         toast(err.message, 'err');
       }
-    } else {
-      showLoad('Extracting…', 'Applying field mapping to source data', [
-        'Connecting source…', 'Reading records…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
-      ]);
-      [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 350 + i * 380));
-
-      const extracted = state.rawData.map((row) => {
-        const out: Record<string, string> = {};
-        state.mapping.forEach((m) => {
-          if (m.src && row[m.src] !== undefined) {
-            const fn = TRANSFORMS[m.tr]?.fn || TRANSFORMS.trim.fn;
-            out[m.sap] = row[m.src] != null ? fn(row[m.src]) : '';
-          }
-        });
-        return out;
-      });
-
-      try {
-        tick(4, 'Quality analysis done');
-        setTimeout(() => {
-          hideLoad();
-          dispatch({ type: 'SET_FIELD', field: 'extracted', value: extracted });
-          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: null });
-          toast(`Extracted ${extracted.length} records`, 'ok');
-        }, 1500);
-      } catch {
-        setTimeout(() => {
-          hideLoad();
-          dispatch({ type: 'SET_FIELD', field: 'extracted', value: extracted });
-          toast(`Extracted ${extracted.length} records`, 'ok');
-        }, 1500);
-      }
     }
-  }
+  };
 
-  // Prepared data metrics for charts & report
-  const edaStats = useMemo(() => {
-    if (!state.extracted || state.extracted.length === 0) return [];
-    const keys = Object.keys(state.extracted[0] || {});
-    const total = state.extracted.length;
-
-    return keys.map((field) => {
-      let nullCount = 0;
-      let wsCount = 0;
-      let numCount = 0;
-      let strCount = 0;
-      const uniqueVals = new Set<string>();
-      let maxLen = 0;
-      let minLen = Infinity;
-
-      state.extracted.forEach((row: any) => {
-        const val = row[field];
-        if (val === null || val === undefined || String(val).trim() === '') {
-          nullCount++;
-        } else {
-          const str = String(val);
-          uniqueVals.add(str);
-          if (str.length > maxLen) maxLen = str.length;
-          if (str.length < minLen) minLen = str.length;
-          if (str !== str.trim()) wsCount++;
-          if (!isNaN(Number(str))) numCount++;
-          else strCount++;
-        }
-      });
-
-      if (minLen === Infinity) minLen = 0;
-      const populatedCount = total - nullCount;
-      const isConstant = (uniqueVals.size === 1 && populatedCount > 0);
-      const isMixedType = (numCount > 0 && strCount > 0 && populatedCount > 0);
-      const isMandatory = !!state.mapping.find(m => m.sap === field)?.req;
-
-      let status = 'HEALTHY';
-      if (isMandatory && nullCount > 0) status = 'CRITICAL';
-      else if (wsCount > 0 || isMixedType || (!isMandatory && nullCount === total)) status = 'WARNING';
-
-      return {
-        field,
-        is_mandatory: isMandatory,
-        null_count: nullCount,
-        populated_count: populatedCount,
-        unique_count: uniqueVals.size,
-        max_length: maxLen,
-        min_length: minLen,
-        ws_count: wsCount,
-        is_constant: isConstant,
-        is_mixed_type: isMixedType,
-        status
-      };
-    });
-  }, [state.extracted, state.mapping]);
-
-  const reportMetrics = useMemo(() => {
-    const mandatoryFields = edaStats.filter((f: any) => f.is_mandatory);
-    const healthy = edaStats.filter((f: any) => f.status === 'HEALTHY').length;
-    const warning = edaStats.filter((f: any) => f.status === 'WARNING').length;
-    const critical = edaStats.filter((f: any) => f.status === 'CRITICAL').length;
-    const totalFields = edaStats.length || 1;
-    const totalRecords = state.extracted.length || 1;
-
-    let score = 100;
-    if (mandatoryFields.length > 0) {
-      const mandatoryErrors = mandatoryFields.reduce((sum, f) => sum + f.null_count, 0);
-      const totalMandatoryCells = mandatoryFields.length * totalRecords;
-      score = Math.round(((totalMandatoryCells - mandatoryErrors) / totalMandatoryCells) * 100);
-    } else {
-      const allErrors = edaStats.reduce((sum, f) => sum + f.null_count, 0);
-      const totalCells = totalFields * totalRecords;
-      score = Math.round(((totalCells - allErrors) / totalCells) * 100);
+  // Sorted & Filtered list for UI display and interactive charts
+  const displayEdaStats = useMemo(() => {
+    let list = [...edaStats];
+    if (edaSearch.trim()) {
+      list = list.filter((r: any) => String(r.field || '').toLowerCase().includes(edaSearch.toLowerCase()));
     }
-
-    const grade = score >= 95 ? 'A' : score >= 80 ? 'B' : 'C';
-    
-    const warnings: string[] = [];
-    edaStats.filter((f: any) => f.is_mandatory && f.null_count > 0).forEach((f: any) => {
-      warnings.push(`Mandatory field [${f.field}] has ${f.null_count} missing values.`);
-    });
-    edaStats.filter((f: any) => f.max_length > 40).forEach((f: any) => {
-      warnings.push(`Field [${f.field}] exceeds SAP standard 40-char limit (Max: ${f.max_length}).`);
-    });
-
-    const recommendations: string[] = [];
-    edaStats.filter((f: any) => f.ws_count > 0).forEach((f: any) => {
-      recommendations.push(`Apply TRIM transform on [${f.field}]: ${f.ws_count} records contain invisible whitespace.`);
-    });
-    edaStats.filter((f: any) => f.is_constant).forEach((f: any) => {
-      recommendations.push(`[${f.field}] is a hardcoded constant. Consider removing from payload and defaulting in SAP.`);
-    });
-    edaStats.filter((f: any) => f.is_mixed_type).forEach((f: any) => {
-      recommendations.push(`[${f.field}] contains both text and numbers. Validate data type mapping.`);
-    });
-    
-    if (warnings.length === 0 && recommendations.length === 0) {
-       recommendations.push('Data quality looks excellent. Proceed to transformation.');
+    if (edaSort === 'null_desc') {
+      list.sort((a, b) => (b.null_count || 0) - (a.null_count || 0));
+    } else if (edaSort === 'anomalies_desc') {
+      list.sort((a, b) => (b.format_anomaly_count || 0) - (a.format_anomaly_count || 0));
+    } else if (edaSort === 'name') {
+      list.sort((a, b) => String(a.field).localeCompare(String(b.field)));
     }
-
-    return {
-      title: `Deterministic Data Quality Report: ${state.obj} Master Data`,
-      summary: `Automated deterministic quality scan completed across ${totalRecords} records and ${totalFields} fields. Advanced formatting and length checks applied.`,
-      score,
-      grade,
-      healthy,
-      warning,
-      critical,
-      totalFields,
-      warnings,
-      recommendations
-    };
-  }, [edaStats, state.obj, state.extracted.length]);
-
-  useEffect(() => {
-    if (edaStats.length > 0 && reportMetrics && !aiLoading && !aiSummary) {
-      console.log('LLM triggered');
-      setAiLoading(true);
-      fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/ai_summary`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stats: edaStats.slice(0, 50),
-          score: reportMetrics.score,
-          total_records: state.extracted.length,
-          target_object: state.obj
-        })
-      }).then(r => r.json()).then(data => {
-        if (data.aiAnalysis) setAiSummary(data.aiAnalysis);
-      }).catch(e => console.error(e)).finally(() => setAiLoading(false));
-    }
-  }, [edaStats, reportMetrics]);
-
-  const complianceData = useMemo(() => {
-    const mandatory = edaStats.filter((f: any) => f.is_mandatory);
-    const optional = edaStats.filter((f: any) => !f.is_mandatory);
-
-    return [
-      {
-        name: 'Mandatory',
-        Healthy: mandatory.filter((f: any) => f.status === 'HEALTHY').length,
-        Critical: mandatory.filter((f: any) => f.status === 'CRITICAL').length,
-        Warning: 0,
-        Total: mandatory.length
-      },
-      {
-        name: 'Optional',
-        Healthy: optional.filter((f: any) => f.status === 'HEALTHY').length,
-        Warning: optional.filter((f: any) => f.status === 'WARNING').length,
-        Critical: 0,
-        Total: optional.length
-      }
-    ].filter(d => d.Total > 0);
-  }, [edaStats]);
+    return list;
+  }, [edaStats, edaSearch, edaSort]);
 
   // Clean Vector PDF Generator using jsPDF
   const exportToPDF = () => {
@@ -542,18 +433,46 @@ export function Step3Extract() {
             </StatsGrid>
           )}
 
-          <Card>
-            <CardHeader title="Extracted Mapped Records">
-              {has && (
-                <div className="ml-auto flex gap-2">
-                  <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(state.extracted), 'extracted.csv', 'text/csv')}>Export CSV</Button>
-                </div>
-              )}
-            </CardHeader>
-            <CardBody>
-              {has ? <DataTable rows={state.extracted.slice(0, rowLimit)} cols={Object.keys(state.extracted[0] || {})} /> : <EmptyState icon={<UploadCloud className="w-10 h-10 text-primary-500" />} message="Run extraction to see mapped data" />}
-            </CardBody>
-          </Card>
+          {has ? (
+            <div className="space-y-6">
+              {(extractedTables.length > 0 
+                ? extractedTables 
+                : [{ table_name: 'Extracted Records', columns: Object.keys(state.extracted[0] || {}) }]
+              ).map((t: any) => (
+                <Card key={t.table_name}>
+                  <CardHeader title={`Extracted Records: ${t.table_name}`}>
+                    <div className="ml-auto flex items-center gap-2">
+                      <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
+                        {t.columns.length} fields · {Math.min(rowLimit, state.extracted.length)} rows
+                      </span>
+                      <Button 
+                        variant="secondary" 
+                        size="sm" 
+                        icon={<Download className="w-3 h-3" />} 
+                        onClick={() => dl(expCSV(state.extracted.map(r => {
+                          const sub: Record<string, any> = {};
+                          t.columns.forEach((c: string) => sub[c] = r[c]);
+                          return sub;
+                        })), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
+                      >
+                        Export {t.table_name}
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardBody>
+                    <DataTable rows={state.extracted.slice(0, rowLimit)} cols={t.columns} />
+                  </CardBody>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardHeader title="Extracted Mapped Records" />
+              <CardBody>
+                <EmptyState icon={<UploadCloud className="w-10 h-10 text-primary-500" />} message="Run extraction to see mapped data" />
+              </CardBody>
+            </Card>
+          )}
         </GridCol>
 
 
@@ -658,34 +577,34 @@ export function Step3Extract() {
 
                 {/* Visual Analytics Container */}
                 <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-5 shadow-sm space-y-4">
-                  
+
                   {/* Tab Header Bar */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
                     <div className="flex items-center gap-2">
                       <BarChart2 className="w-4 h-4 text-indigo-500" />
                       <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                        Field-Level Analytics
+                        Field-Level Analytics & Data Intelligence
                       </span>
                     </div>
 
                     <div className="flex bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg p-1 gap-1 text-[11px]">
                       <button
                         onClick={() => setActiveTab('table')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all ${activeTab === 'table' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'table' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                       >
                         Data Table
                       </button>
                       <button
                         onClick={() => setActiveTab('completeness')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all ${activeTab === 'completeness' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'completeness' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                       >
-                        Populated vs Null
+                        Completeness & Anomalies
                       </button>
                       <button
                         onClick={() => setActiveTab('cardinality')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all ${activeTab === 'cardinality' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'cardinality' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                       >
-                        Cardinality
+                        Cardinality Spectrum
                       </button>
                     </div>
                   </div>
@@ -693,7 +612,7 @@ export function Step3Extract() {
                   {/* Primary Data Table */}
                   {activeTab === 'table' && (
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="relative flex-1 max-w-xs">
                           <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[var(--text-tertiary)]" />
                           <input
@@ -704,44 +623,68 @@ export function Step3Extract() {
                             className="w-full pl-8 pr-3 py-1.5 rounded-lg text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
                           />
                         </div>
-                        <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono">
-                          Showing {edaStats.filter((r: any) => String(r.field || '').toLowerCase().includes(edaSearch.toLowerCase())).length} of {edaStats.length} fields
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase font-mono tracking-wider text-[var(--text-tertiary)]">Sort by:</span>
+                          <select
+                            value={edaSort}
+                            onChange={(e: any) => setEdaSort(e.target.value)}
+                            className="text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-md px-2 py-1 text-[var(--text-primary)] outline-none"
+                          >
+                            <option value="default">Default Order</option>
+                            <option value="null_desc">Highest Nulls (Missing)</option>
+                            <option value="anomalies_desc">Highest Anomalies</option>
+                            <option value="name">Alphabetical (A-Z)</option>
+                          </select>
+                          <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono ml-2">
+                            Showing {displayEdaStats.length} of {edaStats.length} fields
+                          </span>
+                        </div>
                       </div>
-                      
-                      <div className="overflow-x-auto rounded-lg border border-[var(--border)] max-h-[400px] overflow-y-auto">
+
+                      <div className="overflow-x-auto rounded-lg border border-[var(--border)] max-h-[420px] overflow-y-auto">
                         <table className="w-full text-left text-[11.5px]">
                           <thead className="bg-[var(--bg-tertiary)] sticky top-0 border-b border-[var(--border)] text-[var(--text-tertiary)] font-mono uppercase text-[9.5px]">
                             <tr>
                               <th className="py-2.5 px-3">Field</th>
                               <th className="py-2.5 px-3 w-16">Mandatory</th>
-                              <th className="py-2.5 px-3 min-w-[120px]">Populated vs Null</th>
+                              <th className="py-2.5 px-3 min-w-[130px]">Populated vs Null</th>
                               <th className="py-2.5 px-3">Uniques</th>
-                              <th className="py-2.5 px-3 min-w-[120px]">Format Anomalies</th>
+                              <th className="py-2.5 px-3 min-w-[160px]">Format Anomalies (Count & Details)</th>
                               <th className="py-2.5 px-3">Status</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[var(--border)] font-mono">
-                            {edaStats
-                              .filter((r: any) => String(r.field || '').toLowerCase().includes(edaSearch.toLowerCase()))
-                              .map((row: any, i: number) => {
+                            {displayEdaStats.map((row: any, i: number) => {
                               const st = row.status || 'HEALTHY';
                               const bc = st === 'HEALTHY' ? { bg: '#10b98115', txt: '#10b981', brd: '#10b98130' }
                                 : st === 'WARNING' ? { bg: '#f59e0b15', txt: '#f59e0b', brd: '#f59e0b30' }
-                                : { bg: '#ef444415', txt: '#ef4444', brd: '#ef444430' };
-                              
+                                  : { bg: '#ef444415', txt: '#ef4444', brd: '#ef444430' };
+
                               const total = state.extracted.length || 1;
-                              const popPct = (row.populated_count / total) * 100;
-                              const nullPct = (row.null_count / total) * 100;
+                              const popPct = Math.round(((row.populated_count || 0) / total) * 100);
+                              const nullPct = Math.round(((row.null_count || 0) / total) * 100);
 
                               return (
                                 <tr key={i} className="hover:bg-[var(--bg-tertiary)]/50 transition-colors">
-                                  <td className="py-2 px-3 font-semibold text-[var(--text-primary)] whitespace-nowrap">{row.field}</td>
-                                  <td className="py-2 px-3 text-[var(--text-secondary)]">{row.is_mandatory ? 'Yes' : 'No'}</td>
+                                  <td className="py-2 px-3 font-semibold text-[var(--text-primary)] whitespace-nowrap">
+                                    <div className="flex items-center gap-1.5">
+                                      <span>{row.field}</span>
+                                      {row.is_mandatory && (
+                                        <span className="text-[8.5px] px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 font-bold">REQ</span>
+                                      )}
+                                    </div>
+                                  </td>
                                   <td className="py-2 px-3">
-                                    <div className="flex flex-col gap-1 w-full max-w-[120px]">
+                                    {row.is_mandatory ? (
+                                      <span className="text-[10px] text-indigo-500 font-bold">Yes</span>
+                                    ) : (
+                                      <span className="text-[10px] text-[var(--text-tertiary)]">No</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    <div className="flex flex-col gap-1 w-full max-w-[130px]">
                                       <div className="flex justify-between text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider">
-                                        <span>{row.populated_count} Pop</span>
+                                        <span>{row.populated_count} Pop ({popPct}%)</span>
                                         <span>{row.null_count} Null</span>
                                       </div>
                                       <div className="w-full h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden flex">
@@ -750,14 +693,24 @@ export function Step3Extract() {
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="py-2 px-3 text-[var(--text-secondary)]">{row.unique_count}</td>
+                                  <td className="py-2 px-3 text-[var(--text-secondary)]">
+                                    <span className="font-semibold">{row.unique_count}</span>
+                                    {row.is_constant && <span className="ml-1 text-[8.5px] text-purple-500 font-bold">(Const)</span>}
+                                  </td>
                                   <td className="py-2 px-3">
-                                    <div className="flex gap-1 flex-wrap max-w-[150px]">
-                                      {row.ws_count > 0 && <span className="bg-amber-500/20 text-amber-600 px-1.5 py-0.5 rounded text-[9px] border border-amber-500/30">Whitespace</span>}
-                                      {row.is_mixed_type && <span className="bg-purple-500/20 text-purple-600 px-1.5 py-0.5 rounded text-[9px] border border-purple-500/30">Mixed Type</span>}
-                                      {row.is_constant && <span className="bg-blue-500/20 text-blue-600 px-1.5 py-0.5 rounded text-[9px] border border-blue-500/30">Constant</span>}
-                                      {row.max_length > 40 && <span className="bg-red-500/20 text-red-600 px-1.5 py-0.5 rounded text-[9px] border border-red-500/30">Len &gt; 40</span>}
-                                      {!(row.ws_count > 0 || row.is_mixed_type || row.is_constant || row.max_length > 40) && <span className="text-[var(--text-tertiary)] text-[9px]">—</span>}
+                                    <div className="flex items-center gap-1.5 flex-wrap max-w-[220px]">
+                                      {row.format_anomaly_count > 0 ? (
+                                        <span className="bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold px-2 py-0.5 rounded text-[9.5px] border border-amber-500/30">
+                                          {row.format_anomaly_count} rows
+                                        </span>
+                                      ) : (
+                                        <span className="text-emerald-500 font-semibold text-[9.5px]">0 (Clean)</span>
+                                      )}
+                                      {row.anomalies && row.anomalies.map((a: string, ai: number) => (
+                                        <span key={ai} className="bg-[var(--bg-tertiary)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded text-[8.5px] border border-[var(--border)]">
+                                          {a}
+                                        </span>
+                                      ))}
                                     </div>
                                   </td>
                                   <td className="py-2 px-3">
@@ -774,95 +727,131 @@ export function Step3Extract() {
                     </div>
                   )}
 
-                  {/* Chart 1: Populated vs Null Composed */}
+                  {/* Chart 1: Modern Field Completeness & Quality Spectrum */}
                   {activeTab === 'completeness' && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] text-[var(--text-secondary)]">Distribution of Populated vs Null records (Use the brush below to zoom/pan)</div>
-                      <div style={{ width: '100%', height: 350 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ComposedChart
-                            data={edaStats}
-                            margin={{ top: 20, right: 20, bottom: 20, left: 0 }}
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-[var(--text-secondary)]">
+                        <div>Interactive breakdown of Populated vs Missing (Null) values and Format Anomalies across fields.</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-[var(--text-tertiary)]">Sort:</span>
+                          <select
+                            value={edaSort}
+                            onChange={(e: any) => setEdaSort(e.target.value)}
+                            className="text-[10.5px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[var(--text-primary)] outline-none"
                           >
-                            <defs>
-                              <linearGradient id="popColor" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
-                                <stop offset="95%" stopColor="#10b981" stopOpacity={0.1}/>
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.5} />
+                            <option value="default">Default Order</option>
+                            <option value="null_desc">Most Nulls First</option>
+                            <option value="anomalies_desc">Most Anomalies First</option>
+                            <option value="name">A-Z</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ width: '100%', height: 380 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={displayEdaStats}
+                            margin={{ top: 20, right: 20, bottom: 30, left: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.4} />
                             <XAxis
                               dataKey="field"
                               tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
-                              tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 10) + '…' : v}
+                              tickFormatter={(v: string) => v.length > 12 ? v.slice(0, 12) + '…' : v}
                               axisLine={false}
                               tickLine={false}
                               height={60}
-                              angle={-45}
+                              angle={-40}
                               textAnchor="end"
                             />
                             <YAxis
                               tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
                               axisLine={false}
                               tickLine={false}
-                              width={40}
+                              width={45}
                             />
                             <Tooltip
-                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                              cursor={{ fill: 'var(--bg-tertiary)', opacity: 0.4 }}
+                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 11.5, boxShadow: '0 8px 16px -4px rgba(0,0,0,0.15)' }}
+                              formatter={(value: any, name: any, props: any) => {
+                                const total = (props.payload.populated_count || 0) + (props.payload.null_count || 0);
+                                const pct = total > 0 ? Math.round((Number(value) / total) * 100) : 0;
+                                return [`${value} rows (${pct}%)`, name];
+                              }}
                               labelFormatter={(lbl) => `Field: ${lbl}`}
                             />
-                            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                            <Area type="monotone" dataKey="populated_count" name="Populated" fillOpacity={1} fill="url(#popColor)" stroke="#10b981" />
-                            <Line type="monotone" dataKey="null_count" name="Null" stroke="#ef4444" strokeWidth={2} dot={{ r: 3, fill: '#ef4444' }} activeDot={{ r: 6 }} />
-                            <Brush dataKey="field" height={25} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(15, edaStats.length - 1)} />
-                          </ComposedChart>
+                            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 12 }} />
+                            <Bar dataKey="populated_count" name="Populated Rows" stackId="stack" fill="#10b981" radius={[0, 0, 0, 0]} />
+                            <Bar dataKey="null_count" name="Null (Missing) Rows" stackId="stack" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="format_anomaly_count" name="Format Anomalies" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={20} />
+                            <Brush dataKey="field" height={26} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(18, displayEdaStats.length - 1)} />
+                          </BarChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
                   )}
 
-                  {/* Chart 2: Cardinality Composed */}
+                  {/* Chart 2: Modern Cardinality & Uniqueness Spectrum */}
                   {activeTab === 'cardinality' && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] text-[var(--text-secondary)]">Unique distinct values per field (Constants highlighted in purple)</div>
-                      <div style={{ width: '100%', height: 350 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ComposedChart
-                            data={edaStats}
-                            margin={{ top: 20, right: 20, bottom: 20, left: 0 }}
+                    <div className="space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-[var(--text-secondary)]">
+                        <div>Distinct value density across fields. Purple indicates constant values (1 distinct value).</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-[var(--text-tertiary)]">Sort:</span>
+                          <select
+                            value={edaSort}
+                            onChange={(e: any) => setEdaSort(e.target.value)}
+                            className="text-[10.5px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[var(--text-primary)] outline-none"
                           >
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.5} />
+                            <option value="default">Default Order</option>
+                            <option value="name">A-Z</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ width: '100%', height: 380 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={displayEdaStats}
+                            margin={{ top: 20, right: 20, bottom: 30, left: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.4} />
                             <XAxis
                               dataKey="field"
                               tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
-                              tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 10) + '…' : v}
+                              tickFormatter={(v: string) => v.length > 12 ? v.slice(0, 12) + '…' : v}
                               axisLine={false}
                               tickLine={false}
                               height={60}
-                              angle={-45}
+                              angle={-40}
                               textAnchor="end"
                             />
                             <YAxis
                               tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
                               axisLine={false}
                               tickLine={false}
-                              width={40}
+                              width={45}
                             />
                             <Tooltip
-                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                              cursor={{ fill: 'var(--bg-tertiary)', opacity: 0.4 }}
+                              contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 11.5, boxShadow: '0 8px 16px -4px rgba(0,0,0,0.15)' }}
                               labelFormatter={(lbl) => `Field: ${lbl}`}
                               formatter={(value: any, name: any, props: any) => [
-                                value, 
-                                props.payload.is_constant ? 'Constant Value' : 'Unique Values'
+                                `${value} unique values ${props.payload.is_constant ? '(Single Constant)' : ''}`,
+                                'Cardinality'
                               ]}
                             />
-                            <Bar dataKey="unique_count" name="Unique Values" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                              {edaStats.map((entry: any, index: number) => (
-                                <Cell key={`cell-${index}`} fill={entry.is_constant ? '#8b5cf6' : '#06b6d4'} />
+                            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 12 }} />
+                            <Bar dataKey="unique_count" name="Distinct Unique Values" radius={[4, 4, 0, 0]} maxBarSize={36}>
+                              {displayEdaStats.map((entry: any, index: number) => (
+                                <Cell
+                                  key={`cell-${index}`}
+                                  fill={entry.is_constant ? '#8b5cf6' : (entry.unique_count > 50 ? '#06b6d4' : '#6366f1')}
+                                />
                               ))}
                             </Bar>
-                            <Brush dataKey="field" height={25} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(15, edaStats.length - 1)} />
-                          </ComposedChart>
+                            <Brush dataKey="field" height={26} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(18, displayEdaStats.length - 1)} />
+                          </BarChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
@@ -873,37 +862,91 @@ export function Step3Extract() {
 
               </div>
 
-              {/* RIGHT COLUMN: Mandatory Stacked Bar */}
+              {/* RIGHT COLUMN: Modern Compliance & Readiness Dashboard */}
               <div className="w-full lg:w-[320px] flex flex-col gap-4 shrink-0">
-                {/* Mandatory Compliance Chart */}
-                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                    Mandatory vs Optional Compliance
+                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-[var(--border)]">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
+                      Compliance Health
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 font-bold border border-indigo-500/20">
+                      S/4HANA
+                    </span>
                   </div>
-                  <div style={{ width: '100%', height: 180 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={complianceData}
-                        layout="vertical"
-                        margin={{ top: 0, right: 10, bottom: 0, left: 0 }}
-                        barSize={32}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--border)" opacity={0.5} />
-                        <XAxis type="number" hide />
-                        <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: 'var(--text-primary)', fontWeight: 600 }} axisLine={false} tickLine={false} width={65} />
-                        <Tooltip
-                          cursor={{ fill: 'var(--bg-secondary)', opacity: 0.2 }}
-                          contentStyle={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: 10, paddingTop: 10 }} />
-                        <Bar dataKey="Healthy" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
-                        <Bar dataKey="Warning" stackId="a" fill="#f59e0b" radius={[0, 0, 0, 0]} />
-                        <Bar dataKey="Critical" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="text-[10px] text-[var(--text-tertiary)] text-center">
-                    Red indicates critical blockers in mandatory fields.
+
+                  {/* Mandatory Fields Gauge Card */}
+                  {(() => {
+                    const mand = complianceData.find((c: any) => c.name === 'Mandatory') || { Total: 0, Healthy: 0, Critical: 0, Warning: 0 };
+                    const mandPct = mand.Total > 0 ? Math.round((mand.Healthy / mand.Total) * 100) : 100;
+                    return (
+                      <div className="p-3.5 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)] space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-[var(--text-primary)]">Mandatory Fields</span>
+                          <span className={`text-[11px] font-mono font-extrabold ${mand.Critical > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                            {mandPct}% Compliant
+                          </span>
+                        </div>
+
+                        <div className="w-full h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden flex">
+                          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${mandPct}%` }} />
+                          <div className="h-full bg-red-500 transition-all" style={{ width: `${100 - mandPct}%` }} />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
+                          <div className="flex items-center justify-between px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                            <span>Healthy</span>
+                            <strong>{mand.Healthy} / {mand.Total}</strong>
+                          </div>
+                          <div className="flex items-center justify-between px-2 py-1 rounded bg-red-500/10 text-red-500 border border-red-500/20">
+                            <span>Critical</span>
+                            <strong>{mand.Critical}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Optional Fields Gauge Card */}
+                  {(() => {
+                    const opt = complianceData.find((c: any) => c.name === 'Optional') || { Total: 0, Healthy: 0, Warning: 0 };
+                    const optPct = opt.Total > 0 ? Math.round((opt.Healthy / opt.Total) * 100) : 100;
+                    return (
+                      <div className="p-3.5 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)] space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-[var(--text-primary)]">Optional Fields</span>
+                          <span className="text-[11px] font-mono font-extrabold text-amber-500">
+                            {optPct}% Populated
+                          </span>
+                        </div>
+
+                        <div className="w-full h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden flex">
+                          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${optPct}%` }} />
+                          <div className="h-full bg-amber-500 transition-all" style={{ width: `${100 - optPct}%` }} />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
+                          <div className="flex items-center justify-between px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                            <span>Healthy</span>
+                            <strong>{opt.Healthy} / {opt.Total}</strong>
+                          </div>
+                          <div className="flex items-center justify-between px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                            <span>Warnings</span>
+                            <strong>{opt.Warning}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Format Anomalies Global Count */}
+                  <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      <span className="text-[11px] font-bold text-[var(--text-primary)]">Format Anomalies</span>
+                    </div>
+                    <span className="text-xs font-mono font-extrabold text-amber-500">
+                      {reportMetrics.total_anomalies || 0} total
+                    </span>
                   </div>
                 </div>
               </div>
@@ -911,25 +954,25 @@ export function Step3Extract() {
 
             {/* BOTTOM FULL-WIDTH: Exec Summary, Risks, Actions */}
             <div className="flex flex-col gap-4 mt-5">
-              
+
               {/* Executive Summary Card */}
               <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
                 <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)] mb-2.5">
                   <ClipboardList className="w-4 h-4 text-indigo-500" /> {aiSummary ? 'AI Executive Summary' : 'Executive Summary'}
                 </div>
                 <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
-                  {aiSummary?.summary || reportMetrics.summary}
+                  {aiSummary?.executive_summary || aiSummary?.summary || reportMetrics.summary}
                 </p>
               </div>
 
               {/* Critical Migration Risks */}
-              {(aiSummary?.warnings || reportMetrics.warnings).length > 0 && (
+              {((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length > 0 && (
                 <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 shadow-sm space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-red-500">
-                      <ShieldAlert className="w-4 h-4" /> {aiSummary ? 'AI Assessed Risks' : 'Critical Migration Risks'} ({(aiSummary?.warnings || reportMetrics.warnings).length})
+                      <ShieldAlert className="w-4 h-4" /> {aiSummary ? 'AI Assessed Risks' : 'Critical Migration Risks'} ({((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length})
                     </div>
-                    {(aiSummary?.warnings || reportMetrics.warnings).length > 2 && (
+                    {((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length > 2 && (
                       <button
                         onClick={() => setShowAllRisks(!showAllRisks)}
                         className="flex items-center gap-1 text-[10.5px] font-semibold text-red-500 hover:text-red-400 transition-colors cursor-pointer bg-red-500/10 px-2.5 py-1 rounded-md"
@@ -943,7 +986,7 @@ export function Step3Extract() {
                     )}
                   </div>
                   <div className="space-y-2">
-                    {(showAllRisks ? (aiSummary?.warnings || reportMetrics.warnings) : (aiSummary?.warnings || reportMetrics.warnings).slice(0, 2)).map((w: string, i: number) => (
+                    {(showAllRisks ? (aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) : (aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings).slice(0, 2)).map((w: string, i: number) => (
                       <div key={i} className="flex gap-2 text-[11.5px] text-red-400 leading-snug bg-red-500/5 p-2.5 rounded-lg border border-red-500/10">
                         <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
                         <span>{w}</span>
@@ -954,13 +997,13 @@ export function Step3Extract() {
               )}
 
               {/* Action Plan & Recommended Fixes */}
-              {(aiSummary?.recommendations || reportMetrics.recommendations).length > 0 && (
+              {(aiSummary?.recommendations || reportMetrics.recommendations || []).length > 0 && (
                 <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                      <Zap className="w-4 h-4 text-amber-500" /> {aiSummary ? 'AI Strategic Plan' : 'Action Plan'} ({(aiSummary?.recommendations || reportMetrics.recommendations).length})
+                      <Zap className="w-4 h-4 text-amber-500" /> {aiSummary ? 'AI Strategic Plan' : 'Action Plan'} ({(aiSummary?.recommendations || reportMetrics.recommendations || []).length})
                     </div>
-                    {(aiSummary?.recommendations || reportMetrics.recommendations).length > 2 && (
+                    {(aiSummary?.recommendations || reportMetrics.recommendations || []).length > 2 && (
                       <button
                         onClick={() => setShowAllActions(!showAllActions)}
                         className="flex items-center gap-1 text-[10.5px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-500 transition-colors cursor-pointer bg-amber-500/10 px-2.5 py-1 rounded-md"

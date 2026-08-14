@@ -48,7 +48,7 @@ export function Step2AIMapping() {
             setIsLoadingSchema(false);
             return;
           }
-          
+
           try {
             const schemaRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/fetch_schema`, {
               method: 'POST',
@@ -513,31 +513,31 @@ export function Step2AIMapping() {
                           </div>
                         );
                       })}
-                      
+
                     {stagedMaps.map((staged, idx) => (
                       <div key={idx} className="grid grid-cols-[1fr_30px_1fr_70px_140px_28px] gap-2 items-center px-3 py-2 rounded-xl border border-primary-500 bg-[var(--bg-tertiary)]/50 mb-2">
-                        <Select 
+                        <Select
                           size="sm"
                           searchable
-                          value={staged.src} 
+                          value={staged.src}
                           onChange={(v) => {
                             const updated = [...stagedMaps];
                             updated[idx].src = v;
                             setStagedMaps(updated);
                           }}
-                          options={[{value:'', label:'Select Source...'}, ...unmappedSourceList.map(s => ({value:s, label:s}))]} 
+                          options={[{ value: '', label: 'Select Source...' }, ...unmappedSourceList.map(s => ({ value: s, label: s }))]}
                         />
                         <div className="text-center text-[var(--text-tertiary)]">→</div>
-                        <Select 
+                        <Select
                           size="sm"
                           searchable
-                          value={staged.sap} 
+                          value={staged.sap}
                           onChange={(v) => {
                             const updated = [...stagedMaps];
                             updated[idx].sap = v;
                             setStagedMaps(updated);
                           }}
-                          options={[{value:'', label:'Select Target...'}, ...unmappedSapList.map(s => ({value:s.field_name, label:s.field_name}))]} 
+                          options={[{ value: '', label: 'Select Target...' }, ...unmappedSapList.map(s => ({ value: s.field_name, label: s.field_name }))]}
                         />
                         <div className="text-center font-mono text-[10px] text-emerald-500">100%</div>
                         <div className="text-center text-[10px] text-[var(--text-tertiary)]">none</div>
@@ -546,14 +546,14 @@ export function Step2AIMapping() {
                             const updated = [...stagedMaps];
                             updated.splice(idx, 1);
                             setStagedMaps(updated);
-                          }} className="text-red-500 hover:text-red-400 transition-colors"><X className="w-4 h-4"/></button>
+                          }} className="text-red-500 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
                         </div>
                       </div>
                     ))}
                   </div>
 
                   <div className="flex justify-center gap-3 mt-3 pb-2">
-                    <Button variant="secondary" size="sm" onClick={() => setStagedMaps([...stagedMaps, {src: '', sap: ''}])}>+ Add Row</Button>
+                    <Button variant="secondary" size="sm" onClick={() => setStagedMaps([...stagedMaps, { src: '', sap: '' }])}>+ Add Row</Button>
                     {stagedMaps.length > 0 && (
                       <Button variant="primary" size="sm" icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => {
                         // Validate all rows
@@ -562,7 +562,7 @@ export function Step2AIMapping() {
                           toast('Some rows are missing a source or target. Please complete or remove them.', 'err');
                           return;
                         }
-                        
+
                         const newEntries = validRows.map(m => {
                           const f = sapFields.find(x => x.field_name === m.sap);
                           return {

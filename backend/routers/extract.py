@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
@@ -175,14 +176,25 @@ def execute_extraction(req: ExecuteExtractionRequest):
         
         quality_report = agent.generate_eda_quality_report(
             harmonized_results=harmonized_data,
-            target_object=req.target_object
+            target_object=req.target_object,
+            mappings=req.mappings
+        )
+
+        tables = agent.group_records_by_sap_structure(
+            harmonized_results=harmonized_data,
+            target_object=req.target_object,
+            mappings=req.mappings
         )
         
         return {
             "status": "success", 
             "data": harmonized_data,
+            "tables": tables,
+            "eda_stats": quality_report.get("eda_stats", []),
+            "compliance_data": quality_report.get("compliance_data", []),
+            "summary_metrics": quality_report.get("summary_metrics", {}),
             "aiAnalysis": {
-                "report": quality_report
+                "report": quality_report.get("ai_report", {})
             }
         }
     except Exception as e:
@@ -280,14 +292,25 @@ def execute_file_extraction(req: ExecuteFileRequest):
         
         quality_report = agent.generate_eda_quality_report(
             harmonized_results=harmonized_results,
-            target_object=req.target_object
+            target_object=req.target_object,
+            mappings=req.mappings
+        )
+
+        tables = agent.group_records_by_sap_structure(
+            harmonized_results=harmonized_results,
+            target_object=req.target_object,
+            mappings=req.mappings
         )
         
         return {
             "status": "success", 
             "data": harmonized_results,
+            "tables": tables,
+            "eda_stats": quality_report.get("eda_stats", []),
+            "compliance_data": quality_report.get("compliance_data", []),
+            "summary_metrics": quality_report.get("summary_metrics", {}),
             "aiAnalysis": {
-                "report": quality_report
+                "report": quality_report.get("ai_report", {})
             }
         }
     except Exception as e:
@@ -296,7 +319,8 @@ def execute_file_extraction(req: ExecuteFileRequest):
 class SaveExtractionRequest(BaseModel):
     project_id: str
     target_object: str
-    payload: list
+    payload: list = []
+    tables: Optional[list] = None
 
 @router.post("/save")
 def save_extraction(req: SaveExtractionRequest):
@@ -304,6 +328,10 @@ def save_extraction(req: SaveExtractionRequest):
         client = supabase_service.get_client()
         # Resolve target_object name to object_id
         res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
+        if not res_obj.data:
+            clean_name = "Customer" if "CUSTOMER" in req.target_object.upper() else ("Vendor" if "VENDOR" in req.target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+
         if not res_obj.data:
             raise HTTPException(status_code=400, detail=f"SAP object '{req.target_object}' not found.")
         object_id = res_obj.data[0]["id"]
@@ -315,17 +343,56 @@ def save_extraction(req: SaveExtractionRequest):
             .eq("object_id", object_id) \
             .execute()
             
+        # Store both flat rows and separated tables
+        stored_payload = {
+            "rows": req.payload,
+            "tables": req.tables or []
+        } if req.tables else req.payload
+
         # Insert the new payload
         res = client.table("extracted_data").insert({
             "project_id": req.project_id,
             "object_id": object_id,
-            "payload": req.payload
+            "payload": stored_payload
         }).execute()
         
         return {"status": "success", "message": "Extraction saved to database."}
     except Exception as e:
         logger.error(f"Failed to save extraction: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save extraction: {str(e)}")
+
+@router.get("/load/{project_id}")
+def load_saved_extraction(project_id: str, target_object: Optional[str] = None):
+    try:
+        client = supabase_service.get_client()
+        query = client.table("extracted_data").select("*, sap_objects(name)").eq("project_id", project_id)
+        if target_object:
+            clean_name = "Customer" if "CUSTOMER" in target_object.upper() else ("Vendor" if "VENDOR" in target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+            if res_obj.data:
+                query = query.eq("object_id", res_obj.data[0]["id"])
+                
+        res = query.order("created_at", desc=True).limit(1).execute()
+        if not res.data:
+            return {"status": "not_found", "data": [], "tables": []}
+            
+        raw_payload = res.data[0].get("payload")
+        if isinstance(raw_payload, dict) and "tables" in raw_payload:
+            return {
+                "status": "success",
+                "data": raw_payload.get("rows", []),
+                "tables": raw_payload.get("tables", [])
+            }
+        elif isinstance(raw_payload, list):
+            return {
+                "status": "success",
+                "data": raw_payload,
+                "tables": []
+            }
+        return {"status": "success", "data": [], "tables": []}
+    except Exception as e:
+        logger.error(f"Failed to load extraction: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 class AISummaryRequest(BaseModel):
     stats: list

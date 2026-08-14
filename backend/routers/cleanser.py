@@ -71,6 +71,8 @@ async def cleanser_flow(req: FlowRequest):
     if not res_harm.data:
         raise HTTPException(status_code=400, detail="No harmonized data found for this project/object")
     harmonized_data = res_harm.data[0]["payload"]
+    if isinstance(harmonized_data, dict) and "rows" in harmonized_data:
+        harmonized_data = harmonized_data["rows"]
     
     # 3. Fetch complete Validation Report payload.
     res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
