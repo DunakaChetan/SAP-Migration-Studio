@@ -437,8 +437,8 @@ You MUST return the output as a valid JSON object matching this exact schema:
         except Exception as e:
             logger.warning(f"Could not load sap_fields for grouping: {e}")
 
-        # Helper to get metadata for a column
-        def get_col_meta(col_name: str):
+        # Helper to get all sheets a column belongs to
+        def get_col_sheets(col_name: str) -> list:
             import re
             clean_col = re.sub(r"^\[\d+\]", "", col_name)
             
@@ -468,85 +468,98 @@ You MUST return the output as a valid JSON object matching this exact schema:
             
             sap_struct = sap_full.split(".")[0] if "." in sap_full else ""
             sap_field = sap_full.split(".")[-1] if "." in sap_full else (col_name.split(".")[-1] if "." in col_name else col_name)
+            sap_field_upper = sap_field.upper()
 
-            # Match against DB sap_fields
-            matched_field = None
-            for sf in sap_fields:
-                sf_struct = str(sf.get("sap_structure", "")).upper()
-                sf_name = str(sf.get("field_name", "")).upper()
-                if sap_struct and sf_struct == sap_struct.upper() and sf_name == sap_field.upper():
-                    matched_field = sf
-                    break
-                elif sf_name == sap_field.upper() or sf_name == clean_col.upper() or sf_name == col_name.upper():
-                    matched_field = sf
-                    break
-                elif f"{sf_struct}.{sf_name}" == sap_full.upper():
-                    matched_field = sf
-                    break
+            sheets_found = []
+            if sap_fields:
+                for sf in sap_fields:
+                    sf_name = str(sf.get("field_name", "")).upper()
+                    if sf_name == sap_field_upper:
+                        sheet = sf.get("sheet_name") or sf.get("group_name") or sf.get("sap_structure") or "General Data"
+                        if not sheet.lower().endswith("data"):
+                            sheet = f"{sheet} Data"
+                        if sheet not in sheets_found:
+                            sheets_found.append(sheet)
 
-            if matched_field:
-                sheet = matched_field.get("sheet_name") or matched_field.get("group_name") or matched_field.get("sap_structure") or "General Data"
-                if not sheet.lower().endswith("data"):
-                    sheet = f"{sheet} Data"
-                
-                is_mand = bool(matched_field.get("is_mandatory", False))
-                fn_upper = str(matched_field.get("field_name", "")).upper()
-                is_key = is_mand and (fn_upper in ["KUNNR", "LIFNR", "MATNR"] or "NUM" in fn_upper or "ID" in fn_upper)
-                return sheet, is_key or "CUSTOMER_NUMBER" in clean_col.upper() or "PARTY_NUMBER" in clean_col.upper() or "ACCOUNT" in clean_col.upper()
-            
-            # Fallback based on structure name if in mapping
-            if sap_struct:
-                st_upper = sap_struct.upper()
-                if "GEN" in st_upper or "KNA1" in st_upper or "LFA1" in st_upper or "MARA" in st_upper:
-                    sheet = "General Data"
-                elif "SALES" in st_upper or "KNVV" in st_upper or "MVKE" in st_upper:
-                    sheet = "Sales Data"
-                elif "COMP" in st_upper or "CC" in st_upper or "KNB1" in st_upper or "LFB1" in st_upper:
-                    sheet = "Company Data"
-                elif "PURCH" in st_upper or "LFM1" in st_upper:
-                    sheet = "Purchasing Data"
-                elif "PLANT" in st_upper or "MARC" in st_upper:
-                    sheet = "Plant Data"
+            if not sheets_found:
+                if sap_struct:
+                    st_upper = sap_struct.upper()
+                    if "GEN" in st_upper or "KNA1" in st_upper or "LFA1" in st_upper or "MARA" in st_upper:
+                        sheet = "General Data"
+                    elif "SALES" in st_upper or "KNVV" in st_upper or "MVKE" in st_upper:
+                        sheet = "Sales Data"
+                    elif "COMP" in st_upper or "CC" in st_upper or "KNB1" in st_upper or "LFB1" in st_upper:
+                        sheet = "Company Data"
+                    elif "PURCH" in st_upper or "LFM1" in st_upper:
+                        sheet = "Purchasing Data"
+                    elif "PLANT" in st_upper or "MARC" in st_upper:
+                        sheet = "Plant Data"
+                    else:
+                        sheet = f"{sap_struct} Data"
+                    sheets_found.append(sheet)
                 else:
-                    sheet = f"{sap_struct} Data"
-                return sheet, False
+                    cn_upper = clean_col.upper()
+                    if any(k in cn_upper for k in ["SALES", "VKORG", "VTWEG", "SPART", "KDGRP", "BZIRK"]):
+                        sheet = "Sales Data"
+                    elif any(k in cn_upper for k in ["COMPANY", "BUKRS", "AKONT", "ZTERM", "ZWELS"]):
+                        sheet = "Company Data"
+                    elif any(k in cn_upper for k in ["PURCH", "EKORG", "WAERS"]):
+                        sheet = "Purchasing Data"
+                    elif any(k in cn_upper for k in ["PLANT", "WERKS", "LGORT"]):
+                        sheet = "Plant Data"
+                    else:
+                        sheet = "General Data"
+                    sheets_found.append(sheet)
 
-            # Column name heuristics fallback
-            cn_upper = clean_col.upper()
-            if any(k in cn_upper for k in ["SALES", "VKORG", "VTWEG", "SPART", "KDGRP", "BZIRK"]):
-                return "Sales Data", False
-            if any(k in cn_upper for k in ["COMPANY", "BUKRS", "AKONT", "ZTERM", "ZWELS"]):
-                return "Company Data", False
-            if any(k in cn_upper for k in ["PURCH", "EKORG", "WAERS"]):
-                return "Purchasing Data", False
-            if any(k in cn_upper for k in ["PLANT", "WERKS", "LGORT"]):
-                return "Plant Data", False
+            return sheets_found
 
-            return "General Data", False
+        # Helper to determine if column is a key column
+        def is_column_key(col_name: str) -> bool:
+            import re
+            clean_col = re.sub(r"^\[\d+\]", "", col_name).upper()
+            if any(k in clean_col for k in ["CUSTOMER_NUMBER", "PARTY_NUMBER", "ACCOUNT", "LIFNR", "KUNNR", "MATNR", "PARTNER"]):
+                return True
+            
+            sap_full = ""
+            for m in (mappings or []):
+                if isinstance(m, dict):
+                    m_src = str(m.get("src", ""))
+                    m_sap = str(m.get("sap", ""))
+                else:
+                    m_src = str(getattr(m, "src", ""))
+                    m_sap = str(getattr(m, "sap", ""))
+                m_clean = re.sub(r"^\[\d+\]", "", m_src)
+                if m_src == col_name or m_clean == clean_col or m_src.split(".")[-1] == clean_col:
+                    sap_full = m_sap
+                    break
+            
+            if sap_full:
+                sap_field = sap_full.split(".")[-1].upper()
+                if sap_field in ["KUNNR", "LIFNR", "MATNR"] or "NUM" in sap_field or "ID" in sap_field:
+                    return True
+            return False
 
-        # 2. Identify key columns across dataset
-        key_cols = []
-        for col in all_cols:
-            sheet, is_key = get_col_meta(col)
-            col_upper = col.upper()
-            if is_key or "CUSTOMER_NUMBER" in col_upper or "PARTY_NUMBER" in col_upper or "PARTY_ID" in col_upper:
-                if col not in key_cols:
-                    key_cols.append(col)
-
-        # 3. Group columns by sheet
+        # 2. Group columns by sheet dynamically
         cols_by_table = {}
         for col in all_cols:
-            sheet, _ = get_col_meta(col)
-            if sheet not in cols_by_table:
-                cols_by_table[sheet] = []
-            if col not in cols_by_table[sheet]:
-                cols_by_table[sheet].append(col)
+            sheets = get_col_sheets(col)
+            for sheet in sheets:
+                if sheet not in cols_by_table:
+                    cols_by_table[sheet] = []
+                if col not in cols_by_table[sheet]:
+                    cols_by_table[sheet].append(col)
 
-        # 4. Prepend key columns to every table
+        # 3. Sort key columns first for each table, and filter out tables containing only key fields
         result_tables = []
         for sheet, cols in cols_by_table.items():
-            non_keys = [c for c in cols if c not in key_cols]
-            final_cols = key_cols + non_keys
+            key_cols = [c for c in cols if is_column_key(c)]
+            non_key_cols = [c for c in cols if c not in key_cols]
+            
+            # Skip tables that do not have any non-key columns mapped
+            if not non_key_cols:
+                continue
+                
+            final_cols = key_cols + non_key_cols
             
             result_tables.append({
                 "table_name": sheet,
