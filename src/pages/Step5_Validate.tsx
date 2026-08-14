@@ -37,6 +37,7 @@ export function Step5Validate() {
   const { toast } = useToast();
   const { showLoad, tick, hideLoad } = useLoading();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
 
   const [source, setSource] = useState<Source>('harmonized');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -44,10 +45,8 @@ export function Step5Validate() {
   const [uploadMeta, setUploadMeta] = useState<{ rows: number; cols: number } | null>(null);
 
   // Dynamic Rules State
-  const [customPrompts, setCustomPrompts] = useState<string[]>([
-    'Postal code (PSTLZ) must be exactly 5 digits when country (LAND1) is US',
-    'Customer email (SMTP_ADDR) must not be empty when country (LAND1) is US',
-  ]);
+  const [customPrompts, setCustomPrompts] = useState<string[]>([]);
+  const [editedStandardRulePrompts, setEditedStandardRulePrompts] = useState<Record<string, string>>({}); // standardRuleId -> prompt text
   const [newPromptInput, setNewPromptInput] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
@@ -59,8 +58,7 @@ export function Step5Validate() {
     { id: 'CURRENCY_ISO', label: 'Currency ISO', description: '3-letter ISO 4217' },
     { id: 'NUMERIC_ID', label: 'Numeric IDs', description: 'KUNNR/LIFNR digits' },
     { id: 'EMAIL_FORMAT', label: 'Email Format', description: 'Valid @ format' },
-    { id: 'DATE_FORMAT', label: 'Date Format', description: 'YYYYMMDD 8 digits' },
-    { id: 'PAYMENT_TERMS', label: 'Payment Terms', description: 'SAP NT30/NT45 format' }
+    { id: 'DATE_FORMAT', label: 'Date Format', description: 'YYYYMMDD 8 digits' }
   ];
 
   const [selectedRules, setSelectedRules] = useState<Record<string, boolean>>(
@@ -70,6 +68,11 @@ export function Step5Validate() {
   const [standardEditLabel, setStandardEditLabel] = useState('');
   const [standardEditDesc, setStandardEditDesc] = useState('');
   const [savedDynamicRules, setSavedDynamicRules] = useState<any[]>(state.dynamicRules || []);
+  const [selectedDynamicRules, setSelectedDynamicRules] = useState<Record<string, boolean>>(
+    Object.fromEntries((state.dynamicRules || []).map((r) => [r.id, true]))
+  );
+  // Track which standard rule is overridden by which dynamic rule (standardRuleId -> dynamicRuleId)
+  const [standardRuleOverrides, setStandardRuleOverrides] = useState<Record<string, string>>({});
   const [appliedStandardRules, setAppliedStandardRules] = useState<string[] | null>(null);
   const [selectedRulesReceived, setSelectedRulesReceived] = useState<string[] | null>(null);
 
@@ -117,6 +120,13 @@ export function Step5Validate() {
     return false;
   };
 
+  const getPrimaryKeyValue = (row: Record<string, any> = {}, obj: string = state.obj) => {
+    const keyMap: Record<string, string> = { CUSTOMER: 'KUNNR', VENDOR: 'LIFNR', MATERIAL: 'MATNR' };
+    const key = keyMap[obj] || 'KUNNR';
+    const value = row?.[key] ?? row?.[key.toLowerCase()] ?? row?.[key.toUpperCase()];
+    return value !== undefined && value !== null && String(value).trim() ? String(value).trim() : '';
+  };
+
   const has = state.validated.length > 0;
   const eR = state.validated.filter((v) => v.st === 'ERROR').length;
   const wR = state.validated.filter((v) => v.st === 'WARN').length;
@@ -146,16 +156,28 @@ export function Step5Validate() {
 
     try {
       let data: any;
+      
+      // Combine custom prompts + edited standard rule prompts for LLM compilation
+      const allPrompts = [
+        ...customPrompts,
+        ...Object.values(editedStandardRulePrompts)
+      ];
 
       if (source === 'upload' && uploadedFile) {
         const fd = new FormData();
         fd.append('obj', state.obj);
         fd.append('file', uploadedFile);
-        if (customPrompts.length > 0) {
-          fd.append('custom_prompts_json', JSON.stringify(customPrompts));
+        if (allPrompts.length > 0) {
+          fd.append('custom_prompts_json', JSON.stringify(allPrompts));
         }
-        // include selected standard rules
-        const selectedList = Object.keys(selectedRules).filter((k) => selectedRules[k]);
+        // include only selected saved dynamic override rules
+        const selectedDynRules = savedDynamicRules.filter((r) => selectedDynamicRules[r.id] !== false);
+        if (selectedDynRules && selectedDynRules.length) {
+          fd.append('dynamic_rules_json', JSON.stringify(selectedDynRules));
+        }
+        // include selected standard rules EXCLUDING overridden ones
+        const selectedList = Object.keys(selectedRules)
+          .filter((k) => selectedRules[k] && !standardRuleOverrides[k]);
         fd.append('selected_rules_json', JSON.stringify(selectedList));
         const res = await fetch(`${VALIDATE_API}/api/validate/upload-csv`, { method: 'POST', body: fd });
         if (!res.ok) {
@@ -171,8 +193,9 @@ export function Step5Validate() {
           body: JSON.stringify({
             project_id: state.projectId,
             target_object: state.obj,
-            custom_prompts: customPrompts,
-            selected_rules: Object.keys(selectedRules).filter((k) => selectedRules[k])
+            custom_prompts: allPrompts,
+            selected_rules: Object.keys(selectedRules).filter((k) => selectedRules[k] && !standardRuleOverrides[k]),
+            dynamic_rules: savedDynamicRules.filter((r) => selectedDynamicRules[r.id] !== false) || []
           }),
         });
         if (!res.ok) {
@@ -183,14 +206,25 @@ export function Step5Validate() {
         setUploadMeta(null);
       }
 
+      const newDynRules = data.dynamic_rules || [];
       dispatch({
         type: 'BATCH_UPDATE',
         updates: {
           validated: data.validated,
           validationReport: data.report,
-          dynamicRules: data.dynamic_rules || [],
+          dynamicRules: newDynRules,
           stats: { ...state.stats, errors: data.stats.errors, warns: data.stats.warns, passed: data.stats.passed },
         },
+      });
+      // Update selected dynamic rules state to include new ones
+      setSelectedDynamicRules((d) => {
+        const updated = { ...d };
+        newDynRules.forEach((r: any) => {
+          if (!(r.id in updated)) {
+            updated[r.id] = true;
+          }
+        });
+        return updated;
       });
       // debug: show what server received and what it applied
       setSelectedRulesReceived(Array.isArray(data.selected_rules_received) ? data.selected_rules_received : null);
@@ -215,22 +249,50 @@ export function Step5Validate() {
   };
 
   const saveEditStandard = (id: string) => {
-    // convert standard rule edit into a dynamic override rule and keep locally
-    const dyn = {
-      id: `OVERRIDE_${id}_${Date.now()}`,
-      label: standardEditLabel || id,
-      description: standardEditDesc || '',
-      field: 'GENERAL',
-      python_code: 'False',
-      error_message: standardEditDesc || standardEditLabel || id,
-      severity: 'ERROR',
-    };
-    setSavedDynamicRules((d) => [...d.filter((r) => r.id !== dyn.id), dyn]);
+    // Convert edited standard rule into a prompt for LLM compilation
+    // Store it so it gets sent to backend for proper Python code generation
+    
+    const editedPrompt = `${standardEditLabel || id}: ${standardEditDesc || ''}`.trim();
+    
+    if (!editedPrompt) {
+      toast('Please enter a rule description', 'err');
+      return;
+    }
+
+    // Store this as an edited standard rule prompt
+    setEditedStandardRulePrompts((p) => ({ ...p, [id]: editedPrompt }));
+
+    // Disable the original standard rule
+    setSelectedRules((s) => ({ ...s, [id]: false }));
+
+    // Track this as an override (will create dynamic rule after LLM compilation)
+    setStandardRuleOverrides((o) => ({ ...o, [id]: `EDITED_${id}` }));
+
     setStandardEditingId(null);
   };
 
   const deleteDynamicRule = (rid: string) => {
     setSavedDynamicRules((d) => d.filter((r) => r.id !== rid));
+    setSelectedDynamicRules((d) => {
+      const updated = { ...d };
+      delete updated[rid];
+      return updated;
+    });
+
+    // If this was an override rule, re-enable the original standard rule
+    const overriddenStandardId = Object.keys(standardRuleOverrides).find((k) => standardRuleOverrides[k] === rid);
+    if (overriddenStandardId) {
+      setSelectedRules((s) => ({ ...s, [overriddenStandardId]: true }));
+      setStandardRuleOverrides((o) => {
+        const updated = { ...o };
+        delete updated[overriddenStandardId];
+        return updated;
+      });
+    }
+  };
+
+  const toggleSelectDynamicRule = (rid: string) => {
+    setSelectedDynamicRules((d) => ({ ...d, [rid]: !d[rid] }));
   };
 
   const saveRulesToDB = async () => {
@@ -239,13 +301,18 @@ export function Step5Validate() {
       return;
     }
     try {
-      // Compile custom prompts into executable rules first (if any)
+      // Compile custom prompts + edited standard rule prompts into executable rules
+      const allPrompts = [
+        ...customPrompts,
+        ...Object.values(editedStandardRulePrompts)
+      ];
+      
       let compiled: any[] = [];
-      if (customPrompts.length > 0) {
+      if (allPrompts.length > 0) {
         const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/generate-rules`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompts: customPrompts, target_object: state.obj })
+          body: JSON.stringify({ prompts: allPrompts, target_object: state.obj })
         });
         if (!res.ok) throw new Error('Failed to compile prompts');
         const json = await res.json();
@@ -293,7 +360,7 @@ export function Step5Validate() {
       const errorReport: any[] = [];
       state.validated.forEach((v) => {
         [...v.errs, ...v.warns].forEach((e) => {
-          const isDyn = e.rule.startsWith('DYNAMIC_') || !['REQUIRED_FIELDS', 'FIELD_LENGTH', 'COUNTRY_ISO', 'CURRENCY_ISO', 'NUMERIC_ID', 'EMAIL_FORMAT', 'DATE_FORMAT', 'PAYMENT_TERMS'].includes(e.rule);
+          const isDyn = e.rule.startsWith('DYNAMIC_') || !['REQUIRED_FIELDS', 'FIELD_LENGTH', 'COUNTRY_ISO', 'CURRENCY_ISO', 'NUMERIC_ID', 'EMAIL_FORMAT', 'DATE_FORMAT'].includes(e.rule);
           let val = v.row[e.f];
           if (val === undefined) {
             const matchKey = Object.keys(v.row || {}).find((k) => k.toLowerCase() === (e.f || '').toLowerCase());
@@ -303,6 +370,7 @@ export function Step5Validate() {
             rule_code: e.rule,
             rule_type: isDyn ? 'Dynamic AI Rule' : 'Standard SAP Rule',
             row_number: v.idx + 1,
+            primary_key_value: getPrimaryKeyValue(v.row, state.obj),
             field_name: e.f,
             severity: e.sev,
             reason: e.m,
@@ -334,10 +402,10 @@ export function Step5Validate() {
   };
 
   function expErrors(): string {
-    const rows = ['Row Number,Rule Code,Rule Type,Field Name,Severity,Reason,Invalid Value'];
+    const rows = ['Row Number,Primary Key Value,Rule Code,Rule Type,Field Name,Severity,Reason,Invalid Value'];
     state.validated.forEach((v) =>
       [...v.errs, ...v.warns].forEach((e) => {
-        const isDyn = e.rule.startsWith('DYNAMIC_') || !['REQUIRED_FIELDS', 'FIELD_LENGTH', 'COUNTRY_ISO', 'CURRENCY_ISO', 'NUMERIC_ID', 'EMAIL_FORMAT', 'DATE_FORMAT', 'PAYMENT_TERMS'].includes(e.rule);
+        const isDyn = e.rule.startsWith('DYNAMIC_') || !['REQUIRED_FIELDS', 'FIELD_LENGTH', 'COUNTRY_ISO', 'CURRENCY_ISO', 'NUMERIC_ID', 'EMAIL_FORMAT', 'DATE_FORMAT'].includes(e.rule);
         const ruleType = isDyn ? 'Dynamic AI Rule' : 'Standard SAP Rule';
         
         let val = v.row[e.f];
@@ -345,9 +413,10 @@ export function Step5Validate() {
           const matchKey = Object.keys(v.row || {}).find((k) => k.toLowerCase() === (e.f || '').toLowerCase());
           val = matchKey ? v.row[matchKey] : '';
         }
+        const pkValue = getPrimaryKeyValue(v.row, state.obj).replace(/"/g, "'");
         const cleanVal = String(val ?? '').replace(/"/g, "'");
         const cleanMsg = String(e.m ?? '').replace(/"/g, "'");
-        rows.push(`${v.idx + 1},"${e.rule}","${ruleType}","${e.f}","${e.sev}","${cleanMsg}","${cleanVal}"`);
+        rows.push(`${v.idx + 1},"${pkValue}","${e.rule}","${ruleType}","${e.f}","${e.sev}","${cleanMsg}","${cleanVal}"`);
       })
     );
     return rows.join('\n');
@@ -469,7 +538,7 @@ export function Step5Validate() {
                     <div className="mt-1.5 space-y-0.5">
                       {r.failures.slice(0, 4).map((f, i) => (
                         <div key={i} className="text-[10.5px] text-[var(--text-secondary)] font-mono">
-                          #{f.idx + 1} <strong>{f.field}</strong>="{String(f.value).slice(0, 24)}" — {f.message}
+                          #{f.idx + 1} {state.validated[f.idx]?.primary_key ? `[PK: ${state.validated[f.idx].primary_key}]` : ''} <strong>{f.field}</strong>="{String(f.value).slice(0, 24)}" — {f.message}
                         </div>
                       ))}
                       {r.failures.length > 4 && (
@@ -494,7 +563,9 @@ export function Step5Validate() {
                   <div key={i} className="grid grid-cols-[80px_1fr_70px] gap-3 items-start px-3 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/30">
                     <div>
                       <div className="font-mono text-[11px] text-primary-600 dark:text-primary-400">#{v.idx + 1}</div>
-                      <div className="text-[9.5px] text-[var(--text-tertiary)] mt-0.5 truncate">{Object.values(v.row || {}).filter(Boolean).slice(0, 2).map(String).join(' · ').slice(0, 28)}</div>
+                      <div className="text-[9.5px] text-[var(--text-tertiary)] mt-0.5 truncate">
+                        {v.primary_key ? `PK: ${v.primary_key}` : Object.values(v.row || {}).filter(Boolean).slice(0, 2).map(String).join(' · ').slice(0, 28)}
+                      </div>
                     </div>
                     <div className="space-y-0.5">
                       {v.errs.slice(0, 2).map((e, ei) => (
@@ -518,43 +589,91 @@ export function Step5Validate() {
 
       {/* Right Column */}
       <GridCol span={3} className="space-y-4">
-        {/* Standard SAP 8 Rules Card */}
+        {/* Standard SAP Rules Card */}
         <Card>
           <CardHeader title="Standard SAP Rules" subtitle="Built-in field validations" icon={<ListChecks className="w-4 h-4" />} />
-          <CardBody className="p-3 space-y-2.5">
+          <CardBody className="p-3 space-y-2">
             {STANDARD_RULES.map((r) => {
-              const isOverridden = isRuleOverridden(r.label);
-              const checked = selectedRules[r.id] !== false;
+              const isEdited = !!editedStandardRulePrompts[r.id];
+              const checked = selectedRules[r.id] !== false && !isEdited;
               return (
-                <div key={r.id} className={`flex items-start justify-between px-3 py-2 rounded-xl border transition-all ${
-                  isOverridden
-                    ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-70'
-                    : 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    <input type="checkbox" checked={!!checked} onChange={() => toggleSelectRule(r.id)} className="w-4 h-4 mt-0.5" />
-                    <div>
+                <div 
+                  key={r.id} 
+                  className={`px-3 py-2.5 rounded-xl border transition-all ${
+                    checked
+                      ? 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
+                      : isEdited
+                      ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-75'
+                      : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <input 
+                      type="checkbox" 
+                      checked={!!checked} 
+                      onChange={() => toggleSelectRule(r.id)} 
+                      disabled={isEdited}
+                      className="w-4 h-4 mt-0.5 cursor-pointer accent-violet-600 disabled:cursor-not-allowed" 
+                    />
+                    <div className="flex-1 min-w-0">
                       {standardEditingId === r.id ? (
-                        <div className="flex flex-col gap-1">
-                          <input value={standardEditLabel} onChange={(e) => setStandardEditLabel(e.target.value)} className="px-2 py-1 rounded border" />
-                          <input value={standardEditDesc} onChange={(e) => setStandardEditDesc(e.target.value)} className="px-2 py-1 rounded border" />
-                          <div className="flex gap-2">
-                            <button onClick={() => saveEditStandard(r.id)} className="text-emerald-600">Save</button>
-                            <button onClick={() => setStandardEditingId(null)} className="text-[var(--text-tertiary)]">Cancel</button>
+                        <div className="flex flex-col gap-1.5">
+                          <input 
+                            value={standardEditLabel} 
+                            onChange={(e) => setStandardEditLabel(e.target.value)} 
+                            className="w-full px-2 py-1 text-[11px] rounded border border-violet-400 bg-[var(--bg-primary)] text-[var(--text-primary)]" 
+                            placeholder="Rule label"
+                          />
+                          <input 
+                            value={standardEditDesc} 
+                            onChange={(e) => setStandardEditDesc(e.target.value)} 
+                            className="w-full px-2 py-1 text-[10px] rounded border border-violet-400 bg-[var(--bg-primary)] text-[var(--text-secondary)]" 
+                            placeholder="Rule description"
+                          />
+                          <div className="flex items-center justify-end gap-1 pt-1">
+                            <button 
+                              onClick={() => saveEditStandard(r.id)} 
+                              className="px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer transition-colors"
+                            >
+                              <Check className="w-3 h-3" /> Save
+                            </button>
+                            <button 
+                              onClick={() => setStandardEditingId(null)} 
+                              className="px-2 py-1 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--border)] text-[10px] flex items-center gap-0.5 cursor-pointer transition-colors"
+                            >
+                              <X className="w-3 h-3" /> Cancel
+                            </button>
                           </div>
                         </div>
                       ) : (
-                        <>
-                          <div className={`text-[11.5px] font-bold ${isOverridden ? 'line-through text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'}`}>
-                            {r.label}
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className={`text-[11px] font-bold flex items-center gap-2 ${
+                              checked 
+                                ? 'text-emerald-600 dark:text-emerald-400' 
+                                : isEdited
+                                ? 'text-amber-700 dark:text-amber-300 line-through'
+                                : 'text-[var(--text-tertiary)] line-through'
+                            }`}>
+                              {r.label}
+                              {isEdited && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[8px] font-bold uppercase tracking-wider">
+                                  Overridden
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">{r.description}</div>
                           </div>
-                          <div className="text-[10px] text-[var(--text-tertiary)]">{r.description}</div>
-                        </>
+                          <button 
+                            onClick={() => startEditStandard(r.id, r.label, r.description)} 
+                            className="p-1 text-[var(--text-tertiary)] hover:text-violet-500 ml-1 shrink-0 transition-colors hover:bg-violet-500/10 rounded"
+                            title="Edit rule"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => startEditStandard(r.id, r.label, r.description)} className="p-1 text-[var(--text-tertiary)] hover:text-violet-500" title="Edit rule"><Pencil className="w-3.5 h-3.5" /></button>
                   </div>
                 </div>
               );
@@ -572,36 +691,114 @@ export function Step5Validate() {
             <Button variant="secondary" size="sm" icon={<Save className="w-3 h-3" />} onClick={saveRulesToDB}>Save Rules</Button>
           </CardHeader>
           <CardBody className="p-3 space-y-3">
-            {/* Input & Add Prompt */}
-            <div className="flex items-center gap-1.5">
-              <input
-                type="text"
-                value={newPromptInput}
-                onChange={(e) => setNewPromptInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddPrompt()}
-                placeholder="e.g. Currency ISO must be 4 digits"
-                className="flex-1 px-2.5 py-1.5 rounded-lg text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-violet-500"
-              />
-              <Button variant="secondary" size="sm" icon={<Plus className="w-3.5 h-3.5" />} onClick={handleAddPrompt}>
-                Add
-              </Button>
+            {/* Edited Standard Rules Section — PROMINENT */}
+            {Object.keys(editedStandardRulePrompts).length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider">📝 Overridden Rules ({Object.keys(editedStandardRulePrompts).length})</span>
+                  <span className="px-2 py-0.5 rounded-full text-[8px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200">
+                    Will Compile
+                  </span>
+                </div>
+                <div className="space-y-1.5 px-2">
+                  {Object.entries(editedStandardRulePrompts).map(([standardId, prompt]) => (
+                    <div key={standardId} className="flex items-start justify-between p-2.5 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-amber-700 dark:text-amber-300 font-bold text-[10.5px]">{standardId}</div>
+                        <div className="text-[var(--text-secondary)] text-[10px] mt-1 line-clamp-2">{prompt}</div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditedStandardRulePrompts((p) => {
+                            const updated = { ...p };
+                            delete updated[standardId];
+                            return updated;
+                          });
+                          setStandardRuleOverrides((o) => {
+                            const updated = { ...o };
+                            delete updated[standardId];
+                            return updated;
+                          });
+                          setSelectedRules((s) => ({ ...s, [standardId]: true }));
+                        }}
+                        className="text-[var(--text-tertiary)] hover:text-red-500 p-1 rounded hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
+                        title="Revert and re-enable standard rule"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Saved Dynamic Rules */}
+            {savedDynamicRules.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <span className="text-[11px] font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">⚡ Saved Rules ({savedDynamicRules.length})</span>
+                </div>
+                <div className="space-y-1.5 px-2 max-h-[180px] overflow-y-auto scrollbar-thin">
+                  {savedDynamicRules.map((r) => (
+                    <div key={r.id} className="flex items-start gap-2 p-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)]/40">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedDynamicRules[r.id] !== false} 
+                        onChange={() => toggleSelectDynamicRule(r.id)} 
+                        className="w-4 h-4 mt-0.5 cursor-pointer accent-violet-600" 
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-violet-600 dark:text-violet-400 font-bold text-[10.5px]">{r.label}</div>
+                        <div className="text-[var(--text-secondary)] text-[10px] mt-0.5">{r.description}</div>
+                      </div>
+                      <button
+                        onClick={() => deleteDynamicRule(r.id)}
+                        className="text-[var(--text-tertiary)] hover:text-red-500 p-1 rounded hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
+                        title="Delete rule"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Divider */}
+            {(Object.keys(editedStandardRulePrompts).length > 0 || savedDynamicRules.length > 0) && (
+              <div className="h-px bg-[var(--border)]" />
+            )}
+
+            {/* Add New Custom Prompt Section */}
+            <div className="space-y-2">
+              <div className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider px-3 py-2">Add Custom Rule</div>
+              <div className="flex items-center gap-1.5 px-2">
+                <input
+                  type="text"
+                  value={newPromptInput}
+                  onChange={(e) => setNewPromptInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddPrompt()}
+                  placeholder="e.g. Postal code must be 5 digits..."
+                  className="flex-1 px-2.5 py-1.5 rounded-lg text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-400 transition-all"
+                />
+                <Button variant="secondary" size="sm" icon={<Plus className="w-3.5 h-3.5" />} onClick={handleAddPrompt}>
+                  Add
+                </Button>
+              </div>
             </div>
 
             {/* List of Custom Prompts */}
-            {customPrompts.length > 0 ? (
-              <div className="space-y-1.5 pt-1">
-                <div className="flex items-center justify-between text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">
-                  <span>Custom Prompts ({customPrompts.length})</span>
-                  <span className="text-[9.5px] text-violet-600 dark:text-violet-400 font-semibold normal-case">
-                    ⚡ Overrides Default
-                  </span>
+            {customPrompts.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">✨ Custom Prompts ({customPrompts.length})</span>
                 </div>
-                <div className="space-y-1.5 max-h-[220px] overflow-y-auto scrollbar-thin">
+                <div className="space-y-1.5 px-2 max-h-[200px] overflow-y-auto scrollbar-thin">
                   {customPrompts.map((p, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-[var(--bg-tertiary)]/70 text-[10.5px] border border-[var(--border)] gap-1.5">
+                    <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg border border-purple-200 dark:border-purple-900/40 bg-purple-50/40 dark:bg-purple-950/20">
                       {editingIndex === idx ? (
                         <div className="flex items-center gap-1.5 w-full">
-                          <span className="text-violet-600 font-bold shrink-0">⚡ #{idx + 1}</span>
+                          <span className="text-purple-600 font-bold shrink-0 text-[10px]">#{idx + 1}</span>
                           <input
                             type="text"
                             value={editingText}
@@ -610,44 +807,44 @@ export function Step5Validate() {
                               if (e.key === 'Enter') handleSaveEdit(idx);
                               if (e.key === 'Escape') handleCancelEdit();
                             }}
-                            className="flex-1 px-2 py-1 text-[10.5px] rounded bg-[var(--bg-primary)] border border-violet-400 text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-violet-500 font-medium"
+                            className="flex-1 px-2 py-1 text-[10px] rounded bg-[var(--bg-primary)] border border-purple-400 text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-purple-500 font-medium"
                             autoFocus
                           />
                           <button
                             onClick={() => handleSaveEdit(idx)}
                             className="p-1 rounded text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 cursor-pointer shrink-0 transition-colors"
-                            title="Save rule"
+                            title="Save"
                           >
                             <Check className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={handleCancelEdit}
                             className="p-1 rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] cursor-pointer shrink-0 transition-colors"
-                            title="Cancel edit"
+                            title="Cancel"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ) : (
                         <>
-                          <div className="flex gap-1.5 items-start">
-                            <span className="text-violet-600 font-bold shrink-0">⚡</span>
-                            <span className="text-[var(--text-primary)] font-medium leading-tight">#{idx + 1}. {p}</span>
+                          <div className="flex gap-1.5 items-start flex-1">
+                            <span className="text-purple-600 dark:text-purple-400 font-bold shrink-0 text-[10px]">✨</span>
+                            <span className="text-[var(--text-primary)] font-medium text-[10px] leading-snug">#{idx + 1}. {p}</span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <button
                               onClick={() => handleStartEdit(idx)}
-                              className="text-[var(--text-tertiary)] hover:text-violet-500 p-1 rounded hover:bg-violet-500/10 transition-colors cursor-pointer"
-                              title="Edit dynamic rule"
+                              className="text-[var(--text-tertiary)] hover:text-purple-500 p-1 rounded hover:bg-purple-500/10 transition-colors cursor-pointer"
+                              title="Edit"
                             >
-                              <Pencil className="w-3.5 h-3.5" />
+                              <Pencil className="w-3 h-3" />
                             </button>
                             <button
                               onClick={() => handleRemovePrompt(idx)}
                               className="text-[var(--text-tertiary)] hover:text-red-500 p-1 rounded hover:bg-red-500/10 transition-colors cursor-pointer"
-                              title="Delete dynamic rule"
+                              title="Delete"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
                         </>
@@ -655,10 +852,6 @@ export function Step5Validate() {
                     </div>
                   ))}
                 </div>
-              </div>
-            ) : (
-              <div className="text-[10px] text-[var(--text-tertiary)] italic px-1 py-1">
-                No custom AI rules added yet. Add rule prompts above to run custom business validations.
               </div>
             )}
           </CardBody>

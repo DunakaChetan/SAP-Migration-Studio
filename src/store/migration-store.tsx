@@ -18,6 +18,7 @@ export interface MappingEntry {
 export interface ValidationEntry {
   row: Record<string, unknown>;
   idx: number;
+  primary_key?: string;
   errs: { f: string; m: string; sev: string; rule: string }[];
   warns: { f: string; m: string; sev: string; rule: string }[];
   st: 'ERROR' | 'WARN' | 'PASS';
