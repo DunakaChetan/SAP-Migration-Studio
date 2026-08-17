@@ -480,7 +480,7 @@ export function TableFilterToolbar({
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              className={`w-full pl-10 pr-20 py-2.5 rounded-xl text-[13px] font-medium bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] ${colorTheme.focusRing} font-mono placeholder:font-sans placeholder:text-[12px] shadow-xs hover:border-indigo-400 transition-all`}
+              className={`w-full pl-10 pr-20 py-2.5 rounded-xl text-[13px] font-medium bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] ${colorTheme.focusBorder} font-mono placeholder:font-sans placeholder:text-[12px] shadow-xs hover:border-indigo-400 transition-all`}
             />
 
             {/* Inline Add button when user types */}
