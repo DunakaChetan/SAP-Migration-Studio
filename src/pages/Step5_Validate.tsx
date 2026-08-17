@@ -6,7 +6,7 @@ import { useLoading } from '@/components/ui/loading-overlay';
 import { OBJS } from '@/data/sap-schemas';
 import { dl } from '@/lib/utils';
 import { PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, Badge, StatBox, StatsGrid, EmptyState } from '@/components/shared';
-import { ArrowLeft, ArrowRight, Search, Download, Upload, ListChecks, Save, Sparkles, Plus, Trash2, Zap, FileText, Pencil, Check, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Download, Upload, ListChecks, Save, Sparkles, Plus, Trash2, Zap, FileText, Pencil, Check, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 const VALIDATE_API = import.meta.env.VITE_BACKEND_URL;
 
@@ -43,6 +43,8 @@ export function Step5Validate() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const report = (state.validationReport || []) as RuleReport[];
   const [uploadMeta, setUploadMeta] = useState<{ rows: number; cols: number } | null>(null);
+  const [openActiveRulesAccordion, setOpenActiveRulesAccordion] = useState(false);
+  const [openResultsAccordion, setOpenResultsAccordion] = useState(false);
 
   // Dynamic Rules State
   const [customPrompts, setCustomPrompts] = useState<string[]>([]);
@@ -503,87 +505,108 @@ export function Step5Validate() {
         {report.length > 0 && (
           <Card className="mb-4">
             <CardHeader title="Validation Report — Active Rules" subtitle="Executed Dynamic AI Rules & Standard SAP Rules" icon={<ListChecks className="w-4 h-4" />}>
-                  <div className="flex items-center gap-2">
-                    <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>Export Report</Button>
-                    {selectedRulesReceived && (
-                      <div className="text-[12px] text-[var(--text-tertiary)] px-2 py-1 rounded bg-[var(--bg-tertiary)]/60">Received: {selectedRulesReceived.join(', ')}</div>
-                    )}
-                    {appliedStandardRules && (
-                      <div className="text-[12px] text-[var(--text-tertiary)] px-2 py-1 rounded bg-[var(--bg-tertiary)]/60">Applied: {appliedStandardRules.join(', ')}</div>
-                    )}
-                  </div>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>Export Report</Button>
+                {selectedRulesReceived && (
+                  <div className="text-[12px] text-[var(--text-tertiary)] px-2 py-1 rounded bg-[var(--bg-tertiary)]/60">Received: {selectedRulesReceived.join(', ')}</div>
+                )}
+                {appliedStandardRules && (
+                  <div className="text-[12px] text-[var(--text-tertiary)] px-2 py-1 rounded bg-[var(--bg-tertiary)]/60">Applied: {appliedStandardRules.join(', ')}</div>
+                )}
+                <button
+                  onClick={() => setOpenActiveRulesAccordion(!openActiveRulesAccordion)}
+                  className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-pointer transition-colors"
+                  title={openActiveRulesAccordion ? "Collapse Report" : "Expand Report"}
+                >
+                  {openActiveRulesAccordion ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
             </CardHeader>
-            <CardBody className="space-y-2">
-              {report.map((r) => (
-                <div key={r.rule} className={`px-3 py-2.5 rounded-xl border transition-all ${
-                  r.is_dynamic
-                    ? 'border-violet-300 dark:border-violet-700/60 bg-violet-50/20 dark:bg-violet-950/15'
-                    : 'border-[var(--border)] bg-[var(--bg-tertiary)]/30'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-bold text-[var(--text-primary)]">{r.label}</span>
-                      {r.is_dynamic && (
-                        <span className="px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[8.5px] font-bold flex items-center gap-1">
-                          ⚡ AI Dynamic Rule (Overriding Priority)
-                        </span>
-                      )}
-                      <span className="text-[10.5px] text-[var(--text-tertiary)]">{r.description}</span>
+            {openActiveRulesAccordion && (
+              <CardBody className="space-y-2">
+                {report.map((r) => (
+                  <div key={r.rule} className={`px-3 py-2.5 rounded-xl border transition-all ${
+                    r.is_dynamic
+                      ? 'border-violet-300 dark:border-violet-700/60 bg-violet-50/20 dark:bg-violet-950/15'
+                      : 'border-[var(--border)] bg-[var(--bg-tertiary)]/30'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-bold text-[var(--text-primary)]">{r.label}</span>
+                        {r.is_dynamic && (
+                          <span className="px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[8.5px] font-bold flex items-center gap-1">
+                            ⚡ AI Dynamic Rule (Overriding Priority)
+                          </span>
+                        )}
+                        <span className="text-[10.5px] text-[var(--text-tertiary)]">{r.description}</span>
+                      </div>
+                      <Badge variant={r.failCount > 0 ? 'red' : 'green'}>
+                        {r.failCount > 0 ? `${r.failCount} failing` : 'All pass'}
+                      </Badge>
                     </div>
-                    <Badge variant={r.failCount > 0 ? 'red' : 'green'}>
-                      {r.failCount > 0 ? `${r.failCount} failing` : 'All pass'}
-                    </Badge>
+                    {r.failures.length > 0 && (
+                      <div className="mt-1.5 space-y-0.5">
+                        {r.failures.slice(0, 4).map((f, i) => (
+                          <div key={i} className="text-[10.5px] text-[var(--text-secondary)] font-mono">
+                            #{f.idx + 1} {state.validated[f.idx]?.primary_key ? `[PK: ${state.validated[f.idx].primary_key}]` : ''} <strong>{f.field}</strong>="{String(f.value).slice(0, 24)}" — {f.message}
+                          </div>
+                        ))}
+                        {r.failures.length > 4 && (
+                          <div className="text-[10px] text-[var(--text-tertiary)]">
+                            +{r.failures.length - 4} more — see exported report
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  {r.failures.length > 0 && (
-                    <div className="mt-1.5 space-y-0.5">
-                      {r.failures.slice(0, 4).map((f, i) => (
-                        <div key={i} className="text-[10.5px] text-[var(--text-secondary)] font-mono">
-                          #{f.idx + 1} {state.validated[f.idx]?.primary_key ? `[PK: ${state.validated[f.idx].primary_key}]` : ''} <strong>{f.field}</strong>="{String(f.value).slice(0, 24)}" — {f.message}
-                        </div>
-                      ))}
-                      {r.failures.length > 4 && (
-                        <div className="text-[10px] text-[var(--text-tertiary)]">
-                          +{r.failures.length - 4} more — see exported report
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </CardBody>
+                ))}
+              </CardBody>
+            )}
           </Card>
         )}
 
         <Card>
-          <CardHeader title="Validation Results" />
-          <CardBody>
-            {has ? (
-              <div className="space-y-1.5">
-                {state.validated.slice(0, 12).map((v, i) => (
-                  <div key={i} className="grid grid-cols-[80px_1fr_70px] gap-3 items-start px-3 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/30">
-                    <div>
-                      <div className="font-mono text-[11px] text-primary-600 dark:text-primary-400">#{v.idx + 1}</div>
-                      <div className="text-[9.5px] text-[var(--text-tertiary)] mt-0.5 truncate">
-                        {v.primary_key ? `PK: ${v.primary_key}` : Object.values(v.row || {}).filter(Boolean).slice(0, 2).map(String).join(' · ').slice(0, 28)}
+          <CardHeader title="Validation Results">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setOpenResultsAccordion(!openResultsAccordion)}
+                className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-pointer transition-colors"
+                title={openResultsAccordion ? "Collapse Validation Results" : "Expand Validation Results"}
+              >
+                {openResultsAccordion ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+            </div>
+          </CardHeader>
+          {openResultsAccordion && (
+            <CardBody>
+              {has ? (
+                <div className="space-y-1.5">
+                  {state.validated.slice(0, 12).map((v, i) => (
+                    <div key={i} className="grid grid-cols-[80px_1fr_70px] gap-3 items-start px-3 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/30">
+                      <div>
+                        <div className="font-mono text-[11px] text-primary-600 dark:text-primary-400">#{v.idx + 1}</div>
+                        <div className="text-[9.5px] text-[var(--text-tertiary)] mt-0.5 truncate">
+                          {v.primary_key ? `PK: ${v.primary_key}` : Object.values(v.row || {}).filter(Boolean).slice(0, 2).map(String).join(' · ').slice(0, 28)}
+                        </div>
                       </div>
+                      <div className="space-y-0.5">
+                        {v.errs.slice(0, 2).map((e, ei) => (
+                          <div key={ei} className="text-[11px] text-red-600 dark:text-red-400">✗ <strong>{e.f}</strong>: {e.m}</div>
+                        ))}
+                        {v.warns.slice(0, 1).map((w, wi) => (
+                          <div key={wi} className="text-[11px] text-amber-600 dark:text-amber-400">⚠ <strong>{w.f}</strong>: {w.m}</div>
+                        ))}
+                        {v.st === 'PASS' && <div className="text-[11px] text-emerald-600 dark:text-emerald-400">✓ All rules passed</div>}
+                      </div>
+                      <Badge variant={v.st === 'ERROR' ? 'red' : v.st === 'WARN' ? 'amber' : 'green'} className="justify-self-end">{v.st}</Badge>
                     </div>
-                    <div className="space-y-0.5">
-                      {v.errs.slice(0, 2).map((e, ei) => (
-                        <div key={ei} className="text-[11px] text-red-600 dark:text-red-400">✗ <strong>{e.f}</strong>: {e.m}</div>
-                      ))}
-                      {v.warns.slice(0, 1).map((w, wi) => (
-                        <div key={wi} className="text-[11px] text-amber-600 dark:text-amber-400">⚠ <strong>{w.f}</strong>: {w.m}</div>
-                      ))}
-                      {v.st === 'PASS' && <div className="text-[11px] text-emerald-600 dark:text-emerald-400">✓ All rules passed</div>}
-                    </div>
-                    <Badge variant={v.st === 'ERROR' ? 'red' : v.st === 'WARN' ? 'amber' : 'green'} className="justify-self-end">{v.st}</Badge>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyState icon={<Search className="w-10 h-10 text-primary-500" />} message="Run validation to check field rules" />
-            )}
-          </CardBody>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState icon={<Search className="w-10 h-10 text-primary-500" />} message="Run validation to check field rules" />
+              )}
+            </CardBody>
+          )}
         </Card>
       </GridCol>
 
