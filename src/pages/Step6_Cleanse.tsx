@@ -11,7 +11,7 @@ import {
 import {
   ArrowLeft, ArrowRight, Sparkles, Download, Bot, Upload, Save,
   ChevronDown, ChevronUp, Check, X, Trash2, Plus, RefreshCw, ListFilter,
-  Search, FileText, Sliders, FileJson, ChevronLeft, ChevronRight
+  Search, FileText, Sliders, FileJson, ChevronLeft, ChevronRight, RotateCcw, Pencil
 } from 'lucide-react';
 import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
 import type { TableInfo } from '@/components/shared/TableFilterToolbar';
@@ -39,6 +39,7 @@ interface StandardRuleState {
   name: string;
   description: string;
   enabled: boolean;
+  overridden?: boolean;
 }
 
 interface DynamicRuleItem {
@@ -272,8 +273,36 @@ export function Step6Cleanse() {
 
   const saveEditStandardRule = (code: string) => {
     if (!editForm.name.trim()) return;
-    setStandardRules(prev => prev.map(r => r.code === code ? { ...r, name: editForm.name.trim(), description: editForm.description.trim() } : r));
+    const promptText = `${editForm.name.trim()}: ${editForm.description.trim()}`.trim();
+    const dynamicId = `OVERRIDE_${code}`;
+
+    // 1. Add/Update as a Dynamic AI Prompt Rule
+    setCleanserDynamicRules(prev => {
+      const exists = prev.some(r => r.id === dynamicId);
+      if (exists) {
+        return prev.map(r => r.id === dynamicId ? { ...r, prompt: promptText, enabled: true } : r);
+      }
+      return [...prev, { id: dynamicId, prompt: promptText, enabled: true }];
+    });
+
+    // 2. Mark original Standard Rule as disabled & overridden
+    setStandardRules(prev => prev.map(r => r.code === code ? {
+      ...r,
+      name: editForm.name.trim(),
+      description: editForm.description.trim(),
+      enabled: false,
+      overridden: true
+    } : r));
+
     setEditingRuleCode(null);
+    toast(`Rule "${editForm.name}" converted to Dynamic AI Rule (Standard rule overridden)`, 'ok');
+  };
+
+  const restoreStandardRule = (code: string) => {
+    const dynamicId = `OVERRIDE_${code}`;
+    setCleanserDynamicRules(prev => prev.filter(r => r.id !== dynamicId));
+    setStandardRules(prev => prev.map(r => r.code === code ? { ...r, enabled: true, overridden: false } : r));
+    toast('Restored standard rule execution', 'ok');
   };
 
   const toggleValidationRule = (ruleCode: string) => {
@@ -296,6 +325,10 @@ export function Step6Cleanse() {
   };
 
   const deleteCleanserDynamicRule = (id: string) => {
+    if (id.startsWith('OVERRIDE_')) {
+      const origCode = id.replace('OVERRIDE_', '');
+      setStandardRules(prev => prev.map(r => r.code === origCode ? { ...r, enabled: true, overridden: false } : r));
+    }
     setCleanserDynamicRules(prev => prev.filter(r => r.id !== id));
   };
 
@@ -635,7 +668,9 @@ export function Step6Cleanse() {
                       <div
                         key={rule.code}
                         className={`p-2.5 rounded-xl border transition-all ${
-                          rule.enabled
+                          rule.overridden
+                            ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-75'
+                            : rule.enabled
                             ? 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
                             : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
                         }`}
@@ -646,6 +681,7 @@ export function Step6Cleanse() {
                               type="text"
                               value={editForm.name}
                               onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveEditStandardRule(rule.code); }}
                               className="w-full text-[11px] font-bold px-2 py-1 rounded border border-violet-400 bg-[var(--bg-primary)] text-[var(--text-primary)]"
                               placeholder="Rule Name"
                             />
@@ -653,15 +689,16 @@ export function Step6Cleanse() {
                               type="text"
                               value={editForm.description}
                               onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') saveEditStandardRule(rule.code); }}
                               className="w-full text-[10px] px-2 py-1 rounded border border-violet-400 bg-[var(--bg-primary)] text-[var(--text-secondary)]"
-                              placeholder="Rule Description"
+                              placeholder="Rule Prompt Description"
                             />
                             <div className="flex items-center justify-end gap-1.5 pt-1">
                               <button
                                 onClick={() => saveEditStandardRule(rule.code)}
-                                className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
+                                className="p-1 px-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[10px] font-bold flex items-center gap-0.5 cursor-pointer"
                               >
-                                <Check className="w-3 h-3" /> Save
+                                <Check className="w-3 h-3" /> Save to Dynamic AI Rule
                               </button>
                               <button
                                 onClick={() => setEditingRuleCode(null)}
@@ -675,22 +712,48 @@ export function Step6Cleanse() {
                           <div className="flex items-start gap-2">
                             <input
                               type="checkbox"
-                              checked={rule.enabled}
+                              checked={rule.enabled && !rule.overridden}
                               onChange={() => toggleStandardRule(rule.code)}
-                              className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--border)] text-violet-600 focus:ring-violet-500 cursor-pointer accent-violet-600"
+                              disabled={rule.overridden}
+                              className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--border)] text-violet-600 focus:ring-violet-500 cursor-pointer accent-violet-600 disabled:cursor-not-allowed"
+                              title={rule.overridden ? "Rule is overridden by Dynamic AI Prompt" : "Toggle rule execution"}
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between">
-                                <span className={`text-[11px] font-bold ${rule.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--text-tertiary)] line-through'}`}>
-                                  {rule.name}
-                                </span>
-                                <button
-                                  onClick={() => startEditStandardRule(rule)}
-                                  title="Edit Rule Details"
-                                  className="p-1 rounded text-[var(--text-tertiary)] hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 cursor-pointer transition-colors"
-                                >
-                                  <Sliders className="w-3 h-3" />
-                                </button>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`text-[11px] font-bold truncate ${
+                                    rule.overridden
+                                      ? 'text-amber-700 dark:text-amber-300 line-through'
+                                      : rule.enabled
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-[var(--text-tertiary)] line-through'
+                                  }`}>
+                                    {rule.name}
+                                  </span>
+                                  {rule.overridden && (
+                                    <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[8px] font-bold uppercase tracking-wider shrink-0">
+                                      Overridden
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-0.5 shrink-0">
+                                  {rule.overridden && (
+                                    <button
+                                      onClick={() => restoreStandardRule(rule.code)}
+                                      title="Restore original standard rule execution"
+                                      className="p-1 rounded text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 cursor-pointer transition-colors"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => startEditStandardRule(rule)}
+                                    title="Edit & Convert to Dynamic AI Rule"
+                                    className="p-1 rounded text-[var(--text-tertiary)] hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 cursor-pointer transition-colors"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                </div>
                               </div>
                               <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5 truncate">{rule.description}</div>
                             </div>
@@ -824,16 +887,25 @@ export function Step6Cleanse() {
                               />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-start justify-between gap-1">
-                                  <span className={`text-[10.5px] leading-snug ${rule.enabled ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-tertiary)] line-through'}`}>
-                                    {rule.prompt}
-                                  </span>
+                                  <div className="flex-1 min-w-0">
+                                    {rule.id.startsWith('OVERRIDE_') && (
+                                      <div className="mb-0.5">
+                                        <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[8px] font-bold uppercase tracking-wider">
+                                          ⚡ Overridden Standard
+                                        </span>
+                                      </div>
+                                    )}
+                                    <span className={`text-[10.5px] leading-snug ${rule.enabled ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-tertiary)] line-through'}`}>
+                                      {rule.prompt}
+                                    </span>
+                                  </div>
                                   <div className="flex items-center gap-0.5 shrink-0">
                                     <button
                                       onClick={() => startEditDynamicRule(rule)}
                                       title="Edit Prompt"
                                       className="p-1 rounded text-[var(--text-tertiary)] hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/30 cursor-pointer transition-colors"
                                     >
-                                      <Sliders className="w-3 h-3" />
+                                      <Pencil className="w-3 h-3" />
                                     </button>
                                     <button
                                       onClick={() => deleteCleanserDynamicRule(rule.id)}
@@ -939,14 +1011,6 @@ export function Step6Cleanse() {
                 icon={<Sparkles className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
               >
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={<Download className="w-3 h-3" />}
-                    onClick={() => dl(exportAuditLogCSV(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_audit_log.csv', 'text/csv')}
-                  >
-                    Export Audit CSV
-                  </Button>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -1165,25 +1229,39 @@ export function Step6Cleanse() {
               )}
             </Card>
           )}
+        </GridCol>
+      </PageGrid>
 
-          {/* Interactive Audit Log Card */}
-          {summary && (
-            <Card>
+      {/* Full-Width Output Section (Audit Log & Cleansed Data Preview — Same as Step 7 Transform) */}
+      <div className="mt-6 space-y-6">
+        {/* Interactive Audit Log Card */}
+        {summary && (
+          <Card>
               <CardHeader
                 title="Cleansing Audit Log & Change Trail"
                 subtitle={`${allAuditItems.length} cell-level transformation events logged`}
                 icon={<FileText className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
               >
-                <button
-                  onClick={() => setOpenAuditAccordion(!openAuditAccordion)}
-                  className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] hover:bg-[var(--border)] text-[11px] font-bold text-violet-600 dark:text-violet-400 flex items-center gap-1.5 cursor-pointer transition-colors border border-[var(--border)]"
-                >
-                  {openAuditAccordion ? (
-                    <>▼ Hide Complete Audit Trail</>
-                  ) : (
-                    <>▶ View Complete Audit Trail ({allAuditItems.length} log entries)</>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Download className="w-3 h-3" />}
+                    onClick={() => dl(exportAuditLogCSV(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_audit_log.csv', 'text/csv')}
+                  >
+                    Export Audit CSV
+                  </Button>
+                  <button
+                    onClick={() => setOpenAuditAccordion(!openAuditAccordion)}
+                    className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] hover:bg-[var(--border)] text-[11px] font-bold text-violet-600 dark:text-violet-400 flex items-center gap-1.5 cursor-pointer transition-colors border border-[var(--border)]"
+                  >
+                    {openAuditAccordion ? (
+                      <>▼ Hide Complete Audit Trail</>
+                    ) : (
+                      <>▶ View Complete Audit Trail ({allAuditItems.length} log entries)</>
+                    )}
+                  </button>
+                </div>
               </CardHeader>
 
               {openAuditAccordion && (
@@ -1232,7 +1310,7 @@ export function Step6Cleanse() {
                       <table className="w-full text-left border-collapse">
                         <thead className="bg-[var(--bg-tertiary)] text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider border-b border-[var(--border)]">
                           <tr>
-                            <th className="py-2.5 px-3">Row #</th>
+                            <th className="py-2.5 px-3">Record Identifier</th>
                             <th className="py-2.5 px-3">Phase</th>
                             <th className="py-2.5 px-3">Rule Code</th>
                             <th className="py-2.5 px-3">Field Name</th>
@@ -1244,9 +1322,21 @@ export function Step6Cleanse() {
                           {paginatedAuditItems.map((item) => {
                             const isDyn = item.phase === 'Dynamic AI Rule';
                             const isVal = item.phase === 'Validation Fix';
+                            const rowObj = cleanedRows[item.row - 1] || {};
+                            const pkKey = state.obj === 'VENDOR' ? 'LIFNR' : state.obj === 'MATERIAL' ? 'MATNR' : 'KUNNR';
+                            const pkVal = rowObj[pkKey] || rowObj[pkKey.toLowerCase()] || rowObj[pkKey.toUpperCase()] || '';
                             return (
                               <tr key={item.id} className="hover:bg-[var(--bg-tertiary)]/40 transition-colors">
-                                <td className="py-2 px-3 font-bold text-[var(--text-secondary)]">#{item.row}</td>
+                                <td className="py-2 px-3 whitespace-nowrap">
+                                  <div className="flex flex-col">
+                                    <span className="text-[10.5px] font-bold text-[var(--text-secondary)] font-mono">Row #{item.row}</span>
+                                    {pkVal && (
+                                      <span className="text-[9.5px] font-mono text-violet-600 dark:text-violet-400 font-bold">
+                                        {pkKey}: {pkVal}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td className="py-2 px-3">
                                   <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
                                     isDyn
@@ -1422,9 +1512,7 @@ export function Step6Cleanse() {
               )}
             </CardBody>
           </Card>
-
-        </GridCol>
-      </PageGrid>
+      </div>
     </PageLayout>
   );
 }
