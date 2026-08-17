@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
 import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
 import type { TableInfo } from '@/components/shared/TableFilterToolbar';
+import { TablePaginationFooter } from '@/components/shared/TablePaginationFooter';
 
 /* ─── Types ─── */
 interface DroppedFile {
@@ -648,9 +649,10 @@ export function Step4Harmonize() {
   const setResult = (val: any) => dispatch({ type: 'SET_FIELD', field: 'harmonizationResult', value: val });
   const [previewData, setPreviewData] = useState<{ fixLog: string[]; stats: any } | null>(null);
 
-  // Table filter state for output display
+  // Table filter & pagination state for output display
   const [selectedOutputTables, setSelectedOutputTables] = useState<Set<string>>(new Set());
   const [outputKeyFilter, setOutputKeyFilter] = useState('');
+  const [tablePages, setTablePages] = useState<Record<string, number>>({});
   const extractedTables = state.extractedTables || [];
 
   // Initialize selectedOutputTables when extractedTables are available
@@ -1180,6 +1182,9 @@ export function Step4Harmonize() {
                 ) : (
                   visibleTables.map((t: any) => {
                     const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                    const currentPage = tablePages[t.table_name] || 1;
+                    const paginatedRows = tableRows.slice((currentPage - 1) * 15, currentPage * 15);
+
                     return (
                       <Card key={t.table_name}>
                         <CardHeader
@@ -1196,16 +1201,19 @@ export function Step4Harmonize() {
                             Export {t.table_name}
                           </Button>
                         </CardHeader>
-                        <CardBody>
+                        <CardBody className="p-0 overflow-hidden">
                           <DataTable
-                            rows={tableRows.slice(0, 15)}
+                            rows={paginatedRows}
                             cols={tableCols}
                           />
-                          {tableRows.length > 15 && (
-                            <div className="text-[10px] text-[var(--text-tertiary)] text-center py-2 border-t border-[var(--border)]">
-                              Showing 15 of {tableRows.length} rows · Download CSV for full data
-                            </div>
-                          )}
+                          <TablePaginationFooter
+                            currentPage={currentPage}
+                            totalRows={tableRows.length}
+                            pageSize={15}
+                            onPageChange={(newPage) => setTablePages(prev => ({ ...prev, [t.table_name]: newPage }))}
+                            isFiltered={!!outputKeyFilter}
+                            accentColor="purple"
+                          />
                         </CardBody>
                       </Card>
                     );

@@ -38,29 +38,33 @@ class TransformationAgent:
             row_modified = False
             for field, current_val in row.items():
                 if field in rule_lookup:
-                    # Match strictly by string value
+                    # Match string value (case-insensitive & trimmed)
                     str_val = str(current_val).strip() if current_val is not None else ""
                     
+                    matched_rule = None
                     if str_val in rule_lookup[field]:
-                        new_val = rule_lookup[field][str_val]
-                        
-                        if str_val != new_val:
-                            # Log the change
-                            audit_log.append({
-                                "id": str(uuid.uuid4()),
-                                "row": row_idx + 1,
-                                "phase": "Transform Mapping",
-                                "rule_code": "FIND_REPLACE",
-                                "field": field,
-                                "old_value": str_val,
-                                "new_value": new_val,
-                                "status": "APPLIED"
-                            })
-                            
-                            # Apply change
-                            row[field] = new_val
-                            row_modified = True
-                            total_modifications += 1
+                        matched_rule = rule_lookup[field][str_val]
+                    else:
+                        # Try case-insensitive lookup
+                        for src_k, tgt_v in rule_lookup[field].items():
+                            if str_val.lower() == str(src_k).strip().lower():
+                                matched_rule = tgt_v
+                                break
+                    
+                    if matched_rule is not None and str_val != matched_rule:
+                        audit_log.append({
+                            "id": str(uuid.uuid4()),
+                            "row": row_idx + 1,
+                            "phase": "Transform Mapping",
+                            "rule_code": "FIND_REPLACE",
+                            "field": field,
+                            "old_value": str_val,
+                            "new_value": matched_rule,
+                            "status": "APPLIED"
+                        })
+                        row[field] = matched_rule
+                        row_modified = True
+                        total_modifications += 1
 
             if row_modified:
                 modified_rows_count.add(row_idx)
@@ -120,8 +124,8 @@ class TransformationAgent:
             
             for col in original_df.columns:
                 if col in transformed_df.columns:
-                    orig_val = orig_row[col].strip()
-                    new_val = new_row[col].strip()
+                    orig_val = str(orig_row[col]).strip() if orig_row[col] is not None else ""
+                    new_val = str(new_row[col]).strip() if new_row[col] is not None else ""
                     
                     if orig_val != new_val:
                         audit_log.append({
