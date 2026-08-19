@@ -888,13 +888,18 @@ export function Step6Cleanse() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-start justify-between gap-1">
                                   <div className="flex-1 min-w-0">
-                                    {rule.id.startsWith('OVERRIDE_') && (
-                                      <div className="mb-0.5">
+                                    <div className="flex flex-wrap items-center gap-1 mb-0.5">
+                                      {rule.id.startsWith('OVERRIDE_') && (
                                         <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[8px] font-bold uppercase tracking-wider">
                                           ⚡ Overridden Standard
                                         </span>
-                                      </div>
-                                    )}
+                                      )}
+                                      {/(delete|remove|drop|purge|filter out|discard|prune)/i.test(rule.prompt) && (
+                                        <span className="px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-[8px] font-bold uppercase tracking-wider border border-rose-200 dark:border-rose-800/50">
+                                          ⚠️ Row Deletion (Unsafe)
+                                        </span>
+                                      )}
+                                    </div>
                                     <span className={`text-[10.5px] leading-snug ${rule.enabled ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-tertiary)] line-through'}`}>
                                       {rule.prompt}
                                     </span>

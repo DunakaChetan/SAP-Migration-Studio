@@ -10,15 +10,18 @@ Cleanser rule set, and exports a cleaned CSV.
 # Imports
 # =============================================================================
 
-from __future__ import annotations
-
 import ast
 import json
+import logging
+import math
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+import traceback
 
+import numpy as np
 import pandas as pd
 
 from services.cleanser_dynamic_rules import get_relevant_rules_for_cleanser
@@ -707,8 +710,35 @@ def _field_key(field_name: str) -> str:
     return field_name.split(".")[-1].strip().upper()
 
 
+def _resolve_field(df: pd.DataFrame, field_name: str) -> str | None:
+    if field_name in df.columns:
+        return field_name
+    field_upper = str(field_name).strip().upper()
+    unqualified = field_upper.split(".")[-1]
+    for col in df.columns:
+        col_upper = str(col).strip().upper()
+        if col_upper == field_upper or col_upper == unqualified or col_upper.split(".")[-1] == unqualified:
+            return col
+    # Common SAP aliases
+    ALIASES = {
+        "EMAIL": ["SMTP_ADDR", "E_MAIL", "EMAIL_ADDRESS"],
+        "SMTP_ADDR": ["EMAIL", "E_MAIL", "EMAIL_ADDRESS"],
+        "COUNTRY": ["LAND1", "COUNTRY_CODE"],
+        "LAND1": ["COUNTRY", "COUNTRY_CODE"],
+        "CURRENCY": ["WAERS", "CURR"],
+        "WAERS": ["CURRENCY", "CURR"],
+        "CUSTOMER": ["KUNNR"],
+        "KUNNR": ["CUSTOMER"],
+    }
+    for alias in ALIASES.get(unqualified, []):
+        for col in df.columns:
+            if str(col).strip().upper() == alias or str(col).strip().upper().split(".")[-1] == alias:
+                return col
+    return None
+
+
 def _has_field(df: pd.DataFrame, field_name: str) -> bool:
-    return field_name in df.columns
+    return _resolve_field(df, field_name) is not None
 
 
 def _row_index(row_number: int) -> int:
@@ -716,7 +746,10 @@ def _row_index(row_number: int) -> int:
 
 
 def _get_value(df: pd.DataFrame, row_index: int, field_name: str) -> str:
-    return _stringify(df.at[row_index, field_name])
+    col = _resolve_field(df, field_name)
+    if col is not None and 0 <= row_index < len(df):
+        return _stringify(df.at[row_index, col])
+    return ""
 
 
 def _set_value(
@@ -728,12 +761,15 @@ def _set_value(
     phase: str,
     rule_code: str,
 ) -> bool:
-    old_value = _get_value(df, row_index, field_name)
+    col = _resolve_field(df, field_name) or field_name
+    if col not in df.columns or not (0 <= row_index < len(df)):
+        return False
+    old_value = _stringify(df.at[row_index, col])
     next_value = _stringify(new_value)
     if old_value == next_value:
         return False
-    df.at[row_index, field_name] = next_value
-    summary.add_fix(phase, rule_code, row_index + 1, field_name, old_value, next_value)
+    df.at[row_index, col] = next_value
+    summary.add_fix(phase, rule_code, row_index + 1, col, old_value, next_value)
     return True
 
 
@@ -967,11 +1003,11 @@ def fix_required_fields(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     if _is_empty(_get_value(df, idx, field_name)):
         default_value = _default_for_field(field_name)
         if default_value is None:
-            _warn_skipped(summary, rule_code, issue["row"], field_name, "missing required value has no safe configured default")
+            _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "missing required value has no safe configured default")
             return
         _set_value(df, idx, field_name, default_value, summary, "validation", rule_code)
 
@@ -983,11 +1019,11 @@ def fix_numeric_identifier_format(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     value = _get_value(df, idx, field_name).strip()
     if re.fullmatch(r"\d+", value):
         return
-    _warn_skipped(summary, rule_code, issue["row"], field_name, "identifier must contain only digits")
+    _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "identifier must contain only digits")
 
 
 def fix_country_code_format(
@@ -997,11 +1033,11 @@ def fix_country_code_format(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     value = _get_value(df, idx, field_name).strip().upper()
     if re.fullmatch(r"[A-Z]{2,3}", value):
         return
-    _warn_skipped(summary, rule_code, issue["row"], field_name, "country value does not match ISO 2-3 letter format")
+    _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "country value does not match ISO 2-3 letter format")
 
 
 def fix_currency_code_format(
@@ -1011,11 +1047,11 @@ def fix_currency_code_format(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     value = _get_value(df, idx, field_name).strip().upper()
     if re.fullmatch(r"[A-Z]{3}", value):
         return
-    _warn_skipped(summary, rule_code, issue["row"], field_name, "currency value does not match ISO 4217 3-letter format")
+    _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "currency value does not match ISO 4217 3-letter format")
 
 
 def fix_email_address_format(
@@ -1025,11 +1061,11 @@ def fix_email_address_format(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     value = _get_value(df, idx, field_name).strip()
     if EMAIL_RE.match(value):
         return
-    _warn_skipped(summary, rule_code, issue["row"], field_name, "email value does not match valid @ format")
+    _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "email value does not match valid @ format")
 
 
 def fix_date_yyyymmdd_format(
@@ -1039,11 +1075,11 @@ def fix_date_yyyymmdd_format(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     value = _get_value(df, idx, field_name).strip()
     if re.fullmatch(r"\d{8}", value):
         return
-    _warn_skipped(summary, rule_code, issue["row"], field_name, "date value does not match YYYYMMDD 8-digit format")
+    _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "date value does not match YYYYMMDD 8-digit format")
 
 
 def fix_field_length(
@@ -1053,10 +1089,10 @@ def fix_field_length(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     max_length = FIELD_LENGTHS.get(_field_key(field_name))
     if max_length is None:
-        summary.warnings.append(f"No max length configured for {field_name}; skipped row {issue['row']}.")
+        summary.warnings.append(f"No max length configured for {field_name}; skipped row {issue.get('row', idx + 1)}.")
         return
     value = _get_value(df, idx, field_name)
     if len(value) > max_length:
@@ -1070,13 +1106,13 @@ def fix_payment_terms_format(
     rule_code: str,
 ) -> None:
     field_name = issue["field"]
-    idx = _row_index(issue["row"])
-    value = _get_value(df, idx, field_name)
+    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
+    value = _get_value(df, idx, field_name).strip()
     normalized = _normalize_payment_term(value)
     if normalized is not None:
         _set_value(df, idx, field_name, normalized, summary, "validation", rule_code)
     else:
-        _warn_skipped(summary, rule_code, issue["row"], field_name, f"payment term value '{value}' cannot be auto-formatted to SAP key")
+        _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, f"payment term value '{value}' cannot be auto-formatted to SAP key")
 
 
 # =============================================================================
@@ -1348,6 +1384,7 @@ def build_cleanser_execution_plan(
     dynamic_items = []
     satisfied_dynamic_rules = []
     for rule in stored_dynamic_rules:
+        rule_dict = dict(rule) if isinstance(rule, dict) else {}
         rule_id = _dynamic_rule_id(rule)
         field_name = _dynamic_rule_field(rule)
         matching_groups = [
@@ -1356,17 +1393,46 @@ def build_cleanser_execution_plan(
             if (rule_id and group["rule_code"] == rule_id)
             or (field_name != "GENERAL" and group["field_name"] == field_name)
         ]
-        status = "has_issues" if matching_groups else "satisfied"
+        
+        is_custom_rule = (
+            rule_dict.get("is_custom_step6")
+            or bool(rule_dict.get("prompt"))
+            or bool(rule_dict.get("custom_prompt"))
+            or any(kw in _stringify(rule_dict.get("description", "")).lower() for kw in ["delete", "drop", "remove", "filter", "empty"])
+        )
+
+        if matching_groups:
+            status = "has_issues"
+        elif is_custom_rule:
+            # Custom prompt / row-filter rule without pre-existing validation issues:
+            # create synthetic issue group so LLM dynamic fixer executes across dataset
+            matching_groups = [{
+                "group_id": f"dyn_grp_{rule_id}",
+                "rule_code": rule_id,
+                "field_name": field_name or "MULTIPLE",
+                "issue_count": 0,
+                "issues": [],
+                "rule_type": "dynamic",
+            }]
+            status = "has_issues"
+        else:
+            status = "satisfied"
+            satisfied_dynamic_rules.append({
+                "rule": rule_dict,
+                "rule_code": rule_id,
+                "field_name": field_name,
+                "status": "satisfied",
+            })
+            matching_groups = []
+
         item = {
-            "rule": dict(rule),
+            "rule": rule_dict,
             "rule_code": rule_id,
             "field_name": field_name,
             "status": status,
             "issue_groups": matching_groups,
         }
         dynamic_items.append(item)
-        if status == "satisfied":
-            satisfied_dynamic_rules.append(item)
 
     standard_validation_items = []
     overridden_rules = []
@@ -1507,7 +1573,6 @@ FORBIDDEN_DYNAMIC_FIXER_METHODS = {
     "read_csv",
     "remove",
     "rename",
-    "replace",
     "request",
     "rmdir",
     "system",
@@ -1591,16 +1656,28 @@ def _extract_dynamic_fixer_code(raw_response: str) -> str:
     if not raw:
         raise ValueError("LLM returned an empty response.")
 
+    code = ""
     try:
         parsed = json.loads(raw)
         if isinstance(parsed, dict):
-            code = parsed.get("code") or parsed.get("python_code") or parsed.get("fixer_code")
-            if isinstance(code, str):
-                return code.strip()
-        raise ValueError("LLM JSON did not contain code/python_code/fixer_code.")
+            code = parsed.get("code") or parsed.get("python_code") or parsed.get("fixer_code") or ""
     except json.JSONDecodeError:
         fenced = re.search(r"```(?:python)?\s*(.*?)```", raw, re.DOTALL | re.IGNORECASE)
-        return (fenced.group(1) if fenced else raw).strip()
+        code = (fenced.group(1) if fenced else raw).strip()
+
+    if not code:
+        code = raw
+
+    # Sanitize harmless inline imports (e.g. `import pandas as pd`, `import numpy as np`, `import math`, `import re`)
+    # since pd, np are already provided in the safe execution globals
+    cleaned_lines = []
+    for line in code.splitlines():
+        trimmed = line.strip()
+        if re.match(r"^(?:import\s+(?:pandas|numpy|math|re|datetime)(?:\s+as\s+\w+)?|from\s+(?:pandas|numpy|math|re|datetime)\s+import\s+.*)$", trimmed):
+            continue
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
 
 
 def validate_dynamic_fixer_code(code: str) -> tuple[bool, str]:
@@ -1629,9 +1706,15 @@ def validate_dynamic_fixer_code(code: str) -> tuple[bool, str]:
     if not any(isinstance(node, ast.Return) for node in ast.walk(function)):
         return False, "fix_dynamic_rule must return a dataframe/result."
 
+    ALLOWED_IMPORTS = {"pandas", "numpy", "math", "re", "datetime"}
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            return False, "Imports are not allowed in dynamic fixer code."
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name not in ALLOWED_IMPORTS:
+                    return False, f"Import of '{alias.name}' is not allowed in dynamic fixer code."
+        elif isinstance(node, ast.ImportFrom):
+            if node.module not in ALLOWED_IMPORTS:
+                return False, f"Import from '{node.module}' is not allowed in dynamic fixer code."
         if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.Global, ast.Nonlocal, ast.Delete, ast.With, ast.AsyncWith)):
             return False, f"{type(node).__name__} is not allowed in dynamic fixer code."
         if isinstance(node, ast.Name):
@@ -1687,16 +1770,20 @@ Return ONLY a JSON object with a string field named "code".
 The code must define exactly:
 def fix_dynamic_rule(df, issue_rows):
 
-CRITICAL DATAFRAME INDEXING & FIELD INSTRUCTIONS:
-1. USE 0-INDEXED `row_index`: Each item in `issue_rows` has integer `row_index` (0-indexed position in `df`). Use `row_idx = int(issue.get('row_index', 0))` to index into `df.at[row_idx, col_name]`. (Do NOT use 1-indexed `row_number` directly as DataFrame index).
-2. TARGET COLUMN MATCHING: Find target column in `df.columns` by checking case-insensitively (e.g. if field is 'COUNTRY', check for 'COUNTRY' or 'LAND1' in `df.columns`).
-3. DATA-TYPE AWARE PADDING/EXTENSION:
-   - If the rule requires target length N (e.g. 4) and value contains text/letters (e.g. 'IN'): Right-pad/extend with '0' or 'X' to length N (e.g. 'IN' -> 'IN00' or 'INXX').
-   - If value is purely numeric (e.g. '12'): Left-pad with zeroes to length N (e.g. '0012').
-   - If empty: Fill valid default value matching required format.
-4. CONTRACT:
-   Must modify `df` at `row_idx` for target column for issue_rows and return `df`.
-   Do not import modules, access files, call shell commands, or access network/database."""
+CRITICAL DATAFRAME INSTRUCTIONS:
+1. CELL-LEVEL FIXES:
+   - For field-level cleaning (padding, formatting, trimming, casing, value conversion), modify `df` at target column/rows.
+   - You can use 0-indexed `row_index` from `issue_rows` (e.g. `row_idx = int(issue.get('row_index', 0))`) or apply vectorized column operations on `df`.
+2. ROW DELETIONS / EMPTY ROW FILTERING:
+   - If the rule requires deleting, dropping, or filtering records (e.g., 'if all fields are empty delete record', 'drop empty rows', 'remove rows where X'):
+     Note: In this dataset, empty values can be empty strings (''), whitespace, None, or 'nan'.
+     To drop rows where all columns are empty:
+     df = df[~df.astype(str).apply(lambda row: all(str(val).strip() in ('', 'nan', 'None', 'NULL') for val in row), axis=1)].reset_index(drop=True)
+     Or use `df.dropna(how='all')` or boolean indexing for specific conditions.
+3. CONTRACT:
+   Must return the modified DataFrame `df`.
+   You may use `pd` and `np`. Do NOT write 'import pandas' or 'import numpy' inside the function as they are already globally available.
+   Do not import forbidden modules, access files, call shell commands, or access network/database."""
     user_prompt = json.dumps(payload, indent=2, sort_keys=True)
     return system_prompt, user_prompt
 
@@ -1744,27 +1831,44 @@ def generate_dynamic_fixers_from_plan(
                 "group_id": group_id,
             }
             try:
+                print(f"\n{'='*65}")
+                print(f"🚀 [CLEANSER DYNAMIC FIXER] Generating fixer for rule: {fixer_base.get('rule_code')}")
+                print(f"📝 Prompt Description: {_dynamic_rule_description(rule_item.get('rule', {}))}")
+                print(f"🎯 Target Field: {fixer_base.get('field')}")
+                print(f"🔍 Issue count: {fixer_base.get('issue_count')}")
+
                 system_prompt, user_prompt = _build_dynamic_fixer_prompts(rule_item, issue_group)
                 result["llm_calls"] += 1
                 if llm_generator is None:
                     from services.llm_orchestrator import llm_orchestrator
                     llm_generator = llm_orchestrator.generate_generic
                 raw_response = llm_generator(system_prompt, user_prompt)
+                print(f"📥 [CLEANSER DYNAMIC FIXER] Raw LLM Response:\n{raw_response}\n")
+
                 code = _extract_dynamic_fixer_code(raw_response)
+                print(f"⚙️ [CLEANSER DYNAMIC FIXER] Extracted Code:\n{code}\n")
+
                 is_valid, validation_message = validate_dynamic_fixer_code(code)
                 if not is_valid:
+                    print(f"❌ [CLEANSER DYNAMIC FIXER] AST Validation REJECTED: {validation_message}")
+                    print(f"{'='*65}\n")
                     result["failed_generations"].append({
                         **fixer_base,
                         "status": "rejected",
                         "reason": validation_message,
                     })
                     continue
+                
+                print(f"✅ [CLEANSER DYNAMIC FIXER] AST Validation PASSED")
+                print(f"{'='*65}\n")
                 result["generated_fixers"].append({
                     **fixer_base,
                     "status": "generated",
                     "code": code,
                 })
             except Exception as exc:
+                print(f"❌ [CLEANSER DYNAMIC FIXER] Generation failed with error: {exc}")
+                traceback.print_exc()
                 result["failed_generations"].append({
                     **fixer_base,
                     "status": "failed",
@@ -1922,8 +2026,11 @@ def execute_dynamic_fixers(
         issue_rows = groups_map.get(group_id, [])
 
         # Restricted execution namespace
-        safe_globals = {"__builtins__": SAFE_DYNAMIC_BUILTINS, "pd": pd}
+        safe_globals = {"__builtins__": SAFE_DYNAMIC_BUILTINS, "pd": pd, "np": np}
         local_scope: dict[str, Any] = {}
+
+        print(f"\n⚡ [DYNAMIC FIXER EXECUTION] Executing rule: {rule_code} (group: {group_id})")
+        print(f"📊 Before DataFrame Shape: {df.shape}")
 
         try:
             exec(code, safe_globals, local_scope)
@@ -1931,6 +2038,7 @@ def execute_dynamic_fixers(
             if not callable(fix_func):
                 raise ValueError("Defined fix_dynamic_rule is not callable.")
         except Exception as exc:
+            print(f"❌ [DYNAMIC FIXER EXECUTION] Compilation failed: {exc}")
             failed_list.append({
                 "group_id": group_id,
                 "rule_code": rule_code,
@@ -1947,6 +2055,8 @@ def execute_dynamic_fixers(
         try:
             result_df = fix_func(df_for_func, issue_rows)
         except Exception as exc:
+            print(f"❌ [DYNAMIC FIXER EXECUTION ERROR] Runtime exception during fix_dynamic_rule: {exc}")
+            traceback.print_exc()
             failed_list.append({
                 "group_id": group_id,
                 "rule_code": rule_code,
@@ -1961,6 +2071,7 @@ def execute_dynamic_fixers(
         elif isinstance(result_df, pd.DataFrame):
             after_df = result_df
         else:
+            print(f"❌ [DYNAMIC FIXER EXECUTION] Returned invalid result type: {type(result_df).__name__}")
             failed_list.append({
                 "group_id": group_id,
                 "rule_code": rule_code,
@@ -1969,26 +2080,50 @@ def execute_dynamic_fixers(
             })
             continue
 
-        # Structural validation on return result
-        if len(after_df) != len(df) or list(after_df.columns) != list(df.columns):
+        print(f"📊 After DataFrame Shape: {after_df.shape}")
+
+        # Check if rows were dropped (e.g. deletion / filtering dynamic rule)
+        if len(after_df) < len(before_df):
+            dropped_count = len(before_df) - len(after_df)
+            print(f"🗑️ [DYNAMIC FIXER EXECUTION] DROPPED {dropped_count} ROWS! (From {len(before_df)} to {len(after_df)})")
+            summary.add_fix(
+                "dynamic",
+                rule_code,
+                0,
+                field_name or "RECORD",
+                f"Dataset ({len(before_df)} rows)",
+                f"Deleted {dropped_count} record(s) ({len(after_df)} remaining)"
+            )
+            summary.warnings.append(
+                f"Dynamic rule '{rule_code}' dropped {dropped_count} record(s) from dataset."
+            )
+            group_fixes = dropped_count
+            df = after_df.reset_index(drop=True)
+            summary.rows_exported = len(df)
+        elif len(after_df) > len(before_df):
+            print(f"❌ [DYNAMIC FIXER EXECUTION] Fixer unexpectedly added rows from {len(before_df)} to {len(after_df)}")
             failed_list.append({
                 "group_id": group_id,
                 "rule_code": rule_code,
                 "field": field_name,
-                "reason": "Structural validation failed: columns or row count altered by fixer.",
+                "reason": "Fixer unexpectedly added new rows to dataset.",
             })
             continue
-
-        # Cell-by-cell diff tracking (before vs after)
-        group_fixes = 0
-        for row_idx in range(len(df)):
-            for col in df.columns:
-                old_val = _stringify(before_df.at[row_idx, col])
-                new_val = _stringify(after_df.at[row_idx, col])
-                if old_val != new_val:
-                    df.at[row_idx, col] = new_val
-                    summary.add_fix("dynamic", rule_code, row_idx + 1, col, old_val, new_val)
-                    group_fixes += 1
+        else:
+            # Cell-by-cell diff tracking (before vs after)
+            group_fixes = 0
+            for row_idx in range(len(df)):
+                for col in df.columns:
+                    if col in before_df.columns and col in after_df.columns:
+                        old_val = _stringify(before_df.at[row_idx, col])
+                        new_val = _stringify(after_df.at[row_idx, col])
+                        if old_val != new_val:
+                            df.at[row_idx, col] = new_val
+                            summary.add_fix("dynamic", rule_code, row_idx + 1, col, old_val, new_val)
+                            group_fixes += 1
+            print(f"✨ [DYNAMIC FIXER EXECUTION] Cell fixes applied: {group_fixes}")
+            if group_fixes > 0:
+                df = after_df.copy(deep=True)
 
         executed_list.append({
             "group_id": group_id,
@@ -2016,6 +2151,28 @@ def execute_dynamic_fixers(
 # Main Agent
 # =============================================================================
 
+def _find_issue_row_index(df: pd.DataFrame, issue: dict[str, Any]) -> int | None:
+    # 1. Try matching by primary_key_value
+    pk_val = _stringify(issue.get("primary_key_value") or issue.get("pk")).strip()
+    if pk_val:
+        for col in ["KUNNR", "LIFNR", "MATNR", "CUSTOMER", "VENDOR", "MATERIAL", "ID"]:
+            resolved = _resolve_field(df, col)
+            if resolved and resolved in df.columns:
+                matches = df.index[df[resolved].astype(str).str.strip().str.lstrip("0") == pk_val.lstrip("0")].tolist()
+                if matches:
+                    return matches[0]
+                matches_exact = df.index[df[resolved].astype(str).str.strip() == pk_val].tolist()
+                if matches_exact:
+                    return matches_exact[0]
+
+    # 2. Fallback to row_number - 1
+    row_num = issue.get("row") or issue.get("row_number")
+    if isinstance(row_num, int) and 1 <= row_num <= len(df):
+        return row_num - 1
+
+    return None
+
+
 def apply_validation_fixes(
     df: pd.DataFrame,
     validation_report: dict[str, Any],
@@ -2031,7 +2188,6 @@ def apply_validation_fixes(
 
     for issue in validation_report.get("issues", []):
         rule_code = issue.get("rule_code")
-        row_number = issue.get("row")
         field_name = issue.get("field")
         summary.validation_issues.append(dict(issue))
 
@@ -2040,7 +2196,7 @@ def apply_validation_fixes(
             summary.dynamic_issues.append(dict(issue))
             continue
 
-        if not isinstance(rule_code, str) or not rule_code or not isinstance(row_number, int) or not isinstance(field_name, str) or not field_name:
+        if not isinstance(rule_code, str) or not rule_code or not isinstance(field_name, str) or not field_name:
             summary.warnings.append(f"Skipped malformed validation issue: {issue}")
             continue
 
@@ -2048,7 +2204,7 @@ def apply_validation_fixes(
             summary.warnings.append(f"Skipped validation rule {rule_code} for field {field_name} (excluded by user).")
             continue
 
-        # Skip standard validation rules overridden by dynamic rules ONLY if dynamic fixer applied fixes
+        # Skip standard validation rules overridden by dynamic rules ONLY if dynamic fixer applied fixes for that specific field
         clean_rule = _clean_key(rule_code)
         clean_field = _field_key(field_name)
         executed_fields = {
@@ -2056,9 +2212,9 @@ def apply_validation_fixes(
             for item in summary.dynamic_fixer_execution.get("executed", [])
             if item.get("fixes_applied", 0) > 0
         }
-        is_overridden = clean_field in executed_fields and any(
+        is_overridden = clean_field != "GENERAL" and clean_field in executed_fields and any(
             _clean_key(ov.get("rule_code")) == clean_rule and
-            (ov.get("field_name") == "MULTIPLE" or _field_key(ov.get("field_name", "")) in (clean_field, "GENERAL"))
+            (ov.get("field_name") == "MULTIPLE" or _field_key(ov.get("field_name", "")) == clean_field)
             for ov in overridden_rules
             if ov.get("rule_type") == "standard_validation"
         )
@@ -2066,16 +2222,20 @@ def apply_validation_fixes(
             summary.warnings.append(f"Skipped standard validation rule {rule_code} for field {field_name} (handled by active dynamic rule).")
             continue
 
-        if row_number < 1 or row_number > len(df.index):
-            summary.warnings.append(f"Skipped issue for out-of-range row {row_number}: {issue}")
+        resolved_idx = _find_issue_row_index(df, issue)
+        if resolved_idx is None:
+            # Row was dropped by dynamic rule or out of range
             continue
+
         if not _has_field(df, field_name):
             summary.warnings.append(f"Skipped issue for missing field {field_name}: {issue}")
             continue
         fixer = VALIDATION_FIXERS.get(rule_code)
         if fixer is None:
-            summary.warnings.append(f"No validation fixer registered for {rule_code}; skipped row {row_number}.")
+            summary.warnings.append(f"No validation fixer registered for {rule_code}; skipped row {issue.get('row')}.")
             continue
+
+        issue["resolved_row_index"] = resolved_idx
         summary.add_rule(rule_code)
         fixer(df, issue, summary, rule_code)
     return df

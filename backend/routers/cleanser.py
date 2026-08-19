@@ -1,3 +1,4 @@
+import traceback
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import pandas as pd
@@ -82,6 +83,17 @@ async def cleanser_flow(req: FlowRequest):
     res_rules = client.table("dynamic_rules").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
     all_dynamic_rules = list(res_rules.data[0]["payload"]) if res_rules.data else []
 
+    val_issues = validation_payload.get('issues', []) if isinstance(validation_payload, dict) else validation_payload
+    val_rules_summary = sorted({iss.get('rule_code') or iss.get('rule') for iss in val_issues if isinstance(iss, dict)})
+    print(f"\n{'='*70}")
+    print(f"🌟 [CLEANSER API] /api/sap/cleanser/flow invoked")
+    print(f"📁 Project: {req.project_id} | Target Object: {req.target_object}")
+    print(f"📊 Harmonized records count: {len(harmonized_data)}")
+    print(f"🔍 Validation report issues count: {len(val_issues)}")
+    print(f"📋 Validation rule codes in report: {val_rules_summary}")
+    print(f"⚡ Custom dynamic prompts received from Step 6: {req.custom_prompts}")
+    print(f"💾 Stored dynamic rules in DB: {len(all_dynamic_rules)}")
+
     # 5. Compile custom AI dynamic prompts if provided
     if req.custom_prompts:
         actual_cols = list(harmonized_data[0].keys()) if harmonized_data and isinstance(harmonized_data[0], dict) else None
@@ -93,6 +105,10 @@ async def cleanser_flow(req: FlowRequest):
             )
         )
         compiled = gen_res.get("rules", [])
+        for r in compiled:
+            if isinstance(r, dict):
+                r["is_custom_step6"] = True
+        print(f"🤖 [CLEANSER API] Compiled {len(compiled)} dynamic rules from custom prompts")
         all_dynamic_rules.extend(compiled)
 
     with TemporaryDirectory(prefix="sap_cleanser_") as tmp_dir:
@@ -116,7 +132,11 @@ async def cleanser_flow(req: FlowRequest):
                 excluded_validation_rules=req.excluded_validation_rules,
             )
             cleaned_data = parse_cleaned_csv(output_csv_path)
+            print(f"🎉 [CLEANSER API] Cleanser completed! Output rows: {len(cleaned_data)}")
+            print(f"{'='*70}\n")
         except Exception as exc:
+            print(f"❌ [CLEANSER API] Cleanser failed: {exc}")
+            traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Cleanser failed: {exc}") from exc
 
     return {
