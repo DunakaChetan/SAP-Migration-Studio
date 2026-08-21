@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
@@ -79,6 +79,26 @@ export function Step5Validate() {
   const [appliedStandardRules, setAppliedStandardRules] = useState<string[] | null>(null);
   const [selectedRulesReceived, setSelectedRulesReceived] = useState<string[] | null>(null);
 
+  useEffect(() => {
+    if (state.projectId && state.obj && savedDynamicRules.length === 0) {
+      const fetchSavedRules = async () => {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_BACKEND_URL || ''}/api/validate/rules?project_id=${state.projectId}&target_object=${state.obj}&source=validate`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.rules && data.rules.length > 0) {
+              setSavedDynamicRules(data.rules);
+              dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: data.rules });
+              setSelectedDynamicRules(Object.fromEntries(data.rules.map((r: any) => [r.id, true])));
+            }
+          }
+        } catch (e) {
+          console.error("Failed to fetch saved rules", e);
+        }
+      };
+      fetchSavedRules();
+    }
+  }, [state.projectId, state.obj]);
   const handleAddPrompt = () => {
     if (!newPromptInput.trim()) return;
     setCustomPrompts([...customPrompts, newPromptInput.trim()]);

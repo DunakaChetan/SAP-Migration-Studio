@@ -438,7 +438,7 @@ class CleaningSummary:
     cleanser_fixes: list[dict[str, Any]] = field(default_factory=list)
     rows_modified: set[int] = field(default_factory=set)
     rules_applied: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[dict[str, Any]] = field(default_factory=list)
     rows_loaded: int = 0
     rows_exported: int = 0
 
@@ -877,9 +877,16 @@ def _normalize_date(value: Any) -> str | None:
 
 def _warn_skipped(summary: CleaningSummary, rule_code: str, row_number: int, field_name: str, reason: str) -> None:
     detail = f"row {row_number}, field {field_name} requires manual review - {reason}"
-    if any(message.endswith(detail) for message in summary.warnings):
-        return
-    summary.warnings.append(f"{rule_code}: {detail}")
+    for w in summary.warnings:
+        if isinstance(w, dict) and w.get("row") == row_number and w.get("field") == field_name and w.get("rule_code") == rule_code:
+            return
+    summary.warnings.append({
+        "rule_code": rule_code,
+        "row": row_number,
+        "field": field_name,
+        "reason": reason,
+        "message": f"{rule_code}: {detail}"
+    })
 
 
 # =============================================================================
@@ -1092,7 +1099,7 @@ def fix_field_length(
     idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     max_length = FIELD_LENGTHS.get(_field_key(field_name))
     if max_length is None:
-        summary.warnings.append(f"No max length configured for {field_name}; skipped row {issue.get('row', idx + 1)}.")
+        _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "No max length configured")
         return
     value = _get_value(df, idx, field_name)
     if len(value) > max_length:

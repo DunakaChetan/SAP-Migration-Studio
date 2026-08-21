@@ -12,6 +12,89 @@
       "severity": "ERROR",
       "source": "validation_dynamic_rule",
       "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-21T18:31:23.924679+00:00",
+      "description": "Flags records where all customer-related fields are completely empty.",
+      "error_message": "The record contains no data in any of the mapped customer fields and should be deleted.",
+      "field": "GENERAL",
+      "id": "CUST_ALL_FIELDS_EMPTY",
+      "label": "Empty Record Check",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "severity": "ERROR",
+      "source": "validation_dynamic_rule",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-21T18:31:44.448077+00:00",
+      "description": "Identify and flag records where all customer fields are empty.",
+      "error_message": "The record has all customer fields empty and is a candidate for deletion.",
+      "field": "GENERAL",
+      "id": "RULE_CUSTOMER_EMPTY_RECORD",
+      "label": "Empty Record Check",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "severity": "ERROR",
+      "source": "validation_dynamic_rule",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-21T18:33:34.278396+00:00",
+      "description": "Checks if all standard customer fields in the record are empty.",
+      "error_message": "The record contains no data in any of the mapped customer fields and should be removed.",
+      "field": "GENERAL",
+      "id": "CUSTOMER_EMPTY_RECORD",
+      "label": "Empty Record Check",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "severity": "ERROR",
+      "source": "validation_dynamic_rule",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-21T18:49:30.180217+00:00",
+      "description": "",
+      "field": "GENERAL",
+      "id": "DYN_1787338168894",
+      "label": "DYN_1787338168894",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "source": "cleanse",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-21T18:54:55.953919+00:00",
+      "description": "",
+      "field": "GENERAL",
+      "id": "DYN_1787338494276",
+      "label": "DYN_1787338494276",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "source": "cleanse",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-21T18:55:53.774734+00:00",
+      "description": "",
+      "field": "GENERAL",
+      "id": "DYN_1787338552592",
+      "label": "DYN_1787338552592",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "source": "cleanse",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-21T19:16:00.306699+00:00",
+      "description": "",
+      "field": "GENERAL",
+      "id": "DYN_1787339759152",
+      "label": "DYN_1787339759152",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "source": "cleanse",
+      "target_object": "CUSTOMER"
     }
   ],
   "version": "1.0"

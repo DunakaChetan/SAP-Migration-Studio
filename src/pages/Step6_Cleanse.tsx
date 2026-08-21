@@ -68,6 +68,14 @@ interface AuditLogEntry {
   status: string;
 }
 
+interface WarningItem {
+  rule_code: string;
+  row: number;
+  field: string;
+  reason: string;
+  message: string;
+}
+
 interface CleanserSummary {
   overall_status?: string;
   rows_loaded?: number;
@@ -77,6 +85,7 @@ interface CleanserSummary {
   dynamic_fixes?: { count?: number; items?: FixItem[] };
   validation_fixes?: { total?: number; count?: number; items?: FixItem[] };
   cleanser_fixes?: { total?: number; count?: number; items?: FixItem[] };
+  manual_fixes?: { count?: number; items?: FixItem[] };
   priority_overrides?: {
     dynamic_overrides_standard_validation?: string[];
     dynamic_suppressed_cleanser?: string[];
@@ -145,6 +154,7 @@ function exportAuditLogCSV(summary: CleanserSummary, projectName: string, target
   appendFixes('Dynamic AI Rule', summary.dynamic_fixes?.items);
   appendFixes('Validation Fix', summary.validation_fixes?.items);
   appendFixes('Cleanser Normalization', summary.cleanser_fixes?.items);
+  appendFixes('Manual Fix', summary.manual_fixes?.items);
   return lines.join('\n');
 }
 
@@ -170,6 +180,7 @@ function exportExecutiveSummaryJSON(summary: CleanserSummary, projectName: strin
       dynamic_ai_fixes: summary.dynamic_fixes?.items || [],
       validation_fixes: summary.validation_fixes?.items || [],
       cleanser_normalizations: summary.cleanser_fixes?.items || [],
+      manual_fixes: summary.manual_fixes?.items || [],
     }
   };
   return JSON.stringify(payload, null, 2);
@@ -214,6 +225,10 @@ export function Step6Cleanse() {
   const [auditPhaseFilter, setAuditPhaseFilter] = useState<string>('ALL');
   const [auditPage, setAuditPage] = useState(1);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  // Batch Manual Fix Modal state
+  const [showFixModal, setShowFixModal] = useState(false);
+  const [manualFixValues, setManualFixValues] = useState<Record<string, string>>({});
 
   // Table filter state for cleansed output
   const extractedTables = state.extractedTables || [];
@@ -260,6 +275,30 @@ export function Step6Cleanse() {
       setLoadingValRules(false);
     }
   };
+
+  useEffect(() => {
+    if (state.projectId && state.obj) {
+      const fetchSavedRules = async () => {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_BACKEND_URL || ''}/api/validate/rules?project_id=${state.projectId}&target_object=${state.obj}&source=cleanse`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.rules && data.rules.length > 0) {
+              const rules = data.rules.map((r: any) => ({
+                id: r.id,
+                prompt: r.prompt || r.description || r.label || '',
+                enabled: true
+              }));
+              setCleanserDynamicRules(rules);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to fetch saved rules", e);
+        }
+      };
+      fetchSavedRules();
+    }
+  }, [state.projectId, state.obj]);
 
   // Rule Handlers
   const toggleStandardRule = (code: string) => {
@@ -393,6 +432,20 @@ export function Step6Cleanse() {
       });
     });
 
+    (summary.manual_fixes?.items || []).forEach((item, i) => {
+      list.push({
+        id: `man_${i}`,
+        timestamp: now,
+        phase: 'Manual Fix',
+        rule_code: item.rule_code || 'MANUAL_OVERRIDE',
+        row: item.row,
+        field: item.field,
+        old_value: String(item.old ?? ''),
+        new_value: String(item.new ?? ''),
+        status: 'APPLIED'
+      });
+    });
+
     return list;
   }, [summary]);
 
@@ -402,7 +455,8 @@ export function Step6Cleanse() {
         auditPhaseFilter === 'ALL' ||
         (auditPhaseFilter === 'DYNAMIC' && item.phase === 'Dynamic AI Rule') ||
         (auditPhaseFilter === 'VALIDATION' && item.phase === 'Validation Fix') ||
-        (auditPhaseFilter === 'CLEANSER' && item.phase === 'Cleanser Normalization');
+        (auditPhaseFilter === 'CLEANSER' && item.phase === 'Cleanser Normalization') ||
+        (auditPhaseFilter === 'MANUAL' && item.phase === 'Manual Fix');
 
       const q = auditSearch.trim().toLowerCase();
       const matchQuery =
@@ -423,6 +477,113 @@ export function Step6Cleanse() {
     const start = (auditPage - 1) * AUDIT_PAGE_SIZE;
     return filteredAuditItems.slice(start, start + AUDIT_PAGE_SIZE);
   }, [filteredAuditItems, auditPage]);
+
+  // Derived warning list
+  const rawWarnings = summary ? (Array.isArray(summary.warnings) ? summary.warnings : summary.warnings?.items || []) : [];
+  const warningList: WarningItem[] = useMemo(() => {
+    return rawWarnings.map((w: any) => {
+      if (typeof w === 'string') {
+        return { rule_code: 'UNKNOWN', row: 0, field: '', reason: '', message: w };
+      }
+      return w as WarningItem;
+    }).filter((w: WarningItem) => w.row > 0);
+  }, [rawWarnings]);
+
+  const downloadWarnings = () => {
+    if (!warningList.length) return;
+    
+    // Map of row index to warning issues
+    const warningMap = new Map<number, string[]>();
+    warningList.forEach(w => {
+      const idx = w.row - 1;
+      if (!warningMap.has(idx)) warningMap.set(idx, []);
+      warningMap.get(idx)!.push(`[${w.field}] ${w.reason || w.message}`);
+    });
+
+    const dataToDownload = cleanedRows
+      .map((row, idx) => {
+        if (warningMap.has(idx)) {
+          return {
+            _WARNING_ISSUE: warningMap.get(idx)!.join(' | '),
+            ...row
+          };
+        }
+        return null;
+      })
+      .filter((item): item is Record<string, any> => Boolean(item));
+
+    dl(expCSV(dataToDownload), 'warnings_records.csv', 'text/csv');
+  };
+
+  const applyManualFixes = () => {
+    if (!summary) return;
+    
+    let newCleanedRows = [...cleanedRows];
+    let manualFixesList = summary.manual_fixes?.items ? [...summary.manual_fixes.items] : [];
+    
+    const fixesApplied = Object.entries(manualFixValues).filter(([_, val]) => val.trim() !== "");
+    if (fixesApplied.length === 0) {
+      setShowFixModal(false);
+      return;
+    }
+
+    const appliedSet = new Set<string>();
+    const loggedFixes = new Set<string>();
+
+    fixesApplied.forEach(([key, fixValue]) => {
+      const [rowStr, field, ruleCode] = key.split('::');
+      const rowIndex = parseInt(rowStr, 10) - 1;
+      if (isNaN(rowIndex) || rowIndex < 0 || rowIndex >= newCleanedRows.length) return;
+
+      const oldVal = newCleanedRows[rowIndex][field] || "";
+      newCleanedRows[rowIndex] = { ...newCleanedRows[rowIndex], [field]: fixValue };
+      
+      const logKey = `${rowIndex}_${field}`;
+      if (!loggedFixes.has(logKey)) {
+        manualFixesList.push({
+          rule_code: 'MANUAL_OVERRIDE',
+          row: rowIndex + 1,
+          field: field,
+          old: String(oldVal),
+          new: fixValue
+        });
+        loggedFixes.add(logKey);
+      }
+      appliedSet.add(key);
+    });
+
+    const newWarnings = rawWarnings.filter((w: any) => {
+      if (typeof w === 'string') return true;
+      const key = `${w.row}::${w.field}::${w.rule_code}`;
+      return !appliedSet.has(key);
+    });
+
+    const newSummary = { ...summary };
+    if (Array.isArray(newSummary.warnings)) {
+      newSummary.warnings = newWarnings;
+    } else if (newSummary.warnings && newSummary.warnings.items) {
+      newSummary.warnings.items = newWarnings;
+      newSummary.warnings.count = newWarnings.length;
+    }
+
+    newSummary.manual_fixes = {
+      count: manualFixesList.length,
+      items: manualFixesList
+    };
+
+    dispatch({
+      type: 'BATCH_UPDATE',
+      updates: {
+        cleaned: newCleanedRows,
+        cleansingSummary: newSummary,
+        isCleansedSaved: false
+      }
+    });
+
+    setManualFixValues({});
+    setShowFixModal(false);
+    toast(`Applied ${fixesApplied.length} manual fixes successfully`, 'ok');
+  };
 
   async function doCleanse() {
     showLoad('Cleansing…', 'Applying automated fix rules');
@@ -491,6 +652,45 @@ export function Step6Cleanse() {
     }
   }
 
+  const saveRulesToDB = async () => {
+    if (!state.projectId) {
+      toast('No project selected to save rules', 'err');
+      return;
+    }
+    showLoad('Saving rules...', 'Compiling and saving dynamic rules to database');
+    try {
+      const activeDynamicRules = cleanserDynamicRules.filter(r => r.enabled);
+      
+      const payloadRules = activeDynamicRules.map(r => ({
+        id: r.id,
+        prompt: r.prompt,
+        enabled: r.enabled
+      }));
+
+      // Save the rules directly to /api/validate/rules/save
+      const res2 = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules, source: 'cleanse' })
+      });
+      const resJson = await res2.json().catch(() => (null));
+      
+      if (!res2.ok) {
+        let msg = 'Failed to save rules';
+        try {
+          msg = (resJson && (resJson.detail || resJson.message)) || JSON.stringify(resJson) || msg;
+        } catch (e) { }
+        throw new Error(msg);
+      }
+      
+      hideLoad();
+      toast('Dynamic cleansing rules saved to project', 'ok');
+    } catch (err: any) {
+      hideLoad();
+      toast(err.message || 'Failed to save rules', 'err');
+    }
+  };
+
   const saveDataToDB = async () => {
     if (!state.projectId || !state.obj) {
       toast('Project or Object not selected', 'err');
@@ -538,7 +738,6 @@ export function Step6Cleanse() {
     !ruleSearchQuery || r.prompt.toLowerCase().includes(ruleSearchQuery.toLowerCase())
   );
 
-  const warningList = summary ? (Array.isArray(summary.warnings) ? summary.warnings : summary.warnings?.items || []) : [];
 
   return (
     <PageLayout>
@@ -825,6 +1024,14 @@ export function Step6Cleanse() {
               {/* TAB 3: Dynamic AI Rules */}
               {activeRuleTab === 'dynamic' && (
                 <div className="space-y-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold text-violet-700 dark:text-violet-300">
+                      Manage Dynamic Rules
+                    </span>
+                    <Button variant="secondary" size="sm" icon={<Save className="w-3 h-3" />} onClick={saveRulesToDB}>
+                      Save Rules
+                    </Button>
+                  </div>
                   <div className="flex gap-1.5">
                     <input
                       type="text"
@@ -888,19 +1095,21 @@ export function Step6Cleanse() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-start justify-between gap-1">
                                   <div className="flex-1 min-w-0">
-                                    <div className="flex flex-wrap items-center gap-1 mb-0.5">
-                                      {rule.id.startsWith('OVERRIDE_') && (
-                                        <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[8px] font-bold uppercase tracking-wider">
-                                          ⚡ Overridden Standard
-                                        </span>
-                                      )}
-                                      {/(delete|remove|drop|purge|filter out|discard|prune)/i.test(rule.prompt) && (
-                                        <span className="px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-[8px] font-bold uppercase tracking-wider border border-rose-200 dark:border-rose-800/50">
-                                          ⚠️ Row Deletion (Unsafe)
-                                        </span>
-                                      )}
-                                    </div>
-                                    <span className={`text-[10.5px] leading-snug ${rule.enabled ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-tertiary)] line-through'}`}>
+                                    {(rule.id.startsWith('OVERRIDE_') || /(delete|remove|drop|purge|filter out|discard|prune)/i.test(rule.prompt)) && (
+                                      <div className="flex flex-wrap items-center gap-1 mb-1">
+                                        {rule.id.startsWith('OVERRIDE_') && (
+                                          <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[8px] font-bold uppercase tracking-wider">
+                                            ⚡ Overridden Standard
+                                          </span>
+                                        )}
+                                        {/(delete|remove|drop|purge|filter out|discard|prune)/i.test(rule.prompt) && (
+                                          <span className="px-1.5 py-0.2 rounded bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 text-[8px] font-bold uppercase tracking-wider border border-rose-200 dark:border-rose-800/50">
+                                            ⚠️ Row Deletion (Unsafe)
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                    <span className={`text-[10.5px] leading-snug block whitespace-pre-wrap ${rule.enabled ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-tertiary)] line-through'}`}>
                                       {rule.prompt}
                                     </span>
                                   </div>
@@ -1215,14 +1424,47 @@ export function Step6Cleanse() {
 
                   {/* Manual Review Items */}
                   <div>
-                    <div className="text-[11.5px] font-bold text-[var(--text-secondary)] mb-2">
-                      Manual Review Items / Warnings ({warningList.length})
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[11.5px] font-bold text-[var(--text-secondary)]">
+                        Manual Review Items / Warnings ({warningList.length})
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={<Download className="w-3.5 h-3.5" />}
+                          onClick={downloadWarnings}
+                          disabled={warningList.length === 0}
+                        >
+                          Download Warning Records
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon={<Pencil className="w-3.5 h-3.5" />}
+                          onClick={() => {
+                            setManualFixValues({});
+                            setShowFixModal(true);
+                          }}
+                          disabled={warningList.length === 0}
+                          className="bg-amber-600 hover:bg-amber-700 text-white"
+                        >
+                          Fix Warnings
+                        </Button>
+                      </div>
                     </div>
                     {warningList.length ? (
-                      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] p-3 space-y-1.5 max-h-44 overflow-y-auto">
-                        {warningList.map((warning: string, i: number) => (
-                          <div key={i} className="text-[11px] text-amber-600 dark:text-amber-400 font-mono">
-                            {warning}
+                      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] p-3 space-y-2 max-h-56 overflow-y-auto">
+                        {warningList.map((warning, i) => (
+                          <div key={i} className="p-2 rounded-lg bg-[var(--bg-primary)] border border-amber-200 dark:border-amber-900/50 flex flex-col gap-1 text-[11px] font-mono">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-amber-700 dark:text-amber-400">{warning.rule_code}</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300">Row #{warning.row}</span>
+                            </div>
+                            <div className="text-[10px] text-[var(--text-tertiary)]">
+                              Field: <strong className="text-[var(--text-primary)]">{warning.field}</strong>
+                            </div>
+                            <div className="text-[10px] text-amber-600 dark:text-amber-500 mt-0.5">{warning.reason || warning.message}</div>
                           </div>
                         ))}
                       </div>
@@ -1289,6 +1531,7 @@ export function Step6Cleanse() {
                         ['DYNAMIC', `⚡ Dynamic AI (${summary.dynamic_fixes?.items?.length || 0})`],
                         ['VALIDATION', `🛠️ Validation (${summary.validation_fixes?.items?.length || 0})`],
                         ['CLEANSER', `🧹 Cleanser (${summary.cleanser_fixes?.items?.length || 0})`],
+                        ['MANUAL', `🖐️ Manual Fix (${summary.manual_fixes?.items?.length || 0})`],
                       ].map(([key, label]) => (
                         <button
                           key={key}
@@ -1518,6 +1761,93 @@ export function Step6Cleanse() {
             </CardBody>
           </Card>
       </div>
+
+      {/* Batch Manual Fix Modal */}
+      {showFixModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-primary)] rounded-2xl shadow-2xl border border-[var(--border)] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-[var(--border)] bg-[var(--bg-tertiary)]">
+              <div>
+                <h3 className="font-bold text-[14px]">Fix Warning Records</h3>
+                <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Provide correct values for the flagged records.</p>
+              </div>
+              <button onClick={() => setShowFixModal(false)} className="p-1.5 rounded-lg hover:bg-[var(--border)] text-[var(--text-tertiary)]">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[var(--bg-primary)]">
+              {warningList.map((warning, i) => {
+                const key = `${warning.row}::${warning.field}::${warning.rule_code}`;
+                const val = manualFixValues[key] ?? "";
+                const rowIndex = warning.row - 1;
+                const currentVal = (cleanedRows[rowIndex] && cleanedRows[rowIndex][warning.field]) ?? '';
+
+                return (
+                  <div key={i} className="flex flex-col md:flex-row rounded-xl border border-[var(--border)] overflow-hidden bg-[var(--bg-primary)] shadow-sm">
+                    {/* Left Half: Details */}
+                    <div className="w-full md:w-[55%] p-4 bg-[var(--bg-tertiary)]/50 border-b md:border-b-0 md:border-r border-[var(--border)] flex flex-col justify-center">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="font-bold text-amber-600 dark:text-amber-500 text-[12px] uppercase tracking-wide">{warning.rule_code}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-secondary)] font-medium">Row #{warning.row}</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-3 mb-2.5">
+                        <div className="bg-[var(--bg-primary)] rounded-lg p-2 border border-[var(--border)]">
+                          <div className="text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">Field</div>
+                          <div className="text-[11px] font-mono font-semibold text-[var(--text-primary)] truncate" title={warning.field}>{warning.field}</div>
+                        </div>
+                        <div className="bg-[var(--bg-primary)] rounded-lg p-2 border border-[var(--border)]">
+                          <div className="text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">Current Value</div>
+                          <div className={`text-[11px] font-mono font-semibold truncate ${!currentVal ? 'text-[var(--text-tertiary)] italic' : 'text-[var(--text-primary)]'}`} title={currentVal}>
+                            {currentVal || '(empty)'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-2.5 rounded-lg border border-amber-100 dark:border-amber-900/50 flex items-start gap-2">
+                        <span className="mt-0.5">⚠</span>
+                        <span className="leading-tight">{warning.reason || warning.message}</span>
+                      </div>
+                    </div>
+                    {/* Right Half: Input */}
+                    <div className="w-full md:w-[45%] p-5 flex flex-col justify-center bg-[var(--bg-primary)]">
+                      <label className="text-[12px] font-semibold text-[var(--text-primary)] mb-2 block">
+                        Correct Value
+                      </label>
+                      <input
+                        type="text"
+                        value={val}
+                        onChange={(e) => setManualFixValues(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full h-10 px-3.5 text-[13px] rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all placeholder:text-[var(--text-tertiary)]"
+                        placeholder="Enter the correct value..."
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {warningList.length === 0 && (
+                <div className="p-8 text-center text-[var(--text-tertiary)] text-[12px]">
+                  No active warnings to fix.
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-[var(--border)] bg-[var(--bg-tertiary)] flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setShowFixModal(false)}>Cancel</Button>
+              <Button 
+                variant="primary" 
+                onClick={applyManualFixes} 
+                disabled={warningList.length === 0 || Object.values(manualFixValues).every(v => v.trim() === "")}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                icon={<Save className="w-4 h-4" />}
+              >
+                Save Fixes
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageLayout>
   );
 }
