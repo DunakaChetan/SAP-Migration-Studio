@@ -506,7 +506,7 @@ export function Step6Cleanse() {
           return {
             _WARNING_ISSUE: warningMap.get(idx)!.join(' | '),
             ...row
-          };
+          } as Record<string, any>;
         }
         return null;
       })
