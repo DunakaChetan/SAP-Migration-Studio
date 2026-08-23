@@ -1,7 +1,7 @@
 import React, { type ReactNode, useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown, Check, Key } from 'lucide-react';
 
 /* ── Card ── */
 interface CardProps {
@@ -15,7 +15,7 @@ export function Card({ children, className }: CardProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       className={cn(
-        'bg-[var(--bg-secondary)] border border-[var(--border)] shadow-[var(--shadow-sm)] rounded-xl overflow-hidden',
+        'bg-[var(--bg-secondary)] border border-[var(--border)] shadow-[var(--shadow-sm)] rounded-xl',
         className
       )}
     >
@@ -185,22 +185,50 @@ export function CodeBlock({ children, className }: { children: ReactNode; classN
 }
 
 /* ── DataTable ── */
-export function DataTable({ rows, cols }: { rows: Record<string, unknown>[]; cols: string[] }) {
+export function DataTable({ rows, cols, keyCols }: { rows: Record<string, unknown>[]; cols: string[]; keyCols?: string[] }) {
   if (!rows?.length) return <div className="py-6 text-center text-[var(--text-tertiary)] text-sm">No data</div>;
   const c = cols.length ? cols : Object.keys(rows[0] || {});
+
+  const isKey = (colName: string) => {
+    if (keyCols?.length) {
+      return keyCols.some(k => k === colName || colName.toLowerCase() === k.toLowerCase() || colName.toLowerCase().endsWith(`.${k.toLowerCase()}`));
+    }
+    const colLower = colName.toLowerCase().trim();
+    const short = colLower.split('.').pop() || colLower;
+    const mainKeys = [
+      'id', 'kunnr', 'lifnr', 'matnr',
+      'customer_id', 'customerno', 'customer_number', 'customer_num', 'cust_id', 'cust_no',
+      'party_id', 'party_number', 'party_num',
+      'account_id', 'vendor_id', 'material_id'
+    ];
+    if (mainKeys.includes(short) || mainKeys.includes(colLower)) return true;
+    if (short.endsWith('_id') && !['country_id', 'state_id', 'tax_id', 'language_id', 'bank_id', 'region_id'].some(ign => short.includes(ign))) return true;
+    return false;
+  };
+
   return (
     <div className="rounded-xl border border-[var(--border)] overflow-auto max-h-[420px]">
       <table className="w-full border-collapse text-[12px] whitespace-nowrap">
         <thead>
           <tr>
-            {c.map((col) => (
-              <th
-                key={col}
-                className="px-3.5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border)] sticky top-0 z-10"
-              >
-                {col}
-              </th>
-            ))}
+            {c.map((col) => {
+              const keyCol = isKey(col);
+              return (
+                <th
+                  key={col}
+                  className="px-3.5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border)] sticky top-0 z-10"
+                >
+                  <div className="flex items-center gap-1.5">
+                    {keyCol && (
+                      <span className="flex items-center gap-0.5 text-[8.5px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30" title="Key Field / Identifier">
+                        <Key className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                    <span>{col}</span>
+                  </div>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -209,12 +237,17 @@ export function DataTable({ rows, cols }: { rows: Record<string, unknown>[]; col
               {c.map((col) => {
                 const v = row[col] !== undefined ? String(row[col]) : '';
                 const empty = !v.trim();
+                const keyCol = isKey(col);
                 return (
                   <td
                     key={col}
                     className={cn(
                       'px-3.5 py-2 font-mono text-[11px] border-b border-[var(--border-light)]',
-                      empty ? 'text-red-400 dark:text-red-500 italic' : 'text-[var(--text-secondary)]'
+                      empty
+                        ? 'text-red-400 dark:text-red-500 italic'
+                        : keyCol
+                          ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                          : 'text-[var(--text-secondary)]'
                     )}
                   >
                     {empty ? '(empty)' : v}
@@ -404,44 +437,50 @@ export function Select({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.15 }}
-            className="absolute z-50 w-full mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-lg overflow-hidden py-1 backdrop-blur-xl"
+            className="absolute z-[999] w-full min-w-[220px] mt-1.5 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl overflow-hidden py-1 backdrop-blur-2xl"
           >
             {searchable && (
-              <div className="px-2 py-1.5 border-b border-[var(--border)]">
+              <div className="px-2.5 py-2 border-b border-[var(--border)] bg-[var(--bg-secondary)]/80">
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Search..."
+                  placeholder="Search fields..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border-light)] rounded px-2 py-1 text-[11px] outline-none focus:border-primary-500"
+                  className="w-full bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-[11.5px] outline-none focus:border-primary-500 transition-colors placeholder:text-[var(--text-tertiary)]"
                 />
               </div>
             )}
-            <div className="max-h-60 overflow-y-auto">
-              {options.filter(o => o.label.toLowerCase().includes(search.toLowerCase())).map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(opt.value);
-                    setOpen(false);
-                    setSearch('');
-                  }}
-                  className={cn(
-                    "w-full flex items-center justify-between text-left transition-colors cursor-pointer",
-                    size === 'sm' ? "px-2.5 py-1.5 text-[10.5px]" : "px-3 py-2 text-[12px]",
-                    value === opt.value
-                      ? "bg-primary-500/10 text-primary-600 dark:text-primary-400 font-medium"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
-                  )}
-                >
-                  <span className="truncate">{opt.label}</span>
-                  {value === opt.value && <Check className={size === 'sm' ? "w-3 h-3" : "w-3.5 h-3.5"} />}
-                </button>
-              ))}
-              {options.filter(o => o.label.toLowerCase().includes(search.toLowerCase())).length === 0 && (
-                <div className="px-3 py-2 text-center text-[11px] text-[var(--text-tertiary)]">No results</div>
+            <div className="max-h-[190px] overflow-y-auto overscroll-contain">
+              {options
+                .filter(o => {
+                  if (!search) return true;
+                  if (!o.value) return false;
+                  return o.label.toLowerCase().includes(search.toLowerCase()) || o.value.toLowerCase().includes(search.toLowerCase());
+                })
+                .map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                      setSearch('');
+                    }}
+                    className={cn(
+                      "w-full flex items-center justify-between text-left transition-colors cursor-pointer",
+                      size === 'sm' ? "px-2.5 py-1.5 text-[10.5px]" : "px-3 py-2 text-[12px]",
+                      value === opt.value
+                        ? "bg-primary-500/10 text-primary-600 dark:text-primary-400 font-medium"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                    )}
+                  >
+                    <span className="truncate">{opt.label}</span>
+                    {value === opt.value && <Check className={size === 'sm' ? "w-3 h-3" : "w-3.5 h-3.5"} />}
+                  </button>
+                ))}
+              {options.filter(o => !search ? true : (o.value && (o.label.toLowerCase().includes(search.toLowerCase()) || o.value.toLowerCase().includes(search.toLowerCase())))).length === 0 && (
+                <div className="px-3 py-2 text-center text-[11px] text-[var(--text-tertiary)]">No matching fields found</div>
               )}
             </div>
           </motion.div>

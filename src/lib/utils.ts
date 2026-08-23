@@ -20,8 +20,11 @@ export function expCSV(data: Record<string, any>[]): string {
     ...data.map((r) =>
       c
         .map((k) => {
-          const v = String(r[k] || '');
-          return v.includes(',') || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : '' + v;
+          const v = r[k] !== undefined && r[k] !== null ? String(r[k]) : '';
+          if (/^0\d+$/.test(v) && v.length > 1) {
+            return `="${v}"`;
+          }
+          return v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g, '""')}"` : v;
         })
         .join(',')
     ),

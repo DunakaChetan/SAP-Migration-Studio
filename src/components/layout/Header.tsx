@@ -26,7 +26,7 @@ export function Header() {
         </button>
         <div className="flex flex-col">
           <span className="text-[10px] font-mono font-semibold tracking-wider text-[var(--text-tertiary)] uppercase">
-            {state.projectName ? `${state.projectName} / ${currentStepLabel}` : `No Project / ${currentStepLabel}`}
+            {state.projectName ? `${state.projectName}${state.obj ? ` / ${state.obj}` : ''} / ${currentStepLabel}` : `No Project / ${currentStepLabel}`}
           </span>
           <span className="text-lg font-bold text-[var(--text-primary)] tracking-tight">
             {currentStepLabel}

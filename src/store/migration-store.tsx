@@ -70,6 +70,12 @@ export interface MigrationState {
   cleansingSummary: any;
   transformSummary: any;
   isTransformedSaved: boolean;
+  uploadedFilesMeta: { name: string; size: number; headersCount?: number }[];
+  fileSchemas: { filename: string; headers: string[] }[];
+  joinConfig: {
+    base_file: string;
+    joins: { join_file: string; base_key: string; join_key: string }[];
+  };
 }
 
 const defaultState: MigrationState = {
@@ -118,6 +124,9 @@ const defaultState: MigrationState = {
   cleansingSummary: null,
   transformSummary: null,
   isTransformedSaved: false,
+  uploadedFilesMeta: [],
+  fileSchemas: [],
+  joinConfig: { base_file: '', joins: [] },
 };
 
 const getInitialState = (): MigrationState => {

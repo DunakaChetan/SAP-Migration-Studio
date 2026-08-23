@@ -242,6 +242,88 @@ class ExtractAgent:
             if is_constant:
                 anomaly_badges.append("Constant")
 
+            # Collect detailed failing records / sample values for this field
+            failing_records = []
+
+            # Dynamically resolve primary key column from active mappings and database schema
+            primary_key_col = None
+            for m in mappings:
+                sap_val = str(m.get("sap", "")).upper().split(".")[-1]
+                if sap_val in ["KUNNR", "LIFNR", "MATNR", "PARTNER"] or m.get("key") or m.get("is_key"):
+                    primary_key_col = m.get("src")
+                    break
+            
+            def get_row_identifier(row_dict, row_idx):
+                # 1. First prioritize dynamically mapped schema primary key column
+                if primary_key_col:
+                    pk_str = str(primary_key_col)
+                    pk_short = pk_str.split(".")[-1]
+                    for k in [pk_str, pk_short]:
+                        if k in row_dict:
+                            val_str = str(row_dict[k]).strip()
+                            if val_str and val_str.lower() not in ['nan', 'none', 'null', '<null / empty>']:
+                                return str(k), val_str
+                    # Case-insensitive lookup
+                    for k, v in row_dict.items():
+                        if str(k).lower() == pk_str.lower() or str(k).lower() == pk_short.lower() or str(k).lower().endswith("." + pk_short.lower()):
+                            val_str = str(v).strip()
+                            if val_str and val_str.lower() not in ['nan', 'none', 'null', '<null / empty>']:
+                                return str(k), val_str
+
+                # 2. Fallback to first non-empty column in row
+                for k, v in row_dict.items():
+                    val_str = str(v).strip()
+                    if val_str and val_str.lower() not in ['nan', 'none', 'null', '<null / empty>'] and len(val_str) <= 25:
+                        return str(k), val_str
+                return "Row", f"#{row_idx + 1}"
+
+            for idx, raw_val in enumerate(series):
+                row_dict = df.iloc[idx].to_dict()
+                key_field_name, key_field_val = get_row_identifier(row_dict, idx)
+                row_rec_id = f"{key_field_name}: {key_field_val}" if key_field_name != "Row" else key_field_val
+                val_str = "" if pd.isna(raw_val) else str(raw_val)
+                val_clean = val_str.strip()
+                
+                if val_clean == "" and is_mandatory:
+                    failing_records.append({
+                        "row_index": idx + 1,
+                        "key_field": key_field_name,
+                        "key_value": key_field_val,
+                        "record_id": row_rec_id,
+                        "field": col,
+                        "value": "<NULL / EMPTY>",
+                        "issue": f"Missing Mandatory Field [{col}] (Required in S/4HANA)",
+                        "issue_type": "MISSING_MANDATORY",
+                        "severity": "CRITICAL",
+                        "remediation": "Provide default value or enrich source record"
+                    })
+                elif val_str != val_clean:
+                    failing_records.append({
+                        "row_index": idx + 1,
+                        "key_field": key_field_name,
+                        "key_value": key_field_val,
+                        "record_id": row_rec_id,
+                        "field": col,
+                        "value": f"'{val_str}'",
+                        "issue": f"Untrimmed whitespace on [{col}] (Contains leading/trailing space)",
+                        "issue_type": "WHITESPACE",
+                        "severity": "WARNING",
+                        "remediation": "Auto-corrected via TRIM transform in Harmonize step"
+                    })
+                elif len(val_str) > 40:
+                    failing_records.append({
+                        "row_index": idx + 1,
+                        "key_field": key_field_name,
+                        "key_value": key_field_val,
+                        "record_id": row_rec_id,
+                        "field": col,
+                        "value": val_str,
+                        "issue": f"Length exceeded on [{col}] ({len(val_str)} chars > 40 max allowed)",
+                        "issue_type": "LENGTH_OVERFLOW",
+                        "severity": "WARNING",
+                        "remediation": "Review field mapping or apply substring truncation"
+                    })
+
             eda_stats.append({
                 "field": col,
                 "is_mandatory": is_mandatory,
@@ -259,7 +341,8 @@ class ExtractAgent:
                 "anomalies": anomaly_badges,
                 "is_constant": is_constant,
                 "is_mixed_type": is_mixed_type,
-                "status": status
+                "status": status,
+                "failing_records": failing_records
             })
 
             # Rules

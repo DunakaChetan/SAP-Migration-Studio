@@ -229,6 +229,110 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process file: {str(e)}")
 
+@router.post("/upload-preview")
+async def upload_preview(files: List[UploadFile] = File(...)):
+    try:
+        results = []
+        for file in files:
+            contents = await file.read()
+            if file.filename.endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(contents), nrows=5)
+            elif file.filename.endswith(('.xls', '.xlsx')):
+                df = pd.read_excel(io.BytesIO(contents), nrows=5)
+            else:
+                continue
+                
+            # Replace NaN with empty string
+            df = df.fillna("")
+            
+            if not df.empty and len(df) > 0:
+                first_row_vals = [str(v).strip() for v in df.iloc[0].values]
+                col_bases = [str(col).split('.')[0] for col in df.columns]
+                if len(col_bases) != len(set(col_bases)) and len(set(first_row_vals)) == len(first_row_vals):
+                    df.columns = first_row_vals
+                    
+            results.append({
+                "filename": file.filename,
+                "headers": list(df.columns)
+            })
+            
+        return {"status": "success", "files": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process files: {str(e)}")
+
+@router.post("/upload-merge")
+async def upload_merge(
+    join_config: str = Form(...),
+    files: List[UploadFile] = File(...)
+):
+    try:
+        config = json.loads(join_config)
+        base_filename = config.get("base_file")
+        joins = config.get("joins", []) # [{"join_file": "B.csv", "base_key": "ID", "join_key": "FK"}]
+        
+        dfs = {}
+        for file in files:
+            contents = await file.read()
+            if file.filename.endswith('.csv'):
+                df = pd.read_csv(io.BytesIO(contents))
+            elif file.filename.endswith(('.xls', '.xlsx')):
+                df = pd.read_excel(io.BytesIO(contents))
+            else:
+                continue
+                
+            if not df.empty and len(df) > 0:
+                first_row_vals = [str(v).strip() for v in df.iloc[0].values]
+                col_bases = [str(col).split('.')[0] for col in df.columns]
+                if len(col_bases) != len(set(col_bases)) and len(set(first_row_vals)) == len(first_row_vals):
+                    df.columns = first_row_vals
+                    df = df.iloc[1:].reset_index(drop=True)
+            
+            # Stringify all columns to avoid type mismatch during merge
+            df = df.astype(str)
+            dfs[file.filename] = df
+
+        if base_filename not in dfs:
+            raise ValueError(f"Base file {base_filename} not found in uploaded files.")
+            
+        merged_df = dfs[base_filename].fillna("")
+        
+        for join in joins:
+            join_file = join.get("join_file")
+            base_key = join.get("base_key")
+            join_key = join.get("join_key")
+            
+            if join_file in dfs:
+                join_df = dfs[join_file].fillna("")
+                file_tag = join_file.split(".")[0]
+                
+                # Suffix overlapping columns to avoid errors and preserve data
+                merged_df = pd.merge(
+                    merged_df, 
+                    join_df, 
+                    left_on=base_key, 
+                    right_on=join_key, 
+                    how='left',
+                    suffixes=('', f'_{file_tag}')
+                )
+
+                # Remove redundant foreign key column so only the primary key is kept for mapping
+                if join_key and join_key != base_key and join_key in merged_df.columns:
+                    merged_df.drop(columns=[join_key], inplace=True)
+                
+                # If foreign key had the same name and was suffixed, drop the redundant suffixed column
+                suffixed_fk = f"{join_key}_{file_tag}"
+                if suffixed_fk in merged_df.columns:
+                    merged_df.drop(columns=[suffixed_fk], inplace=True)
+                
+        merged_df = merged_df.fillna("").replace(["nan", "None", "<NA>"], "")
+        headers = list(merged_df.columns)
+        data = merged_df.to_dict(orient="records")
+        
+        return {"status": "success", "headers": headers, "data": data}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)}")
+
 class ExecuteFileRequest(BaseModel):
     target_object: str
     mappings: list
@@ -239,7 +343,7 @@ def execute_file_extraction(req: ExecuteFileRequest):
     try:
         agent = ExtractAgent()
         
-        raw_data = req.raw_data
+        raw_data = req.raw_data or []
         mapping_src_fields = set(
             str(m.get('src', '')).split('.')[-1].lower() 
             for m in req.mappings if m.get('src')
@@ -253,27 +357,37 @@ def execute_file_extraction(req: ExecuteFileRequest):
             if len(first_row_vals.intersection(mapping_src_fields)) >= 2:
                 raw_data = raw_data[1:]
 
-        # Manually apply transformations (similar to extract_agent.perform_extraction)
+        def extract_cell_val(row_dict, src_key):
+            if not row_dict or not src_key:
+                return ""
+            if src_key in row_dict and row_dict[src_key] is not None:
+                return str(row_dict[src_key])
+            
+            src_short = src_key.split(".")[-1]
+            if src_short in row_dict and row_dict[src_short] is not None:
+                return str(row_dict[src_short])
+            
+            src_lower = src_key.lower()
+            src_short_lower = src_short.lower()
+            for k, v in row_dict.items():
+                k_lower = str(k).lower()
+                k_short = k_lower.split(".")[-1]
+                if k_lower == src_lower or k_short == src_short_lower or k_lower.endswith("." + src_short_lower):
+                    if v is not None:
+                        return str(v)
+            return ""
+
+        # Manually apply transformations
         harmonized_results = []
         for row in raw_data:
-            harmonized_row = {}
+            harmonized_row = dict(row)
             for m in req.mappings:
                 src_full = m.get('src')
                 if not src_full:
                     continue
                 
-                sap_key = m.get('sap')
                 transform = m.get('tr', 'none')
-                
-                raw_val = row.get(src_full, "")
-                if not raw_val and "." in src_full:
-                    base_name = src_full.split(".")[-1]
-                    raw_val = row.get(base_name, "")
-
-                if isinstance(raw_val, dict) or raw_val is None:
-                    raw_val = ""
-                else:
-                    raw_val = str(raw_val)
+                raw_val = extract_cell_val(row, src_full)
 
                 if transform == 'trim':
                     val = raw_val.strip()
@@ -287,6 +401,9 @@ def execute_file_extraction(req: ExecuteFileRequest):
                     val = raw_val
                 
                 harmonized_row[src_full] = val
+                src_short = src_full.split(".")[-1]
+                if src_short != src_full:
+                    harmonized_row[src_short] = val
                 
             harmonized_results.append(harmonized_row)
         

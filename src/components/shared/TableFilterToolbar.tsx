@@ -1,23 +1,28 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Search, ChevronDown, ChevronUp, Check, X, Layers, CheckCheck, Hash, Plus, CornerDownLeft } from 'lucide-react';
 
-/* ─── Key Column Detection ─── */
-const KEY_PATTERNS = [
-  'KUNNR', 'LIFNR', 'MATNR', 'PARTNER', 'CUSTOMER_NUMBER', 'VENDOR_NUMBER',
-  'MATERIAL_NUMBER', 'ACCOUNT', 'PARTY_NUMBER', 'BP_NUMBER', 'BUSINESS_PARTNER',
-  'ID', 'CODE', 'NUMBER', 'NAME', 'NAME1', 'CITY', 'COUNTRY', 'LAND1'
+/* ─── Main Primary Key Column Detection ─── */
+const MAIN_KEY_PATTERNS = [
+  'KUNNR', 'LIFNR', 'MATNR', 'CUSTOMER_NUMBER', 'VENDOR_NUMBER',
+  'MATERIAL_NUMBER', 'PARTY_NUMBER', 'BP_NUMBER', 'BUSINESS_PARTNER',
+  'CUSTOMER_ID', 'VENDOR_ID', 'MATERIAL_ID', 'PARTY_ID', 'ACCOUNT_ID',
+  'CUSTOMERNO', 'CUST_ID', 'CUST_NO'
 ];
 
 export function isKeyColumn(colName: string): boolean {
+  if (!colName) return false;
   const upper = colName.toUpperCase().replace(/[.\s]/g, '_');
-  if (KEY_PATTERNS.some(k => upper.includes(k))) return true;
-  if (upper.endsWith('_ID') || upper.endsWith('_NUM') || upper.endsWith('_NO') || upper.endsWith('_CODE')) return true;
+  const shortUpper = upper.split('_').pop() || upper;
+
+  if (MAIN_KEY_PATTERNS.some(k => upper === k || upper.endsWith(`_${k}`) || shortUpper === k)) return true;
+  if (upper === 'ID' || shortUpper === 'ID' || upper === 'KUNNR' || upper === 'LIFNR' || upper === 'MATNR') return true;
+  if (upper.endsWith('_ID') && !['COUNTRY_ID', 'STATE_ID', 'TAX_ID', 'LANGUAGE_ID', 'BANK_ID', 'REGION_ID'].some(ign => upper.includes(ign))) return true;
   return false;
 }
 
 export function detectKeyColumns(columns: string[]): string[] {
   const detected = columns.filter(isKeyColumn);
-  return detected.length > 0 ? detected : columns.slice(0, 4);
+  return detected.length > 0 ? detected : (columns.length > 0 ? [columns[0]] : []);
 }
 
 /* ─── Types ─── */

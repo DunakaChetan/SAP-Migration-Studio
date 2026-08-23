@@ -9,7 +9,7 @@ import {
   Card, CardHeader, CardBody, Button, InfoBox, Badge, DataTable,
   PageLayout, PageGrid, GridCol, PageHeader, Divider, SidebarItem, Select, ConfirmModal
 } from '@/components/shared';
-import { Zap, ArrowRight, Link2, Database, LayoutTemplate, FileSpreadsheet, Layers, Cloud, HardDrive, Users, Building2, Package, Cable, Settings2, Download, FolderGit2, Plus, Edit3, Save, Trash2 } from 'lucide-react';
+import { Zap, ArrowRight, Link2, Database, LayoutTemplate, FileSpreadsheet, Layers, Cloud, HardDrive, Users, Building2, Package, Cable, Settings2, Download, FolderGit2, Plus, Edit3, Save, Trash2, X, GitMerge, FileText, CheckCircle2 } from 'lucide-react';
 
 const objIcons = {
   users: <Users className="w-4 h-4 text-blue-500" />,
@@ -48,9 +48,17 @@ export function Step1SourceData() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Connection State
+  const updateField = (field: any, value: any) => dispatch({ type: 'SET_FIELD', field, value });
   const [isTestingConn, setIsTestingConn] = useState(false);
   const [isFetchingSample, setIsFetchingSample] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+  const [fileSchemas, setFileSchemas] = useState<{ filename: string; headers: string[] }[]>(() => state.fileSchemas || []);
+  const [joinConfig, setJoinConfig] = useState<{
+    base_file: string;
+    joins: { join_file: string; base_key: string; join_key: string }[];
+  }>(() => state.joinConfig?.base_file ? state.joinConfig : { base_file: '', joins: [] });
+  const [isMerging, setIsMerging] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -92,14 +100,123 @@ export function Step1SourceData() {
       toast(err.message, 'err');
     } finally {
       setIsFetchingSample(false);
-      // hideLoad();
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const fetchFileSchemas = async (files: File[]) => {
+    if (files.length === 0) {
+      setFileSchemas([]);
+      setJoinConfig({ base_file: '', joins: [] });
+      return;
+    }
 
+    setIsUploading(true);
+    const formData = new FormData();
+    files.forEach(f => formData.append('files', f));
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload-preview`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) throw new Error('Failed to preview file schemas');
+      const data = await res.json();
+      const schemas: { filename: string; headers: string[] }[] = data.files || [];
+      setFileSchemas(schemas);
+
+      // Setup default join config
+      const defaultBase = schemas[0]?.filename || '';
+      const defaultJoins = schemas.slice(1).map(s => {
+        const baseSchema = schemas[0];
+        let matchedBaseKey = '';
+        let matchedJoinKey = '';
+        if (baseSchema) {
+          for (const jh of s.headers) {
+            for (const bh of baseSchema.headers) {
+              const jClean = jh.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const bClean = bh.toLowerCase().replace(/[^a-z0-9]/g, '');
+              if (jClean === bClean || (jClean.includes('id') && bClean.includes('id'))) {
+                matchedJoinKey = jh;
+                matchedBaseKey = bh;
+                break;
+              }
+            }
+            if (matchedJoinKey) break;
+          }
+        }
+
+        return {
+          join_file: s.filename,
+          base_key: matchedBaseKey || (baseSchema?.headers[0] || ''),
+          join_key: matchedJoinKey || (s.headers[0] || '')
+        };
+      });
+
+      const nextConfig = {
+        base_file: schemas.some(s => s.filename === displayedJoinConfig.base_file) ? displayedJoinConfig.base_file : defaultBase,
+        joins: defaultJoins
+      };
+
+      setJoinConfig(nextConfig);
+      dispatch({
+        type: 'BATCH_UPDATE',
+        updates: {
+          fileSchemas: schemas,
+          uploadedFilesMeta: files.map(f => ({ name: f.name, size: f.size })),
+          joinConfig: nextConfig
+        }
+      });
+    } catch (err: any) {
+      toast(err.message || 'Error loading file schemas', 'err');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFilesAdded = async (newFileList: FileList | File[] | null) => {
+    if (!newFileList) return;
+    const newFiles = Array.from(newFileList);
+    if (newFiles.length === 0) return;
+
+    // Combine avoiding exact same filename
+    const existingNames = new Set(displayedFiles.map(f => f.name));
+    const combined = [...stagedFiles, ...newFiles.filter(f => !existingNames.has(f.name))];
+    setStagedFiles(combined);
+    await fetchFileSchemas(combined);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleRemoveStagedFile = async (fileName: string) => {
+    const updated = stagedFiles.filter(f => f.name !== fileName);
+    setStagedFiles(updated);
+    if (updated.length === 0) {
+      handleClearStagedFiles();
+    } else {
+      await fetchFileSchemas(updated);
+    }
+  };
+
+  const handleClearStagedFiles = () => {
+    setStagedFiles([]);
+    setFileSchemas([]);
+    setJoinConfig({ base_file: '', joins: [] });
+    dispatch({
+      type: 'BATCH_UPDATE',
+      updates: {
+        uploadedFilesMeta: [],
+        fileSchemas: [],
+        joinConfig: { base_file: '', joins: [] },
+        headers: [],
+        uploadedData: [],
+        rawData: []
+      }
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleLoadSingleStagedFile = async () => {
+    if (displayedFiles.length === 0) return;
+    const file = stagedFiles[0];
     setIsUploading(true);
     showLoad('Uploading File...', `Parsing ${file.name}`, ['Reading columns...']);
 
@@ -118,15 +235,71 @@ export function Step1SourceData() {
       }
 
       const data = await res.json();
-      dispatch({ type: 'SET_FIELD', field: 'headers', value: data.headers });
-      dispatch({ type: 'SET_FIELD', field: 'uploadedData', value: data.data });
-      toast(`Successfully loaded ${data.headers.length} columns and ${data.data.length} rows!`, 'ok');
+      dispatch({
+        type: 'BATCH_UPDATE',
+        updates: {
+          headers: data.headers,
+          uploadedData: data.data,
+          rawData: data.data,
+          uploadedFilesMeta: displayedFiles.map(f => ({ name: f.name, size: f.size })),
+          fileSchemas: fileSchemas,
+          joinConfig: joinConfig
+        }
+      });
+      toast(`Successfully loaded ${data.headers.length} columns and ${data.data.length} rows from ${file.name}!`, 'ok');
     } catch (err: any) {
       toast(err.message, 'err');
     } finally {
       setIsUploading(false);
       hideLoad();
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleMergeAndLoadFiles = async () => {
+    if (displayedFiles.length < 2) return;
+    if (!displayedJoinConfig.base_file) {
+      toast('Please select a Primary / Base Table', 'err');
+      return;
+    }
+    const missingJoin = displayedJoinConfig.joins.find(j => !j.base_key || !j.join_key);
+    if (missingJoin) {
+      toast(`Please select join keys for ${missingJoin.join_file}`, 'err');
+      return;
+    }
+
+    setIsMerging(true);
+    showLoad('Merging Datasets...', `Joining ${displayedFiles.length} files on selected keys`, ['Aligning relational records...']);
+
+    const formData = new FormData();
+    stagedFiles.forEach(f => formData.append('files', f));
+    formData.append('join_config', JSON.stringify(joinConfig));
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload-merge`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Failed to merge files');
+      }
+
+      const data = await res.json();
+      dispatch({
+        type: 'BATCH_UPDATE',
+        updates: {
+          headers: data.headers,
+          uploadedData: data.data,
+          rawData: data.data
+        }
+      });
+      toast(`Successfully joined ${displayedFiles.length} files! Loaded ${data.headers.length} columns and ${data.data.length} rows.`, 'ok');
+    } catch (err: any) {
+      toast(err.message, 'err');
+    } finally {
+      setIsMerging(false);
+      hideLoad();
     }
   };
 
@@ -322,7 +495,7 @@ export function Step1SourceData() {
       type: 'BATCH_UPDATE',
       updates: {
         rawData: data,
-        headers: Object.keys(data[0]),
+        headers: Object.keys(data[0] || {}),
       },
     });
 
@@ -333,13 +506,14 @@ export function Step1SourceData() {
     }
   };
 
-  const updateField = (field: string, value: string) => {
-    dispatch({ type: 'SET_FIELD', field: field as keyof typeof state, value });
-  };
+  const has = state.rawData.length > 0 || state.uploadedData.length > 0;
+  const displayedFiles = stagedFiles.length > 0 
+    ? stagedFiles.map(f => ({ name: f.name, size: f.size })) 
+    : (state.uploadedFilesMeta || []);
+  const displayedSchemas = fileSchemas.length > 0 ? fileSchemas : (state.fileSchemas || []);
+  const displayedJoinConfig = joinConfig.base_file ? joinConfig : (state.joinConfig || { base_file: '', joins: [] });
 
-  const has = state.rawData.length > 0;
-
-  const nextDisabled = !state.src || !state.obj || !state.projectId || (state.src === 'SAP_ECC' && (!state.connUrl || !state.connUser || !state.connPass || state.rawData.length === 0));
+  const nextDisabled = !state.src || !state.obj || !state.projectId || (state.src === 'SAP_ECC' && (!state.connUrl || !state.connUser || !state.connPass || (state.rawData.length === 0 && state.uploadedData.length === 0)));
 
   return (
     <PageLayout>
@@ -362,8 +536,6 @@ export function Step1SourceData() {
               ))}
             </CardBody>
           </Card>
-
-          {/* Removed SAP Target Object card */}
         </GridCol>
 
         {/* Middle Column */}
@@ -433,22 +605,262 @@ export function Step1SourceData() {
                 )}
 
                 {(state.src === 'EXCEL_CSV') && (
-                  <div className="border-2 border-dashed border-[var(--border)] rounded-lg p-6 flex flex-col items-center justify-center text-center bg-[var(--bg-tertiary)]/50">
-                    <Cloud className="w-8 h-8 text-[var(--text-tertiary)] mb-2" />
-                    <p className="text-[12px] text-[var(--text-secondary)] font-medium">Drag and drop file here</p>
-                    <p className="text-[11px] text-[var(--text-tertiary)] mb-3">or click to browse (.xlsx, .csv)</p>
+                  <div className="space-y-4">
+                    {/* Hidden Multi-file input */}
                     <input
                       type="file"
                       accept=".csv, .xlsx, .xls"
                       className="hidden"
                       ref={fileInputRef}
-                      onChange={handleFileUpload}
+                      onChange={e => handleFilesAdded(e.target.files)}
+                      multiple
                     />
-                    <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-                      {isUploading ? 'Uploading...' : 'Choose File'}
-                    </Button>
+
+                    {/* Staged files list / Upload area */}
+                    {displayedFiles.length === 0 ? (
+                      <div
+                        className="border-2 border-dashed border-[var(--border)] rounded-xl p-6 flex flex-col items-center justify-center text-center bg-[var(--bg-tertiary)]/50 hover:bg-[var(--bg-tertiary)] hover:border-emerald-500/50 transition-all cursor-pointer group"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 mb-3 group-hover:scale-110 transition-transform">
+                          <Cloud className="w-6 h-6" />
+                        </div>
+                        <p className="text-[13px] text-[var(--text-primary)] font-semibold mb-1">
+                          Upload Source Data Files
+                        </p>
+                        <p className="text-[11.5px] text-[var(--text-tertiary)] mb-3 max-w-[260px]">
+                          Select single or multiple (.csv, .xlsx) files to join relational tables
+                        </p>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fileInputRef.current?.click();
+                          }}
+                          disabled={isUploading}
+                        >
+                          {isUploading ? 'Inspecting...' : 'Choose File(s)'}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {/* File list header */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[12px] font-semibold text-[var(--text-primary)] uppercase tracking-wider font-mono">
+                              Selected Files ({displayedFiles.length})
+                            </span>
+                            <Badge variant="neutral">{displayedFiles.length > 1 ? 'Multi-Table Join' : 'Single Table'}</Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={isUploading}
+                              icon={<Plus className="w-3.5 h-3.5 text-emerald-500" />}
+                            >
+                              Add File
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={handleClearStagedFiles}
+                              className="text-red-500 hover:text-red-600"
+                            >
+                              Reset
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* List of files with delete (X) mark */}
+                        <div className="grid grid-cols-1 gap-2">
+                          {displayedFiles.map((file, idx) => {
+                            const schema = displayedSchemas.find(s => s.filename === file.name);
+                            return (
+                              <div
+                                key={file.name + idx}
+                                className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/70 hover:border-emerald-500/40 transition-colors"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0">
+                                    <FileText className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-[13px] font-medium text-[var(--text-primary)] truncate">
+                                      {file.name}
+                                    </p>
+                                    <p className="text-[10.5px] text-[var(--text-tertiary)]">
+                                      {(file.size / 1024).toFixed(1)} KB
+                                      {schema && (
+                                        <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-mono">
+                                          • {schema.headers.length} columns
+                                        </span>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveStagedFile(file.name)}
+                                  className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                                  title="Remove file"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Single file load action */}
+                        {displayedFiles.length === 1 && (
+                          <Button
+                            variant="primary"
+                            className="w-full justify-center mt-2"
+                            onClick={handleLoadSingleStagedFile}
+                            disabled={isUploading}
+                            icon={<CheckCircle2 className="w-4 h-4" />}
+                          >
+                            {isUploading ? 'Loading...' : `Load ${displayedFiles[0].name}`}
+                          </Button>
+                        )}
+
+                        {/* Multi-file Relational Key Join Configuration */}
+                        {displayedFiles.length >= 2 && (
+                          <div className="mt-4 pt-3 border-t border-[var(--border)] space-y-3.5">
+                            <div className="flex items-center gap-2">
+                              <GitMerge className="w-4 h-4 text-emerald-500" />
+                              <h4 className="text-[12.5px] font-semibold text-[var(--text-primary)]">
+                                Key Join Configuration (Data Modeling)
+                              </h4>
+                            </div>
+
+                            {/* Base Table Selector */}
+                            <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/40 space-y-1.5">
+                              <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] block">
+                                Primary / Base Table (Master Table)
+                              </label>
+                              <Select
+                                value={displayedJoinConfig.base_file}
+                                searchable
+                                onChange={(val) => {
+                                  const newBaseJoins = displayedFiles.filter(f => f.name !== val).map(f => {
+                                    const baseS = displayedSchemas.find(s => s.filename === val);
+                                    const joinS = displayedSchemas.find(s => s.filename === f.name);
+                                    return {
+                                      join_file: f.name,
+                                      base_key: baseS?.headers[0] || '',
+                                      join_key: joinS?.headers[0] || ''
+                                    };
+                                  });
+                                  const newCfg = {
+                                    base_file: val,
+                                    joins: newBaseJoins
+                                  };
+                                  setJoinConfig(newCfg);
+                                  dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+                                }}
+                                options={displayedFiles.map(f => ({ value: f.name, label: f.name }))}
+                              />
+                            </div>
+
+                            {/* Joins for each secondary file */}
+                            {displayedJoinConfig.base_file && displayedJoinConfig.joins.map((join, idx) => {
+                              const baseSchema = displayedSchemas.find(s => s.filename === displayedJoinConfig.base_file);
+                              const joinSchema = displayedSchemas.find(s => s.filename === join.join_file);
+
+                              return (
+                                <div
+                                  key={join.join_file + idx}
+                                  className="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/40 space-y-2.5"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <Layers className="w-3.5 h-3.5 text-emerald-500" />
+                                      <span className="text-[12px] font-semibold text-[var(--text-primary)]">
+                                        Join: {join.join_file}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] font-mono text-[var(--text-tertiary)]">LEFT JOIN</span>
+                                  </div>
+
+                                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
+                                    <div>
+                                      <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
+                                        {displayedJoinConfig.base_file} Primary Key
+                                      </label>
+                                      <Select
+                                        value={join.base_key}
+                                        searchable
+                                        onChange={(v) => {
+                                          const newJoins = [...displayedJoinConfig.joins];
+                                          newJoins[idx].base_key = v;
+                                          const newCfg = { ...displayedJoinConfig, joins: newJoins };
+                                          setJoinConfig(newCfg);
+                                          dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+                                        }}
+                                        options={[
+                                          { value: '', label: 'Select Primary Key...' },
+                                          ...(baseSchema?.headers.map(h => ({ value: h, label: h })) || [])
+                                        ]}
+                                      />
+                                    </div>
+
+                                    <div className="flex flex-col items-center justify-center pt-4">
+                                      <ArrowRight className="w-4 h-4 text-emerald-500" />
+                                    </div>
+
+                                    <div>
+                                      <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
+                                        {join.join_file} Foreign Key
+                                      </label>
+                                      <Select
+                                        value={join.join_key}
+                                        searchable
+                                        onChange={(v) => {
+                                          const newJoins = [...displayedJoinConfig.joins];
+                                          newJoins[idx].join_key = v;
+                                          const newCfg = { ...displayedJoinConfig, joins: newJoins };
+                                          setJoinConfig(newCfg);
+                                          dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+                                        }}
+                                        options={[
+                                          { value: '', label: 'Select Foreign Key...' },
+                                          ...(joinSchema?.headers.map(h => ({ value: h, label: h })) || [])
+                                        ]}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            <Button
+                              variant="primary"
+                              className="w-full justify-center mt-2"
+                              onClick={handleMergeAndLoadFiles}
+                              disabled={isMerging || isUploading || !displayedJoinConfig.base_file || displayedJoinConfig.joins.some(j => !j.base_key || !j.join_key)}
+                              icon={<GitMerge className="w-4 h-4" />}
+                            >
+                              {isMerging ? 'Merging Tables...' : `Merge & Load ${displayedFiles.length} Tables`}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Loaded state notification banner */}
                     {state.headers.length > 0 && (
-                      <p className="text-[11px] text-emerald-500 mt-2 font-medium">✓ File uploaded ({state.headers.length} columns loaded)</p>
+                      <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[12px] font-medium">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          <span>
+                            Loaded {(state.rawData?.length || state.uploadedData?.length || 0)} records ({state.headers.length} columns ready)
+                          </span>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
