@@ -491,7 +491,7 @@ export function Step6Cleanse() {
 
   const downloadWarnings = () => {
     if (!warningList.length) return;
-    
+
     // Map of row index to warning issues
     const warningMap = new Map<number, string[]>();
     warningList.forEach(w => {
@@ -517,10 +517,10 @@ export function Step6Cleanse() {
 
   const applyManualFixes = () => {
     if (!summary) return;
-    
+
     let newCleanedRows = [...cleanedRows];
     let manualFixesList = summary.manual_fixes?.items ? [...summary.manual_fixes.items] : [];
-    
+
     const fixesApplied = Object.entries(manualFixValues).filter(([_, val]) => val.trim() !== "");
     if (fixesApplied.length === 0) {
       setShowFixModal(false);
@@ -537,7 +537,7 @@ export function Step6Cleanse() {
 
       const oldVal = newCleanedRows[rowIndex][field] || "";
       newCleanedRows[rowIndex] = { ...newCleanedRows[rowIndex], [field]: fixValue };
-      
+
       const logKey = `${rowIndex}_${field}`;
       if (!loggedFixes.has(logKey)) {
         manualFixesList.push({
@@ -660,7 +660,7 @@ export function Step6Cleanse() {
     showLoad('Saving rules...', 'Compiling and saving dynamic rules to database');
     try {
       const activeDynamicRules = cleanserDynamicRules.filter(r => r.enabled);
-      
+
       const payloadRules = activeDynamicRules.map(r => ({
         id: r.id,
         prompt: r.prompt,
@@ -674,7 +674,7 @@ export function Step6Cleanse() {
         body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules, source: 'cleanse' })
       });
       const resJson = await res2.json().catch(() => (null));
-      
+
       if (!res2.ok) {
         let msg = 'Failed to save rules';
         try {
@@ -682,7 +682,7 @@ export function Step6Cleanse() {
         } catch (e) { }
         throw new Error(msg);
       }
-      
+
       hideLoad();
       toast('Dynamic cleansing rules saved to project', 'ok');
     } catch (err: any) {
@@ -799,11 +799,10 @@ export function Step6Cleanse() {
               <button
                 onClick={() => setActiveRuleTab('standard')}
                 title={`Standard Rules (${stdActiveCount}/${standardRules.length} active)`}
-                className={`py-1.5 px-1 rounded-md text-[10.5px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer min-w-0 ${
-                  activeRuleTab === 'standard'
-                    ? 'bg-[var(--bg-primary)] text-violet-600 dark:text-violet-400 shadow-sm border border-[var(--border)]'
-                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
-                }`}
+                className={`py-1.5 px-1 rounded-md text-[10.5px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer min-w-0 ${activeRuleTab === 'standard'
+                  ? 'bg-[var(--bg-primary)] text-violet-600 dark:text-violet-400 shadow-sm border border-[var(--border)]'
+                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                  }`}
               >
                 <Sliders className="w-3 h-3 shrink-0" />
                 <span className="truncate">Standard</span>
@@ -815,11 +814,10 @@ export function Step6Cleanse() {
               <button
                 onClick={() => setActiveRuleTab('validation')}
                 title={`Validation Rules (${valActiveCount}/${validationRules.length} active)`}
-                className={`py-1.5 px-1 rounded-md text-[10.5px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer min-w-0 ${
-                  activeRuleTab === 'validation'
-                    ? 'bg-[var(--bg-primary)] text-teal-600 dark:text-teal-400 shadow-sm border border-[var(--border)]'
-                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
-                }`}
+                className={`py-1.5 px-1 rounded-md text-[10.5px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer min-w-0 ${activeRuleTab === 'validation'
+                  ? 'bg-[var(--bg-primary)] text-teal-600 dark:text-teal-400 shadow-sm border border-[var(--border)]'
+                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                  }`}
               >
                 <ListFilter className="w-3 h-3 shrink-0" />
                 <span className="truncate">Validation</span>
@@ -831,11 +829,10 @@ export function Step6Cleanse() {
               <button
                 onClick={() => setActiveRuleTab('dynamic')}
                 title={`Dynamic AI Rules (${dynActiveCount}/${cleanserDynamicRules.length} active)`}
-                className={`py-1.5 px-1 rounded-md text-[10.5px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer min-w-0 ${
-                  activeRuleTab === 'dynamic'
-                    ? 'bg-[var(--bg-primary)] text-violet-600 dark:text-violet-400 shadow-sm border border-[var(--border)]'
-                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
-                }`}
+                className={`py-1.5 px-1 rounded-md text-[10.5px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer min-w-0 ${activeRuleTab === 'dynamic'
+                  ? 'bg-[var(--bg-primary)] text-violet-600 dark:text-violet-400 shadow-sm border border-[var(--border)]'
+                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                  }`}
               >
                 <Sparkles className="w-3 h-3 text-violet-500 shrink-0" />
                 <span className="truncate">Dynamic</span>
@@ -866,13 +863,12 @@ export function Step6Cleanse() {
                     return (
                       <div
                         key={rule.code}
-                        className={`p-2.5 rounded-xl border transition-all ${
-                          rule.overridden
-                            ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-75'
-                            : rule.enabled
+                        className={`p-2.5 rounded-xl border transition-all ${rule.overridden
+                          ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-75'
+                          : rule.enabled
                             ? 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
                             : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
-                        }`}
+                          }`}
                       >
                         {isEditing ? (
                           <div className="space-y-1.5">
@@ -920,13 +916,12 @@ export function Step6Cleanse() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className={`text-[11px] font-bold truncate ${
-                                    rule.overridden
-                                      ? 'text-amber-700 dark:text-amber-300 line-through'
-                                      : rule.enabled
+                                  <span className={`text-[11px] font-bold truncate ${rule.overridden
+                                    ? 'text-amber-700 dark:text-amber-300 line-through'
+                                    : rule.enabled
                                       ? 'text-emerald-600 dark:text-emerald-400'
                                       : 'text-[var(--text-tertiary)] line-through'
-                                  }`}>
+                                    }`}>
                                     {rule.name}
                                   </span>
                                   {rule.overridden && (
@@ -987,11 +982,10 @@ export function Step6Cleanse() {
                     filteredValidationRules.map((rule) => (
                       <div
                         key={rule.rule_code}
-                        className={`p-2.5 rounded-xl border transition-all ${
-                          rule.enabled
-                            ? 'border-teal-200 dark:border-teal-900/50 bg-teal-50/20 dark:bg-teal-950/10'
-                            : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
-                        }`}
+                        className={`p-2.5 rounded-xl border transition-all ${rule.enabled
+                          ? 'border-teal-200 dark:border-teal-900/50 bg-teal-50/20 dark:bg-teal-950/10'
+                          : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
+                          }`}
                       >
                         <div className="flex items-start gap-2">
                           <input
@@ -1055,11 +1049,10 @@ export function Step6Cleanse() {
                       return (
                         <div
                           key={rule.id}
-                          className={`p-2.5 rounded-xl border transition-all ${
-                            rule.enabled
-                              ? 'border-violet-200 dark:border-violet-900/50 bg-violet-50/20 dark:bg-violet-950/10'
-                              : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
-                          }`}
+                          className={`p-2.5 rounded-xl border transition-all ${rule.enabled
+                            ? 'border-violet-200 dark:border-violet-900/50 bg-violet-50/20 dark:bg-violet-950/10'
+                            : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
+                            }`}
                         >
                           {isEditing ? (
                             <div className="space-y-1.5">
@@ -1484,366 +1477,515 @@ export function Step6Cleanse() {
         {/* Interactive Audit Log Card */}
         {summary && (
           <Card>
-              <CardHeader
-                title="Cleansing Audit Log & Change Trail"
-                subtitle={`${allAuditItems.length} cell-level transformation events logged`}
-                icon={<FileText className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
-              >
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={<Download className="w-3 h-3" />}
-                    onClick={() => dl(exportAuditLogCSV(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_audit_log.csv', 'text/csv')}
-                  >
-                    Export Audit CSV
-                  </Button>
-                  <button
-                    onClick={() => setOpenAuditAccordion(!openAuditAccordion)}
-                    className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] hover:bg-[var(--border)] text-[11px] font-bold text-violet-600 dark:text-violet-400 flex items-center gap-1.5 cursor-pointer transition-colors border border-[var(--border)]"
-                  >
-                    {openAuditAccordion ? (
-                      <>▼ Hide Complete Audit Trail</>
-                    ) : (
-                      <>▶ View Complete Audit Trail ({allAuditItems.length} log entries)</>
-                    )}
-                  </button>
-                </div>
-              </CardHeader>
-
-              {openAuditAccordion && (
-                <CardBody className="space-y-3 pt-2">
-                  {/* Search & Phase Filter Bar */}
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-2 p-2 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)]">
-                    <div className="relative flex-1 w-full">
-                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                      <input
-                        type="text"
-                        value={auditSearch}
-                        onChange={(e) => { setAuditSearch(e.target.value); setAuditPage(1); }}
-                        placeholder="Search audit log by field, rule code, row #, or value..."
-                        className="w-full text-[11px] pl-8 pr-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-violet-500"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0 w-full sm:w-auto overflow-x-auto pb-0.5">
-                      {[
-                        ['ALL', `All (${allAuditItems.length})`],
-                        ['DYNAMIC', `⚡ Dynamic AI (${summary.dynamic_fixes?.items?.length || 0})`],
-                        ['VALIDATION', `🛠️ Validation (${summary.validation_fixes?.items?.length || 0})`],
-                        ['CLEANSER', `🧹 Cleanser (${summary.cleanser_fixes?.items?.length || 0})`],
-                        ['MANUAL', `🖐️ Manual Fix (${summary.manual_fixes?.items?.length || 0})`],
-                      ].map(([key, label]) => (
-                        <button
-                          key={key}
-                          onClick={() => { setAuditPhaseFilter(key); setAuditPage(1); }}
-                          className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap ${
-                            auditPhaseFilter === key
-                              ? 'bg-violet-600 text-white shadow-sm'
-                              : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--border)] hover:border-violet-300'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Audit Log Table */}
-                  {filteredAuditItems.length === 0 ? (
-                    <div className="text-center py-6 text-[11px] text-[var(--text-tertiary)] font-mono">
-                      No audit log transformation events match your search/filter criteria.
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-                      <table className="w-full text-left border-collapse">
-                        <thead className="bg-[var(--bg-tertiary)] text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider border-b border-[var(--border)]">
-                          <tr>
-                            <th className="py-2.5 px-3">Record Identifier</th>
-                            <th className="py-2.5 px-3">Phase</th>
-                            <th className="py-2.5 px-3">Rule Code</th>
-                            <th className="py-2.5 px-3">Field Name</th>
-                            <th className="py-2.5 px-3">Transformation (Before → After)</th>
-                            <th className="py-2.5 px-3 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[var(--border)] text-[10.5px] font-mono">
-                          {paginatedAuditItems.map((item) => {
-                            const isDyn = item.phase === 'Dynamic AI Rule';
-                            const isVal = item.phase === 'Validation Fix';
-                            const rowObj = cleanedRows[item.row - 1] || {};
-                            const pkKey = state.obj === 'VENDOR' ? 'LIFNR' : state.obj === 'MATERIAL' ? 'MATNR' : 'KUNNR';
-                            const pkVal = rowObj[pkKey] || rowObj[pkKey.toLowerCase()] || rowObj[pkKey.toUpperCase()] || '';
-                            return (
-                              <tr key={item.id} className="hover:bg-[var(--bg-tertiary)]/40 transition-colors">
-                                <td className="py-2 px-3 whitespace-nowrap">
-                                  <div className="flex flex-col">
-                                    <span className="text-[10.5px] font-bold text-[var(--text-secondary)] font-mono">Row #{item.row}</span>
-                                    {pkVal && (
-                                      <span className="text-[9.5px] font-mono text-violet-600 dark:text-violet-400 font-bold">
-                                        {pkKey}: {pkVal}
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="py-2 px-3">
-                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                    isDyn
-                                      ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
-                                      : isVal
-                                        ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300'
-                                        : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
-                                  }`}>
-                                    {item.phase}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-3 font-bold text-[var(--text-primary)]">{item.rule_code}</td>
-                                <td className="py-2 px-3 text-violet-600 dark:text-violet-400 font-bold">{item.field}</td>
-                                <td className="py-2 px-3">
-                                  <div className="flex items-center gap-1">
-                                    <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 line-through text-[10px]">
-                                      {item.old_value || '(empty)'}
-                                    </span>
-                                    <span className="text-[var(--text-tertiary)]">→</span>
-                                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[10px]">
-                                      {item.new_value}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="py-2 px-3 text-right">
-                                  <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold">
-                                    APPLIED
-                                  </span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-
-                      {/* Pagination Controls */}
-                      {auditTotalPages > 1 && (
-                        <div className="flex items-center justify-between px-3 py-2 bg-[var(--bg-tertiary)]/50 border-t border-[var(--border)] text-[11px] text-[var(--text-secondary)]">
-                          <div>
-                            Showing {((auditPage - 1) * AUDIT_PAGE_SIZE) + 1}–{Math.min(auditPage * AUDIT_PAGE_SIZE, filteredAuditItems.length)} of {filteredAuditItems.length}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => setAuditPage(p => Math.max(1, p - 1))}
-                              disabled={auditPage === 1}
-                              className="p-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-                            >
-                              <ChevronLeft className="w-3.5 h-3.5" />
-                            </button>
-                            <span className="px-2 font-mono font-bold">{auditPage} / {auditTotalPages}</span>
-                            <button
-                              onClick={() => setAuditPage(p => Math.min(auditTotalPages, p + 1))}
-                              disabled={auditPage === auditTotalPages}
-                              className="p-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-                            >
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardBody>
-              )}
-            </Card>
-          )}
-
-          {/* Cleansed Data Preview (Multi-Table Display) */}
-          <Card>
             <CardHeader
-              title="Cleansed Data Preview"
-              subtitle={has ? `Displaying ${cleanedRows.length} cleansed master records` : 'Run cleansing to auto-fix data issues'}
+              title="Cleansing Audit Log & Change Trail"
+              subtitle={`${allAuditItems.length} cell-level transformation events logged`}
+              icon={<FileText className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
             >
               <div className="flex items-center gap-2">
-                {has && (
-                  <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(cleanedRows), 'cleaned.csv', 'text/csv')}>
-                    Export All CSV
-                  </Button>
-                )}
-                <button
-                  onClick={() => setOpenPreviewAccordion(!openPreviewAccordion)}
-                  className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-pointer transition-colors"
-                  title={openPreviewAccordion ? "Collapse Data Preview" : "Expand Data Preview"}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<Download className="w-3 h-3" />}
+                  onClick={() => dl(exportAuditLogCSV(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_audit_log.csv', 'text/csv')}
                 >
-                  {openPreviewAccordion ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  Export Audit CSV
+                </Button>
+                <button
+                  onClick={() => setOpenAuditAccordion(!openAuditAccordion)}
+                  className="px-2.5 py-1.5 rounded-lg bg-[var(--bg-tertiary)] hover:bg-[var(--border)] text-[11px] font-bold text-violet-600 dark:text-violet-400 flex items-center gap-1.5 cursor-pointer transition-colors border border-[var(--border)]"
+                >
+                  {openAuditAccordion ? (
+                    <>▼ Hide Complete Audit Trail</>
+                  ) : (
+                    <>▶ View Complete Audit Trail ({allAuditItems.length} log entries)</>
+                  )}
                 </button>
               </div>
             </CardHeader>
-            {openPreviewAccordion && (
-              <CardBody>
-                {has ? (() => {
-                  const allTables: TableInfo[] = extractedTables.length > 0
-                    ? extractedTables
-                    : [{ table_name: 'Cleansed Records', columns: Object.keys(cleanedRows[0] || {}) }];
-                  const visibleTables = allTables.filter((t: any) => selectedCleanseTables.has(t.table_name));
-                  const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
-                  const filteredRows = filterRowsByKey(cleanedRows, cleanseKeyFilter, allKeyColumns);
 
-                  return (
-                    <div className="space-y-4">
-                      <TableFilterToolbar
-                        tables={allTables}
-                        selectedTables={selectedCleanseTables}
-                        onSelectedTablesChange={setSelectedCleanseTables}
-                        keyFilterValue={cleanseKeyFilter}
-                        onKeyFilterChange={setCleanseKeyFilter}
-                        keyColumns={allKeyColumns}
-                        accentColor="violet"
-                      />
-                      {visibleTables.length === 0 ? (
-                        <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
-                          No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
-                        </div>
-                      ) : (
-                        visibleTables.map((t: any) => {
-                          const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+            {openAuditAccordion && (
+              <CardBody className="space-y-3 pt-2">
+                {/* Search & Phase Filter Bar */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 p-2 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)]">
+                  <div className="relative flex-1 w-full">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                    <input
+                      type="text"
+                      value={auditSearch}
+                      onChange={(e) => { setAuditSearch(e.target.value); setAuditPage(1); }}
+                      placeholder="Search audit log by field, rule code, row #, or value..."
+                      className="w-full text-[11px] pl-8 pr-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-violet-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 w-full sm:w-auto overflow-x-auto pb-0.5">
+                    {[
+                      ['ALL', `All (${allAuditItems.length})`],
+                      ['DYNAMIC', `⚡ Dynamic AI (${summary.dynamic_fixes?.items?.length || 0})`],
+                      ['VALIDATION', `🛠️ Validation (${summary.validation_fixes?.items?.length || 0})`],
+                      ['CLEANSER', `🧹 Cleanser (${summary.cleanser_fixes?.items?.length || 0})`],
+                      ['MANUAL', `🖐️ Manual Fix (${summary.manual_fixes?.items?.length || 0})`],
+                    ].map(([key, label]) => (
+                      <button
+                        key={key}
+                        onClick={() => { setAuditPhaseFilter(key); setAuditPage(1); }}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap ${auditPhaseFilter === key
+                          ? 'bg-violet-600 text-white shadow-sm'
+                          : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--border)] hover:border-violet-300'
+                          }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Audit Log Table */}
+                {filteredAuditItems.length === 0 ? (
+                  <div className="text-center py-6 text-[11px] text-[var(--text-tertiary)] font-mono">
+                    No audit log transformation events match your search/filter criteria.
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-[var(--border)] overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-[var(--bg-tertiary)] text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider border-b border-[var(--border)]">
+                        <tr>
+                          <th className="py-2.5 px-3">Record Identifier</th>
+                          <th className="py-2.5 px-3">Phase</th>
+                          <th className="py-2.5 px-3">Rule Code</th>
+                          <th className="py-2.5 px-3">Field Name</th>
+                          <th className="py-2.5 px-3">Transformation (Before → After)</th>
+                          <th className="py-2.5 px-3 text-right">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border)] text-[10.5px] font-mono">
+                        {paginatedAuditItems.map((item) => {
+                          const isDyn = item.phase === 'Dynamic AI Rule';
+                          const isVal = item.phase === 'Validation Fix';
+                          const rowObj = cleanedRows[item.row - 1] || {};
+                          const pkKey = state.obj === 'VENDOR' ? 'LIFNR' : state.obj === 'MATERIAL' ? 'MATNR' : 'KUNNR';
+                          const pkVal = rowObj[pkKey] || rowObj[pkKey.toLowerCase()] || rowObj[pkKey.toUpperCase()] || '';
                           return (
-                            <div key={t.table_name} className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3 shadow-xs">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-[12px] text-[var(--text-primary)]">{t.table_name}</span>
-                                  <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                                    ({tableCols.length} columns · {tableRows.length} rows{cleanseKeyFilter ? ' filtered' : ''})
+                            <tr key={item.id} className="hover:bg-[var(--bg-tertiary)]/40 transition-colors">
+                              <td className="py-2 px-3 whitespace-nowrap">
+                                <div className="flex flex-col">
+                                  <span className="text-[10.5px] font-bold text-[var(--text-secondary)] font-mono">Row #{item.row}</span>
+                                  {pkVal && (
+                                    <span className="text-[9.5px] font-mono text-violet-600 dark:text-violet-400 font-bold">
+                                      {pkKey}: {pkVal}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2 px-3">
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${isDyn
+                                  ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300'
+                                  : isVal
+                                    ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300'
+                                    : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                                  }`}>
+                                  {item.phase}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 font-bold text-[var(--text-primary)]">{item.rule_code}</td>
+                              <td className="py-2 px-3 text-violet-600 dark:text-violet-400 font-bold">{item.field}</td>
+                              <td className="py-2 px-3">
+                                <div className="flex items-center gap-1">
+                                  <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 line-through text-[10px]">
+                                    {item.old_value || '(empty)'}
+                                  </span>
+                                  <span className="text-[var(--text-tertiary)]">→</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[10px]">
+                                    {item.new_value}
                                   </span>
                                 </div>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  icon={<Download className="w-3 h-3" />}
-                                  onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_cleansed.csv`, 'text/csv')}
-                                >
-                                  Export {t.table_name}
-                                </Button>
-                              </div>
-                              <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} />
-                              {tableRows.length > 15 && (
-                                <div className="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-[var(--border)]">
-                                  Showing 15 of {tableRows.length} rows · Export CSV for full table
-                                </div>
-                              )}
-                            </div>
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold">
+                                  APPLIED
+                                </span>
+                              </td>
+                            </tr>
                           );
-                        })
-                      )}
-                    </div>
-                  );
-                })() : (
-                  <EmptyState icon={<Sparkles className="w-10 h-10 text-violet-500" />} message="Run cleansing to auto-fix data issues and view cleansed output" />
+                        })}
+                      </tbody>
+                    </table>
+
+                    {/* Pagination Controls */}
+                    {auditTotalPages > 1 && (
+                      <div className="flex items-center justify-between px-3 py-2 bg-[var(--bg-tertiary)]/50 border-t border-[var(--border)] text-[11px] text-[var(--text-secondary)]">
+                        <div>
+                          Showing {((auditPage - 1) * AUDIT_PAGE_SIZE) + 1}–{Math.min(auditPage * AUDIT_PAGE_SIZE, filteredAuditItems.length)} of {filteredAuditItems.length}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setAuditPage(p => Math.max(1, p - 1))}
+                            disabled={auditPage === 1}
+                            className="p-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="px-2 font-mono font-bold">{auditPage} / {auditTotalPages}</span>
+                          <button
+                            onClick={() => setAuditPage(p => Math.min(auditTotalPages, p + 1))}
+                            disabled={auditPage === auditTotalPages}
+                            className="p-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </CardBody>
             )}
           </Card>
+        )}
 
-          {/* Status Notes */}
-          <Card>
-            <CardBody className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {has ? (
-                <>
-                  <InfoBox variant="success">
-                    <strong>✓ Auto-Fixed Standard Items:</strong><br />
-                    Country codes & currencies normalized<br />
-                    IDs padded to SAP 10-digit standard<br />
-                    Whitespace trimmed & special chars cleaned
-                  </InfoBox>
-                  <InfoBox variant="warning">
-                    <strong>⚠ Manual Review Guidance:</strong><br />
-                    Review empty required fields<br />
-                    Verify customer email formats & overlength strings
-                  </InfoBox>
-                </>
-              ) : (
-                <InfoBox variant="info">Select rules on the left and click <strong>Auto-Fix with AI</strong> to cleanse data.</InfoBox>
+        {/* Cleansed Data Preview (Multi-Table Display) */}
+        <Card>
+          <CardHeader
+            title="Cleansed Data Preview"
+            subtitle={has ? `Displaying ${cleanedRows.length} cleansed master records` : 'Run cleansing to auto-fix data issues'}
+          >
+            <div className="flex items-center gap-2">
+              {has && (
+                <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(cleanedRows), 'cleaned.csv', 'text/csv')}>
+                  Export All CSV
+                </Button>
+              )}
+              <button
+                onClick={() => setOpenPreviewAccordion(!openPreviewAccordion)}
+                className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-pointer transition-colors"
+                title={openPreviewAccordion ? "Collapse Data Preview" : "Expand Data Preview"}
+              >
+                {openPreviewAccordion ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+            </div>
+          </CardHeader>
+          {openPreviewAccordion && (
+            <CardBody>
+              {has ? (() => {
+                const allTables: TableInfo[] = extractedTables.length > 0
+                  ? extractedTables
+                  : [{ table_name: 'Cleansed Records', columns: Object.keys(cleanedRows[0] || {}) }];
+                const visibleTables = allTables.filter((t: any) => selectedCleanseTables.has(t.table_name));
+                const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
+                const filteredRows = filterRowsByKey(cleanedRows, cleanseKeyFilter, allKeyColumns);
+
+                return (
+                  <div className="space-y-4">
+                    <TableFilterToolbar
+                      tables={allTables}
+                      selectedTables={selectedCleanseTables}
+                      onSelectedTablesChange={setSelectedCleanseTables}
+                      keyFilterValue={cleanseKeyFilter}
+                      onKeyFilterChange={setCleanseKeyFilter}
+                      keyColumns={allKeyColumns}
+                      accentColor="violet"
+                    />
+                    {visibleTables.length === 0 ? (
+                      <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
+                        No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                      </div>
+                    ) : (
+                      visibleTables.map((t: any) => {
+                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                        return (
+                          <div key={t.table_name} className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3 shadow-xs">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-[12px] text-[var(--text-primary)]">{t.table_name}</span>
+                                <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                                  ({tableCols.length} columns · {tableRows.length} rows{cleanseKeyFilter ? ' filtered' : ''})
+                                </span>
+                              </div>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<Download className="w-3 h-3" />}
+                                onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_cleansed.csv`, 'text/csv')}
+                              >
+                                Export {t.table_name}
+                              </Button>
+                            </div>
+                            <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} />
+                            {tableRows.length > 15 && (
+                              <div className="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-[var(--border)]">
+                                Showing 15 of {tableRows.length} rows · Export CSV for full table
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                );
+              })() : (
+                <EmptyState icon={<Sparkles className="w-10 h-10 text-violet-500" />} message="Run cleansing to auto-fix data issues and view cleansed output" />
               )}
             </CardBody>
-          </Card>
+          )}
+        </Card>
+
+        {/* Status Notes */}
+        <Card>
+          <CardBody className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {has ? (
+              <>
+                <InfoBox variant="success">
+                  <strong>✓ Auto-Fixed Standard Items:</strong><br />
+                  Country codes & currencies normalized<br />
+                  IDs padded to SAP 10-digit standard<br />
+                  Whitespace trimmed & special chars cleaned
+                </InfoBox>
+                <InfoBox variant="warning">
+                  <strong>⚠ Manual Review Guidance:</strong><br />
+                  Review empty required fields<br />
+                  Verify customer email formats & overlength strings
+                </InfoBox>
+              </>
+            ) : (
+              <InfoBox variant="info">Select rules on the left and click <strong>Auto-Fix with AI</strong> to cleanse data.</InfoBox>
+            )}
+          </CardBody>
+        </Card>
       </div>
 
       {/* Batch Manual Fix Modal */}
       {showFixModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-primary)] rounded-2xl shadow-2xl border border-[var(--border)] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-[var(--border)] bg-[var(--bg-tertiary)]">
-              <div>
-                <h3 className="font-bold text-[14px]">Fix Warning Records</h3>
-                <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Provide correct values for the flagged records.</p>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowFixModal(false); }}>
+          <div className="w-full max-w-3xl max-h-[90vh] bg-[var(--bg-primary)] rounded-2xl shadow-2xl border border-[var(--border)] flex flex-col overflow-hidden"
+            style={{ boxShadow: '0 25px 60px rgba(0,0,0,0.35), 0 0 0 1px rgba(251,191,36,0.12)' }}>
+
+            {/* ── Modal Header ── */}
+            <div className="relative px-6 pt-6 pb-5 border-b border-[var(--border)] shrink-0"
+              style={{ background: 'linear-gradient(135deg, rgba(251,191,36,0.18) 0%, rgba(245,158,11,0.12) 50%, rgba(120,53,15,0.06) 100%)', backgroundColor: 'var(--bg-secondary)' }}>
+              {/* Decorative glow – pointer-events-none so it never clips content */}
+              <div className="absolute inset-0 pointer-events-none rounded-t-2xl overflow-hidden">
+                <div className="absolute top-0 right-0 w-56 h-full opacity-[0.05]"
+                  style={{ background: 'radial-gradient(ellipse at top right, #f59e0b 0%, transparent 70%)' }} />
               </div>
-              <button onClick={() => setShowFixModal(false)} className="p-1.5 rounded-lg hover:bg-[var(--border)] text-[var(--text-tertiary)]">
-                <X className="w-4 h-4" />
-              </button>
+
+              {/* Title row */}
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  {/* Icon badge */}
+                  <div className="w-11 h-11 shrink-0 rounded-xl flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', boxShadow: '0 4px 14px rgba(245,158,11,0.4)' }}>
+                    <span className="text-[18px] leading-none">⚠️</span>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-[15px] text-[var(--text-primary)] leading-snug">Fix Warning Records</h3>
+                    <p className="text-[11.5px] text-[var(--text-tertiary)] mt-0.5 leading-snug">Provide corrected values for each flagged field below</p>
+                  </div>
+                </div>
+
+                {/* Badges + close */}
+                <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                  <span className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 whitespace-nowrap">
+                    {warningList.length} {warningList.length === 1 ? 'warning' : 'warnings'}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 whitespace-nowrap">
+                    {Object.values(manualFixValues).filter(v => v.trim() !== '').length} fixed
+                  </span>
+                  <button
+                    onClick={() => setShowFixModal(false)}
+                    className="ml-1 w-8 h-8 flex items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-all cursor-pointer border border-transparent hover:border-[var(--border)]"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              {warningList.length > 0 && (
+                <div className="relative mt-4">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] text-[var(--text-tertiary)] font-medium">Completion progress</span>
+                    <span className="text-[10px] font-bold text-[var(--text-secondary)]">
+                      {Math.round((Object.values(manualFixValues).filter(v => v.trim() !== '').length / warningList.length) * 100)}%
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-tertiary)' }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${(Object.values(manualFixValues).filter(v => v.trim() !== '').length / warningList.length) * 100}%`,
+                        background: 'linear-gradient(90deg, #10b981, #059669)'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-            
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[var(--bg-primary)]">
+
+            {/* ── Warning Cards List ── */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-3" style={{ background: 'var(--bg-secondary)' }}>
               {warningList.map((warning, i) => {
                 const key = `${warning.row}::${warning.field}::${warning.rule_code}`;
                 const val = manualFixValues[key] ?? "";
                 const rowIndex = warning.row - 1;
                 const currentVal = (cleanedRows[rowIndex] && cleanedRows[rowIndex][warning.field]) ?? '';
+                const isFixed = val.trim() !== '';
 
                 return (
-                  <div key={i} className="flex flex-col md:flex-row rounded-xl border border-[var(--border)] overflow-hidden bg-[var(--bg-primary)] shadow-sm">
-                    {/* Left Half: Details */}
-                    <div className="w-full md:w-[55%] p-4 bg-[var(--bg-tertiary)]/50 border-b md:border-b-0 md:border-r border-[var(--border)] flex flex-col justify-center">
-                      <div className="flex items-center justify-between mb-2.5">
-                        <span className="font-bold text-amber-600 dark:text-amber-500 text-[12px] uppercase tracking-wide">{warning.rule_code}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-secondary)] font-medium">Row #{warning.row}</span>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-3 mb-2.5">
-                        <div className="bg-[var(--bg-primary)] rounded-lg p-2 border border-[var(--border)]">
-                          <div className="text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">Field</div>
-                          <div className="text-[11px] font-mono font-semibold text-[var(--text-primary)] truncate" title={warning.field}>{warning.field}</div>
+                  <div
+                    key={i}
+                    className="rounded-xl border overflow-hidden transition-all duration-200"
+                    style={{
+                      borderColor: isFixed ? 'rgba(16,185,129,0.4)' : 'var(--border)',
+                      background: 'var(--bg-primary)',
+                      boxShadow: isFixed ? '0 0 0 1px rgba(16,185,129,0.15), 0 2px 8px rgba(0,0,0,0.06)' : '0 2px 8px rgba(0,0,0,0.04)'
+                    }}
+                  >
+                    {/* Card Top Bar */}
+                    <div className="flex items-center justify-between px-4 py-2.5 border-b"
+                      style={{
+                        borderColor: isFixed ? 'rgba(16,185,129,0.2)' : 'var(--border)',
+                        background: isFixed
+                          ? 'linear-gradient(90deg, rgba(16,185,129,0.06), rgba(5,150,105,0.03))'
+                          : 'linear-gradient(90deg, rgba(251,191,36,0.06), rgba(245,158,11,0.02))'
+                      }}>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black shrink-0"
+                          style={{
+                            background: isFixed ? '#10b981' : '#f59e0b',
+                            color: 'white',
+                            boxShadow: isFixed ? '0 2px 6px rgba(16,185,129,0.4)' : '0 2px 6px rgba(245,158,11,0.4)'
+                          }}>
+                          {isFixed ? '✓' : i + 1}
                         </div>
-                        <div className="bg-[var(--bg-primary)] rounded-lg p-2 border border-[var(--border)]">
-                          <div className="text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider mb-0.5">Current Value</div>
-                          <div className={`text-[11px] font-mono font-semibold truncate ${!currentVal ? 'text-[var(--text-tertiary)] italic' : 'text-[var(--text-primary)]'}`} title={currentVal}>
-                            {currentVal || '(empty)'}
+                        <code className="text-[11px] font-bold tracking-wide"
+                          style={{ color: isFixed ? '#10b981' : '#f59e0b' }}>
+                          {warning.rule_code}
+                        </code>
+                        <span className="hidden sm:inline text-[var(--text-tertiary)] text-[10px]">·</span>
+                        <span className="hidden sm:inline text-[10px] font-mono text-[var(--text-tertiary)]">
+                          Field: <strong className="text-[var(--text-secondary)]">{warning.field}</strong>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isFixed && (
+                          <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                            Fixed ✓
+                          </span>
+                        )}
+                        <span className="text-[10px] px-2 py-0.5 rounded-lg border text-[var(--text-secondary)] font-semibold"
+                          style={{ borderColor: 'var(--border)', background: 'var(--bg-tertiary)' }}>
+                          Row #{warning.row}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Card Body */}
+                    <div className="flex flex-col sm:flex-row">
+                      {/* Left: Info Panel */}
+                      <div className="flex-1 p-4 space-y-3 border-b sm:border-b-0 sm:border-r" style={{ borderColor: 'var(--border)' }}>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                            <div className="text-[9px] uppercase tracking-widest font-bold text-[var(--text-tertiary)] mb-1">Field</div>
+                            <div className="text-[11.5px] font-mono font-bold text-[var(--text-primary)] truncate">{warning.field || '—'}</div>
                           </div>
+                          <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                            <div className="text-[9px] uppercase tracking-widest font-bold text-[var(--text-tertiary)] mb-1">Current Value</div>
+                            <div className={`text-[11.5px] font-mono font-semibold truncate ${!currentVal ? 'italic opacity-40' : 'text-[var(--text-primary)]'}`}>
+                              {currentVal || '(empty)'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg text-[11px] leading-snug"
+                          style={{
+                            background: 'rgba(251,191,36,0.08)',
+                            border: '1px solid rgba(251,191,36,0.2)',
+                            color: 'var(--color-warning, #f59e0b)'
+                          }}>
+                          <span className="shrink-0 text-[13px] mt-0.5">⚠</span>
+                          <span className="text-[var(--text-secondary)]">{warning.reason || warning.message || 'No description provided.'}</span>
                         </div>
                       </div>
 
-                      <div className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 p-2.5 rounded-lg border border-amber-100 dark:border-amber-900/50 flex items-start gap-2">
-                        <span className="mt-0.5">⚠</span>
-                        <span className="leading-tight">{warning.reason || warning.message}</span>
+                      {/* Right: Input Panel */}
+                      <div className="w-full sm:w-[42%] p-4 flex flex-col justify-center gap-2" style={{ background: 'var(--bg-primary)' }}>
+                        <label className="text-[11px] font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+                          Correct Value
+                        </label>
+                        <input
+                          type="text"
+                          value={val}
+                          onChange={(e) => setManualFixValues(prev => ({ ...prev, [key]: e.target.value }))}
+                          className="w-full h-11 px-4 text-[13px] font-medium rounded-xl outline-none transition-all duration-200 placeholder:text-[var(--text-tertiary)]"
+                          style={{
+                            background: 'var(--bg-tertiary)',
+                            border: `1.5px solid ${isFixed ? '#10b981' : 'var(--border)'}`,
+                            color: 'var(--text-primary)',
+                            boxShadow: isFixed ? '0 0 0 3px rgba(16,185,129,0.12)' : 'none'
+                          }}
+                          onFocus={(e) => {
+                            e.currentTarget.style.border = `1.5px solid ${isFixed ? '#10b981' : '#8b5cf6'}`;
+                            e.currentTarget.style.boxShadow = isFixed ? '0 0 0 3px rgba(16,185,129,0.15)' : '0 0 0 3px rgba(139,92,246,0.15)';
+                          }}
+                          onBlur={(e) => {
+                            e.currentTarget.style.border = `1.5px solid ${isFixed ? '#10b981' : 'var(--border)'}`;
+                            e.currentTarget.style.boxShadow = isFixed ? '0 0 0 3px rgba(16,185,129,0.12)' : 'none';
+                          }}
+                          placeholder="Enter the correct value…"
+                        />
+                        {isFixed && (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Value ready to save
+                          </p>
+                        )}
                       </div>
-                    </div>
-                    {/* Right Half: Input */}
-                    <div className="w-full md:w-[45%] p-5 flex flex-col justify-center bg-[var(--bg-primary)]">
-                      <label className="text-[12px] font-semibold text-[var(--text-primary)] mb-2 block">
-                        Correct Value
-                      </label>
-                      <input
-                        type="text"
-                        value={val}
-                        onChange={(e) => setManualFixValues(prev => ({ ...prev, [key]: e.target.value }))}
-                        className="w-full h-10 px-3.5 text-[13px] rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all placeholder:text-[var(--text-tertiary)]"
-                        placeholder="Enter the correct value..."
-                      />
                     </div>
                   </div>
                 );
               })}
               {warningList.length === 0 && (
-                <div className="p-8 text-center text-[var(--text-tertiary)] text-[12px]">
-                  No active warnings to fix.
+                <div className="flex flex-col items-center justify-center py-14 gap-3 text-center">
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-emerald-100 dark:bg-emerald-900/30">
+                    <Check className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div className="text-[13px] font-semibold text-[var(--text-primary)]">No warnings to fix</div>
+                  <div className="text-[11.5px] text-[var(--text-tertiary)]">All records are clean — no manual intervention required.</div>
                 </div>
               )}
             </div>
 
-            <div className="p-4 border-t border-[var(--border)] bg-[var(--bg-tertiary)] flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setShowFixModal(false)}>Cancel</Button>
-              <Button 
-                variant="primary" 
-                onClick={applyManualFixes} 
-                disabled={warningList.length === 0 || Object.values(manualFixValues).every(v => v.trim() === "")}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                icon={<Save className="w-4 h-4" />}
-              >
-                Save Fixes
-              </Button>
+            {/* ── Modal Footer ── */}
+            <div className="px-6 py-4 border-t border-[var(--border)] flex items-center justify-between gap-3"
+              style={{ background: 'var(--bg-secondary)' }}>
+              <div className="text-[11px] text-[var(--text-tertiary)]">
+                {Object.values(manualFixValues).filter(v => v.trim() !== '').length > 0 ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                    {Object.values(manualFixValues).filter(v => v.trim() !== '').length} of {warningList.length} values entered
+                  </span>
+                ) : (
+                  <span>Enter values in the fields above to enable save</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowFixModal(false)}
+                  className="px-4 py-2 rounded-xl text-[12px] font-semibold border transition-all cursor-pointer hover:bg-[var(--bg-tertiary)]"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={applyManualFixes}
+                  disabled={warningList.length === 0 || Object.values(manualFixValues).every(v => v.trim() === "")}
+                  className="px-5 py-2 rounded-xl text-[12px] font-bold text-white flex items-center gap-2 transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{
+                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                    boxShadow: '0 4px 14px rgba(16,185,129,0.35)'
+                  }}
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Save {Object.values(manualFixValues).filter(v => v.trim() !== '').length > 0 ? `${Object.values(manualFixValues).filter(v => v.trim() !== '').length} Fix${Object.values(manualFixValues).filter(v => v.trim() !== '').length > 1 ? 'es' : ''}` : 'Fixes'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
