@@ -539,18 +539,23 @@ class HarmonizationAgent:
                         mapped = transformed_series.at[idx]
                         self.fix_log.append(f"[{tag}] Row {idx + 1} ({target_col}): '{raw}' → '{mapped}'")
 
-        # Preserve all original source columns (short name after dot) if not already populated with valid data
+        # Collect all mapped source field names (full and base)
+        mapped_source_cols = set()
+        for m in mappings:
+            if m.src:
+                clean_s = re.sub(r"^\[\d+\]", "", str(m.src)).strip()
+                mapped_source_cols.add(clean_s.lower())
+                mapped_source_cols.add(clean_s.split(".")[-1].lower())
+
+        # Preserve only UNMAPPED source columns (columns not mapped to any SAP target)
         for col in df.columns:
-            short_col = col.split(".")[-1] if "." in col else col
-            short_col = re.sub(r"^\[\d+\]", "", short_col).strip()
-            if short_col not in result.columns:
-                result[short_col] = df[col]
-            else:
-                curr_s = result[short_col].fillna("").astype(str).str.strip()
-                if (curr_s == "").all() or (curr_s == "nan").all():
+            clean_c = re.sub(r"^\[\d+\]", "", str(col)).strip()
+            short_col = clean_c.split(".")[-1]
+            if clean_c.lower() not in mapped_source_cols and short_col.lower() not in mapped_source_cols:
+                if short_col not in result.columns:
                     result[short_col] = df[col]
 
-        # Ensure standard address / key / contact fields sync across standard SAP/ERP synonyms if missing or empty
+        # Ensure existing columns in result sync values from donor source if they are currently empty
         synonym_groups = [
             ["CITY", "CITY1", "CITY2", "HOME_CITY", "ORT01"],
             ["STATE", "REGION", "REGIO", "UF"],
@@ -594,13 +599,12 @@ class HarmonizationAgent:
                         break
 
             if donor_series is not None:
+                # ONLY fill columns that already exist in result.columns (do not inject phantom columns)
                 for col_name in syn_group:
                     if col_name in result.columns:
                         curr_s = result[col_name].fillna("").astype(str).str.strip()
                         if ((curr_s == "") | (curr_s == "nan") | (curr_s == "none") | (curr_s == "null")).all():
                             result[col_name] = donor_series
-                    else:
-                        result[col_name] = donor_series
 
         return result
 

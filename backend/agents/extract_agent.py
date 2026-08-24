@@ -613,7 +613,7 @@ You MUST return the output as a valid JSON object matching this exact schema:
         def is_column_key(col_name: str) -> bool:
             import re
             clean_col = re.sub(r"^\[\d+\]", "", col_name).upper()
-            if any(k in clean_col for k in ["CUSTOMER_NUMBER", "PARTY_NUMBER", "ACCOUNT", "LIFNR", "KUNNR", "MATNR", "PARTNER"]):
+            if any(k in clean_col for k in ["CUSTOMER_NUMBER", "PARTY_NUMBER", "ACCOUNT", "LIFNR", "KUNNR", "MATNR", "BPEXT", "PARTNER"]):
                 return True
             
             sap_full = ""
@@ -631,7 +631,7 @@ You MUST return the output as a valid JSON object matching this exact schema:
             
             if sap_full:
                 sap_field = sap_full.split(".")[-1].upper()
-                if sap_field in ["KUNNR", "LIFNR", "MATNR"] or "NUM" in sap_field or "ID" in sap_field:
+                if sap_field in ["KUNNR", "LIFNR", "MATNR", "BPEXT", "PARTNER"] or "NUM" in sap_field or "ID" in sap_field:
                     return True
             return False
 
