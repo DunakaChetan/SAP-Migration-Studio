@@ -223,6 +223,20 @@ SAP_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "currency_fields": ["WAERS"],
         "payterm_fields": ["ZTERM"],
     },
+    "VENDOR": {
+        "label": "Vendor Master (XK01)",
+        "key_field": "LIFNR",
+        "country_fields": ["LAND1"],
+        "currency_fields": ["WAERS"],
+        "payterm_fields": ["ZTERM"],
+    },
+    "MATERIAL": {
+        "label": "Material Master (MM01)",
+        "key_field": "MATNR",
+        "mattype_fields": ["MTART"],
+        "uom_fields": ["MEINS"],
+        "currency_fields": ["WAERS"],
+    },
 }
 
 
@@ -240,9 +254,16 @@ def _tf_upper(v: Any) -> str:
     return str(v).upper().strip() if v is not None and str(v) != "nan" else ""
 
 def _tf_pad10(v: Any) -> str:
-    s = str(v) if v is not None and str(v) != "nan" else ""
-    digits = re.sub(r"\D", "", s)
-    return digits.zfill(10) if digits else ""
+    s = str(v).strip() if v is not None and str(v) != "nan" else ""
+    if not s or s.lower() in ["none", "null", "nan", ""]:
+        return ""
+    if s.isdigit():
+        return s.zfill(10)
+    return s
+
+def _tf_email(v: Any) -> str:
+    s = str(v).strip() if v is not None and str(v) != "nan" else ""
+    return s.lower()
 
 def _tf_country(v: Any) -> str:
     s = str(v).strip().upper() if v is not None and str(v) != "nan" else ""
@@ -261,20 +282,46 @@ def _tf_mattype(v: Any) -> str:
     return MATERIAL_TYPE_MAP.get(s, s)
 
 def _tf_date8(v: Any) -> str:
-    s = str(v) if v is not None and str(v) != "nan" else ""
-    # Try dd/mm/yyyy or dd-mm-yyyy
+    s = str(v).strip() if v is not None and str(v) != "nan" else ""
+    if not s or s.lower() in ["none", "null", "nan", ""]:
+        return ""
+    # Try dd/mm/yyyy or dd-mm-yyyy (e.g. 31/12/2023 or 31-12-2023)
     m = re.match(r"^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$", s)
     if m:
         return f"{m.group(3)}{m.group(2).zfill(2)}{m.group(1).zfill(2)}"
-    # Try yyyy-mm-dd or yyyy/mm/dd
-    m = re.match(r"^(\d{4})[/\-](\d{2})[/\-](\d{2})$", s)
+    # Try yyyy-mm-dd or yyyy/mm/dd (e.g. 2023-12-31 or 2023/12/31)
+    m = re.match(r"^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})$", s)
+    if m:
+        return f"{m.group(1)}{m.group(2).zfill(2)}{m.group(3).zfill(2)}"
+    # Try yyyymmdd (8 numeric digits between 1900-2100)
+    if re.match(r"^(19\d\d|20\d\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$", s):
+        return s
+    # Try mm/dd/yy or dd/mm/yy (2-digit year)
+    m = re.match(r"^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})$", s)
+    if m:
+        year = f"20{m.group(3)}" if int(m.group(3)) < 50 else f"19{m.group(3)}"
+        return f"{year}{m.group(1).zfill(2)}{m.group(2).zfill(2)}"
+    # Try ISO timestamp with time: 2023-05-12T14:30:00 -> 20230512
+    m = re.match(r"^(\d{4})[/\-](\d{2})[/\-](\d{2})[T\s]", s)
     if m:
         return f"{m.group(1)}{m.group(2)}{m.group(3)}"
-    return re.sub(r"\D", "", s)[:8]
+    # If not parseable as a valid date, return original value without mangling or emptying
+    return s
 
 def _tf_phone(v: Any) -> str:
-    s = str(v) if v is not None and str(v) != "nan" else ""
-    return re.sub(r"[^\d+\-\s()]", "", s).strip()
+    s = str(v).strip() if v is not None and str(v) != "nan" else ""
+    if not s or s.lower() in ["none", "null", "nan", ""]:
+        return ""
+    # If the string contains substantial alphabetic words (> 3 letters not part of an extension like 'ext' or 'x'),
+    # it is address/text, do not strip letters
+    letters = re.findall(r"[a-zA-Z]", s)
+    if len(letters) > 4 and not re.search(r"(?i)\b(ext|x)\.?\s*\d+", s):
+        return s
+    # Clean invalid characters, preserving digits, +, -, (, ), spaces, and ext/x
+    cleaned = re.sub(r"[^\d+\-\s()./xXextEXT]", "", s).strip()
+    if not re.search(r"\d", cleaned):
+        return s
+    return cleaned
 
 def _tf_trunc35(v: Any) -> str:
     s = str(v) if v is not None and str(v) != "nan" else ""
@@ -298,6 +345,7 @@ TRANSFORMS: Dict[str, Callable] = {
     "uom": _tf_quantity,
     "date8": _tf_date8,
     "phone": _tf_phone,
+    "email": _tf_email,
     "trunc35": _tf_trunc35,
 }
 
@@ -424,7 +472,49 @@ class HarmonizationAgent:
                         break
 
             if matched_col and matched_col in df.columns:
-                tf_fn = TRANSFORMS.get(m.transform, TRANSFORMS["trim"])
+                # ── Validate that the transform actually matches the column data ──
+                # This prevents false transforms when the DB mapping has an incorrect
+                # transform_rule (e.g. 'date8' stored for a city/name column).
+                actual_transform = m.transform or "trim"
+
+                if actual_transform == "date8":
+                    sample_vals = [str(v).strip() for v in df[matched_col].dropna()
+                                   if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+                    if sample_vals:
+                        def _looks_like_date(v: str) -> bool:
+                            return bool(
+                                re.match(r"^\d{4}[/\-]\d{1,2}[/\-]\d{1,2}", v) or
+                                re.match(r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", v) or
+                                re.match(r"^(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$", v) or
+                                re.match(r"^\d{4}-\d{2}-\d{2}[T\s]", v)
+                            )
+                        date_ratio = sum(1 for v in sample_vals if _looks_like_date(v)) / len(sample_vals)
+                        if date_ratio < 0.25:
+                            actual_transform = "trim"  # Safe fallback — data doesn't look like dates
+
+                elif actual_transform == "phone":
+                    sample_vals = [str(v).strip() for v in df[matched_col].dropna()
+                                   if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+                    if sample_vals:
+                        def _looks_like_phone(v: str) -> bool:
+                            letters = re.findall(r"[a-zA-Z]", v)
+                            if len(letters) > 4:
+                                return False
+                            return len(re.findall(r"\d", v)) >= 6
+                        phone_ratio = sum(1 for v in sample_vals if _looks_like_phone(v)) / len(sample_vals)
+                        if phone_ratio < 0.2:
+                            actual_transform = "trim"  # Safe fallback — data doesn't look like phone numbers
+
+                elif actual_transform in ("country", "currency"):
+                    sample_vals = [str(v).strip().upper() for v in df[matched_col].dropna()
+                                   if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+                    if sample_vals:
+                        avg_len = sum(len(v) for v in sample_vals) / len(sample_vals)
+                        all_alpha = all(v.isalpha() for v in sample_vals)
+                        if avg_len > 6 or not all_alpha:
+                            actual_transform = "trim"  # Safe fallback — values are too long to be ISO codes
+
+                tf_fn = TRANSFORMS.get(actual_transform, TRANSFORMS["trim"])
                 target_col = m.sap.split(".")[-1] if "." in m.sap else m.sap
 
                 orig_series = df[matched_col].astype(str)
@@ -440,6 +530,7 @@ class HarmonizationAgent:
                     "mattype": "MatType→SAP",
                     "date8": "Date→YYYYMMDD",
                     "phone": "PhoneClean",
+                    "email": "EmailClean",
                     "quantity": "UOM→SAP",
                     "uom": "UOM→SAP",
                     "trunc35": "Trunc35",
@@ -447,7 +538,7 @@ class HarmonizationAgent:
                     "pad10": "Pad10",
                     "trim": "WhitespaceTrim",
                 }
-                tag = tag_map.get(m.transform, f"Transform:{m.transform}")
+                tag = tag_map.get(actual_transform, f"Transform:{actual_transform}")
 
                 diff_mask = (orig_series.str.strip() != transformed_series.astype(str).str.strip()) & (orig_series.str.strip() != "") & (orig_series.str.strip() != "nan")
                 if diff_mask.any():
@@ -491,35 +582,6 @@ class HarmonizationAgent:
     # 7 Harmonization Rules
     # ──────────────────────────────────────
 
-    def _rule_1_dedup(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Rule 1: Key-based dedup — remove rows with duplicate key field, keep first."""
-        key_field = self.schema["key_field"]
-
-        # Find which column contains the key (could be mapped to SAP name or original)
-        key_col = None
-        for col in df.columns:
-            # Match on the field name part (e.g. "KUNNR" or "S_CUST_GEN.KUNNR")
-            base = col.split(".")[-1] if "." in col else col
-            if base == key_field:
-                key_col = col
-                break
-
-        if key_col is None:
-            self.fix_log.append(f"[Dedup] Key field '{key_field}' not found — skipping dedup")
-            return df
-
-        before = len(df)
-        # Drop rows with empty key first
-        df = df[df[key_col].apply(lambda v: str(v).strip() != "" and str(v) != "nan")]
-        # Drop duplicate keys, keep first
-        df = df.drop_duplicates(subset=[key_col], keep="first")
-        after = len(df)
-        removed = before - after
-        if removed > 0:
-            self.fix_log.append(f"[Dedup] Removed {removed} duplicate/empty-key rows on '{key_col}'")
-        self.stats["deduped"] = removed
-        return df.reset_index(drop=True)
-
     def _rule_2_empty_filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """Rule 2: Remove rows where 100% of values are empty/whitespace."""
         before = len(df)
@@ -541,58 +603,139 @@ class HarmonizationAgent:
 
     def _find_country_columns(self, df: pd.DataFrame) -> List[str]:
         target_cols = []
-        schema_fields = self.schema.get("country_fields", [])
+        schema_fields = set(self.schema.get("country_fields", []))
+        KNOWN_COUNTRY_COLS = {
+            "LAND1", "COUNTRY", "COUNTRY_CODE", "BILLING_COUNTRY", "SHIP_COUNTRY",
+            "SHIPPING_COUNTRY", "LANDX", "CTRY", "NATION", "NATIONALITY", "COUNTRY_KEY"
+        }
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["LAND1", "COUNTRY", "COUNTRY_CODE", "LAND", "NATION", "CTRY", "BILLING_COUNTRY", "SHIP_COUNTRY"] or "COUNTRY" in col_upper or "LAND" in base or "CTRY" in col_upper:
-                target_cols.append(col)
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
+            is_named_country = False
+            if base in schema_fields or base in KNOWN_COUNTRY_COLS:
+                is_named_country = True
+            elif re.search(r'(?i)(^|[_\s])(country|country_code|land1|landx|ctry|billing_country|shipping_country)([_\s]|$)', base):
+                is_named_country = True
+
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna() if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+            if not sample_vals:
+                if is_named_country:
+                    target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
-            if any(v in COUNTRY_MAP for v in sample_vals if v):
+
+            country_matches = sum(1 for v in sample_vals if v in COUNTRY_MAP or v in COUNTRY_MAP_3 or (len(v) in [2, 3] and v.isalpha() and v in set(COUNTRY_MAP.values())))
+            country_ratio = country_matches / len(sample_vals)
+
+            if is_named_country and (country_ratio >= 0.15 or len(sample_vals) < 3):
                 target_cols.append(col)
+            elif not is_named_country and country_ratio >= 0.5:
+                target_cols.append(col)
+
         return target_cols
 
     def _find_currency_columns(self, df: pd.DataFrame) -> List[str]:
         target_cols = []
-        schema_fields = self.schema.get("currency_fields", [])
+        schema_fields = set(self.schema.get("currency_fields", []))
+        KNOWN_CURR_COLS = {
+            "WAERS", "CURRENCY", "CURRENCY_CODE", "PRICE_CURR", "DOC_CURR",
+            "BASE_CURR", "ORDER_CURRENCY", "SALES_CURRENCY", "CCY"
+        }
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["WAERS", "CURRENCY", "CURRENCY_CODE", "CURR", "CCY", "PRICE_CURR"] or "WAERS" in col_upper or "CURR" in base or "CCY" in col_upper:
-                target_cols.append(col)
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
+            is_named_curr = False
+            if base in schema_fields or base in KNOWN_CURR_COLS:
+                is_named_curr = True
+            elif re.search(r'(?i)(^|[_\s])(currency|currency_code|waers|ccy|price_curr|doc_curr)([_\s]|$)', base):
+                if not re.search(r'(?i)(current_|concurrent|recurring|occurrence)', base):
+                    is_named_curr = True
+
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna() if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+            if not sample_vals:
+                if is_named_curr:
+                    target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
-            if any(v in CURRENCY_MAP for v in sample_vals if v):
+
+            curr_matches = sum(1 for v in sample_vals if v in CURRENCY_MAP or (len(v) == 3 and v.isalpha() and v in set(CURRENCY_MAP.values())))
+            curr_ratio = curr_matches / len(sample_vals)
+
+            if is_named_curr and (curr_ratio >= 0.15 or len(sample_vals) < 3):
                 target_cols.append(col)
+            elif not is_named_curr and curr_ratio >= 0.5:
+                target_cols.append(col)
+
         return target_cols
 
     def _find_payterm_columns(self, df: pd.DataFrame) -> List[str]:
         target_cols = []
-        schema_fields = self.schema.get("payterm_fields", [])
+        schema_fields = set(self.schema.get("payterm_fields", []))
+        KNOWN_PAY_COLS = {
+            "ZTERM", "PAYMENT_TERMS", "PAY_TERMS", "PAYTERMS", "PAY_TERM", "TERMS_OF_PAYMENT"
+        }
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["ZTERM", "PAYMENT_TERMS", "PAY_TERMS", "PAYTERMS", "PAY_TERM", "TERMS"] or "ZTERM" in col_upper or "PAY" in base:
-                target_cols.append(col)
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
+            is_named_pay = False
+            if base in schema_fields or base in KNOWN_PAY_COLS:
+                is_named_pay = True
+            elif re.search(r'(?i)(^|[_\s])(zterm|payment_terms?|pay_terms?|payterms?)([_\s]|$)', base):
+                if not re.search(r'(?i)(payroll|payee|taxpayer|display|company|repay|overpay|pay_grade)', base):
+                    is_named_pay = True
+
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna() if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+            if not sample_vals:
+                if is_named_pay:
+                    target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
-            if any(v in PAYMENT_TERMS_MAP for v in sample_vals if v):
+
+            pay_matches = sum(1 for v in sample_vals if v in PAYMENT_TERMS_MAP or v in set(PAYMENT_TERMS_MAP.values()))
+            pay_ratio = pay_matches / len(sample_vals)
+
+            if is_named_pay and (pay_ratio >= 0.15 or len(sample_vals) < 3):
                 target_cols.append(col)
+            elif not is_named_pay and pay_ratio >= 0.4:
+                target_cols.append(col)
+
         return target_cols
 
     def _find_mattype_columns(self, df: pd.DataFrame) -> List[str]:
         target_cols = []
-        schema_fields = self.schema.get("mattype_fields", [])
+        schema_fields = set(self.schema.get("mattype_fields", []))
+        KNOWN_MAT_COLS = {
+            "MTART", "MATERIAL_TYPE", "MAT_TYPE", "MATTYPE"
+        }
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
-            if base in schema_fields or base in ["MTART", "MATERIAL_TYPE", "MAT_TYPE", "MATTYPE", "MAT_GROUP"] or "MTART" in col_upper or "MAT_TYPE" in base or "MTART" in base:
-                target_cols.append(col)
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
+            is_named_mat = False
+            if base in schema_fields or base in KNOWN_MAT_COLS:
+                is_named_mat = True
+            elif re.search(r'(?i)(^|[_\s])(mtart|material_type|mat_type|mattype)([_\s]|$)', base):
+                if not re.search(r'(?i)(mat_group|material_group|matkl)', base):
+                    is_named_mat = True
+
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna() if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+            if not sample_vals:
+                if is_named_mat:
+                    target_cols.append(col)
                 continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(15)]
-            if any(v in MATERIAL_TYPE_MAP for v in sample_vals if v):
+
+            mat_matches = sum(1 for v in sample_vals if v in MATERIAL_TYPE_MAP or v in set(MATERIAL_TYPE_MAP.values()))
+            mat_ratio = mat_matches / len(sample_vals)
+
+            if is_named_mat and (mat_ratio >= 0.15 or len(sample_vals) < 3):
                 target_cols.append(col)
+            elif not is_named_mat and mat_ratio >= 0.4:
+                target_cols.append(col)
+
         return target_cols
 
     def _rule_1_dedup(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -748,78 +891,161 @@ class HarmonizationAgent:
     # ──────────────────────────────────────
 
     def _find_date_columns(self, df: pd.DataFrame) -> List[str]:
-        """Auto-detect date columns by name patterns and data sampling."""
-        DATE_NAME_PATTERNS = [
+        """Auto-detect date columns with strict name matching and data validation."""
+        DATE_NAME_PATTERNS = {
             "ERDAT", "AEDAT", "ERNAM_DATE", "BUDAT", "BLDAT", "CPUDT",
-            "FKDAT", "AUDAT", "VDATU", "BDATU", "PSODT", "BEDAT",
-        ]
+            "FKDAT", "AUDAT", "VDATU", "BDATU", "PSODT", "BEDAT", "GBDAT",
+            "START_DATE", "END_DATE", "BIRTH_DATE", "HIRE_DATE", "EFFECTIVE_DATE",
+            "CREATION_DATE", "EXPIRATION_DATE", "MODIFIED_DATE", "DOB", "DATE_OF_BIRTH",
+            "VALID_FROM", "VALID_TO", "POSTING_DATE", "DOC_DATE", "ENTRY_DATE"
+        }
+
+        def is_date_format(val: str) -> bool:
+            v = str(val).strip()
+            if not v or v.lower() in ["nan", "none", "null", ""]:
+                return False
+            # Check YYYY-MM-DD or YYYY/MM/DD
+            if re.match(r"^\d{4}[/\-]\d{1,2}[/\-]\d{1,2}", v):
+                return True
+            # Check DD/MM/YYYY or DD-MM-YYYY or MM/DD/YYYY
+            if re.match(r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}", v):
+                return True
+            # Check YYYYMMDD (8 digits between year 1900-2100)
+            if re.match(r"^(19\d\d|20\d\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$", v):
+                return True
+            # Check ISO timestamp e.g. 2023-05-12T14:30:00
+            if re.match(r"^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}", v):
+                return True
+            return False
+
         target_cols = []
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
+            is_named_date = False
             if base in DATE_NAME_PATTERNS:
-                target_cols.append(col)
-                continue
-            if "DATE" in base or base.endswith("_AT") or base.endswith("_DT") or base.startswith("DT_"):
-                target_cols.append(col)
-                continue
-            sample_vals = [str(v).strip() for v in df[col].dropna().head(15) if str(v).strip() and str(v) != "nan"]
-            if len(sample_vals) >= 3:
-                date_pattern = re.compile(r"^\d{1,2}[/\-]\d{1,2}[/\-]\d{4}$|^\d{4}[/\-]\d{2}[/\-]\d{2}$")
-                matches = sum(1 for v in sample_vals if date_pattern.match(v))
-                if matches >= len(sample_vals) * 0.5:
+                is_named_date = True
+            elif re.search(r'(?i)(^|[_\s])(date|dob|datu|valid_from|valid_to|birth_date|hire_date|effective_date)([_\s\d]|$)', base):
+                # Avoid false positives like "Effective-dated: No", "Candidate", "Validate", "Accommodation"
+                if not re.search(r'(?i)(dated:\s*(no|yes)|candidate|validate|validation|accommodat|foundation|mandat)', base):
+                    is_named_date = True
+
+            sample_vals = [str(v).strip() for v in df[col].dropna() if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+            if not sample_vals:
+                if is_named_date:
                     target_cols.append(col)
+                continue
+
+            date_matches = sum(1 for v in sample_vals if is_date_format(v))
+            date_ratio = date_matches / len(sample_vals)
+
+            if is_named_date and date_ratio >= 0.25:
+                target_cols.append(col)
+            elif not is_named_date and date_ratio >= 0.6:
+                target_cols.append(col)
+
         return target_cols
 
     def _find_phone_columns(self, df: pd.DataFrame) -> List[str]:
-        """Auto-detect phone/fax columns by name patterns."""
-        PHONE_NAMES = [
-            "TELF1", "TELF2", "TELFX", "TELMOB", "TEL_NUMBER",
-            "FAX_NUMBER", "SMTP_ADDR",
-        ]
+        """Auto-detect phone/fax columns with strict name matching and sample check."""
+        PHONE_NAMES = {
+            "TELF1", "TELF2", "TELFX", "TELMOB", "TEL_NUMBER", "TELNR",
+            "FAX_NUMBER", "PHONE_NUMBER", "MOBILE_NUMBER", "TELEPHONE",
+            "CELL_PHONE", "PHONE", "FAX", "MOBILE"
+        }
         target_cols = []
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
+            is_named_phone = False
             if base in PHONE_NAMES:
-                target_cols.append(col)
+                is_named_phone = True
+            elif re.search(r'(?i)(^|[_\s])(phone|fax|mobile|telephone|cell_phone|telf\d*|telfx|telmob|telnr)([_\s]|$)', base):
+                if not re.search(r'(?i)(cell_tower|excellent|cancelled|parcel|headphone|microphone)', base):
+                    is_named_phone = True
+
+            sample_vals = [str(v).strip() for v in df[col].dropna() if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+            if not sample_vals:
+                if is_named_phone:
+                    target_cols.append(col)
                 continue
-            if any(kw in base for kw in ["PHONE", "FAX", "MOBILE", "TELF", "CELL"]):
+
+            def is_phone_like(val: str) -> bool:
+                letters = re.findall(r"[a-zA-Z]", val)
+                if len(letters) > 4 and not re.search(r"(?i)\b(ext|x)\.?\s*\d+", val):
+                    return False
+                digits = re.findall(r"\d", val)
+                return len(digits) >= 6
+
+            phone_matches = sum(1 for v in sample_vals if is_phone_like(v))
+            phone_ratio = phone_matches / len(sample_vals)
+
+            if is_named_phone and (phone_ratio >= 0.2 or len(sample_vals) < 3):
                 target_cols.append(col)
+            elif not is_named_phone and phone_ratio >= 0.6:
+                target_cols.append(col)
+
         return target_cols
 
     def _find_uom_columns(self, df: pd.DataFrame) -> List[str]:
         """Auto-detect unit-of-measure columns by name patterns and data sampling."""
-        UOM_NAMES = ["MEINS", "BSTME", "GEWEI", "VOLEH", "LMEIN"]
+        UOM_NAMES = {
+            "MEINS", "BSTME", "GEWEI", "VOLEH", "LMEIN", "UOM",
+            "BASE_UOM", "UNIT_OF_MEASURE", "BASE_UNIT", "ORDER_UOM"
+        }
         target_cols = []
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
+            is_named_uom = False
             if base in UOM_NAMES:
-                target_cols.append(col)
-                continue
-            if any(kw in base for kw in ["_UOM", "UNIT_OF", "_UNIT", "BASE_UNIT", "UOM"]):
-                target_cols.append(col)
-                continue
-            sample_vals = [str(v).strip().upper() for v in df[col].dropna().head(10) if str(v).strip() and str(v) != "nan"]
-            if sample_vals and all(v in QUANTITY_MAP for v in sample_vals if v):
-                if len([v for v in sample_vals if v in QUANTITY_MAP]) >= 3:
+                is_named_uom = True
+            elif re.search(r'(?i)(^|[_\s])(meins|bstme|gewei|voleh|lmein|uom|base_uom|unit_of_measure)([_\s]|$)', base):
+                if not re.search(r'(?i)(business_unit|org_unit|organization_unit|community)', base):
+                    is_named_uom = True
+
+            sample_vals = [str(v).strip().upper() for v in df[col].dropna() if str(v).strip() and str(v).lower() not in ["nan", "none", "null", ""]][:20]
+            if not sample_vals:
+                if is_named_uom:
                     target_cols.append(col)
+                continue
+
+            uom_matches = sum(1 for v in sample_vals if v in QUANTITY_MAP or v in set(QUANTITY_MAP.values()))
+            uom_ratio = uom_matches / len(sample_vals)
+
+            if is_named_uom and (uom_ratio >= 0.15 or len(sample_vals) < 3):
+                target_cols.append(col)
+            elif not is_named_uom and uom_ratio >= 0.5:
+                target_cols.append(col)
+
         return target_cols
 
     def _find_text_columns(self, df: pd.DataFrame) -> List[str]:
         """Auto-detect name/address text fields that should be truncated to 35 chars."""
-        TEXT_NAMES = [
+        TEXT_NAMES = {
             "NAME1", "NAME2", "NAME3", "NAME4",
             "ORT01", "ORT02", "STRAS", "PSTLZ",
             "SORTL", "MCOD1", "MCOD2", "MCOD3",
-        ]
+            "STREET", "CITY", "FIRST_NAME", "LAST_NAME",
+            "NAME_FIRST", "NAME_LAST"
+        }
         target_cols = []
         for col in df.columns:
-            col_upper = col.upper()
+            col_upper = col.upper().strip()
             base = col_upper.split(".")[-1] if "." in col_upper else col_upper
+            base = re.sub(r"^\[\d+\]", "", base).strip()
+
             if base in TEXT_NAMES:
                 target_cols.append(col)
+            elif re.search(r'(?i)(^|[_\s])(name\d*|first_name|last_name|street|city|district|address_line\d*)([_\s]|$)', base):
+                target_cols.append(col)
+
         return target_cols
 
     def _rule_8_date_format(self, df: pd.DataFrame, target_fields: Optional[List[str]] = None, target_format: str = "YYYYMMDD") -> pd.DataFrame:

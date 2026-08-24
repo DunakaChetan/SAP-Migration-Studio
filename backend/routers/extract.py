@@ -393,10 +393,23 @@ def execute_file_extraction(req: ExecuteFileRequest):
                     val = raw_val.strip()
                 elif transform == 'upper':
                     val = raw_val.upper()
+                elif transform == 'email':
+                    val = raw_val.strip().lower()
                 elif transform == 'pad10':
                     val = raw_val.zfill(10) if raw_val.isdigit() else raw_val
                 elif transform == 'country' or transform == 'currency':
                     val = raw_val.strip().upper()
+                elif transform == 'date8':
+                    s = raw_val.strip()
+                    import re
+                    m1 = re.match(r"^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})$", s)
+                    m2 = re.match(r"^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})$", s)
+                    if m1:
+                        val = f"{m1.group(3)}{m1.group(2).zfill(2)}{m1.group(1).zfill(2)}"
+                    elif m2:
+                        val = f"{m2.group(1)}{m2.group(2).zfill(2)}{m2.group(3).zfill(2)}"
+                    else:
+                        val = raw_val
                 else:
                     val = raw_val
                 

@@ -206,6 +206,28 @@ export function DataTable({ rows, cols, keyCols }: { rows: Record<string, unknow
     return false;
   };
 
+  /**
+   * Shorten overly long column headers for display.
+   * Long HRIS-style headers like "Entity PerPerson | HRIS Element personInfo | Effective-dated: No | Business Key: personIdExternal"
+   * are trimmed to the last meaningful segment (after the last "|", or after "Business Key:" / "Field:").
+   */
+  const shortColLabel = (col: string): string => {
+    if (col.length <= 30) return col;
+    // Try "Business Key: <name>" pattern
+    const bkMatch = col.match(/Business Key:\s*(\S+)/i);
+    if (bkMatch) return bkMatch[1];
+    // Try "Field: <name>" or "Key: <name>" pattern
+    const fMatch = col.match(/(?:Field|Key):\s*(\S+)/i);
+    if (fMatch) return fMatch[1];
+    // Try last pipe-separated segment
+    if (col.includes('|')) {
+      const lastPart = col.split('|').pop()?.trim() || col;
+      if (lastPart.length <= 40) return lastPart;
+    }
+    // Fallback: take last 30 chars with ellipsis prefix
+    return '…' + col.slice(-28);
+  };
+
   return (
     <div className="rounded-xl border border-[var(--border)] overflow-auto max-h-[420px]">
       <table className="w-full border-collapse text-[12px] whitespace-nowrap">
@@ -213,9 +235,11 @@ export function DataTable({ rows, cols, keyCols }: { rows: Record<string, unknow
           <tr>
             {c.map((col) => {
               const keyCol = isKey(col);
+              const label = shortColLabel(col);
               return (
                 <th
                   key={col}
+                  title={col !== label ? col : undefined}
                   className="px-3.5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border)] sticky top-0 z-10"
                 >
                   <div className="flex items-center gap-1.5">
@@ -224,7 +248,7 @@ export function DataTable({ rows, cols, keyCols }: { rows: Record<string, unknow
                         <Key className="w-2.5 h-2.5" />
                       </span>
                     )}
-                    <span>{col}</span>
+                    <span>{label}</span>
                   </div>
                 </th>
               );

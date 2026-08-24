@@ -20,7 +20,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "message": "Backend is running."}
+    return {"status": "ok", "message": "Backend is running.", "version": "2026-08-24-v2"}
 
 from routers.mapping import router as mapping_router
 from routers.auth import router as auth_router
