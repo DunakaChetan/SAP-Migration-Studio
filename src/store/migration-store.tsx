@@ -74,7 +74,13 @@ export interface MigrationState {
   fileSchemas: { filename: string; headers: string[] }[];
   joinConfig: {
     base_file: string;
-    joins: { join_file: string; base_key: string; join_key: string }[];
+    joins: {
+      join_file: string;
+      source_file?: string;
+      base_key?: string;
+      join_key?: string;
+      key_pairs?: { base_key: string; join_key: string }[];
+    }[];
   };
 }
 

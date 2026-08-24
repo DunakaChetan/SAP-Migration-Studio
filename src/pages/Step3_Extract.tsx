@@ -12,7 +12,7 @@ import {
   ArrowLeft, ArrowRight, Zap, Download, ClipboardList,
   UploadCloud, AlertTriangle, Activity, CheckCircle, Save,
   BarChart2, ShieldAlert, Search, FileSpreadsheet, Layers, ChevronDown, ChevronUp,
-  RefreshCw, CheckCircle2, Eye, Filter, X, FileText, AlertCircle, Key
+  RefreshCw, CheckCircle2, Eye, Filter, X, FileText, AlertCircle, Key, Database, Columns3
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -290,7 +290,10 @@ export function Step3Extract() {
 
     // 3. Check if field was configured as primary key in Step 1 joinConfig
     if (state.joinConfig?.base_file) {
-      const baseKeys = (state.joinConfig.joins || []).map(j => (j.base_key || '').toLowerCase());
+      const baseKeys = (state.joinConfig.joins || []).flatMap(j => {
+        const kps = j.key_pairs?.length ? j.key_pairs : (j.base_key ? [{ base_key: j.base_key, join_key: j.join_key }] : []);
+        return kps.map((kp: any) => (kp.base_key || '').toLowerCase());
+      });
       if (baseKeys.some(bk => bk === fLower || bk === shortName)) {
         return true;
       }
@@ -310,38 +313,70 @@ export function Step3Extract() {
     }
     if (!row) return { keyField: 'Row', keyValue: `#${idx + 1}`, label: `Row #${idx + 1}` };
 
-    // 1. Check mapped source key from active database schema
+    // 1. Check mapped source key(s) from active database schema & join config
     const targetObjSchema = OBJS[state.obj];
     const schemaKeyFields = (targetObjSchema?.fields || [])
       .filter(f => f.key)
       .map(f => f.n.toLowerCase());
 
-    const keyMapping = state.mapping.find(m => {
+    const keyMappings = state.mapping.filter(m => {
       const sapLower = (m.sap || '').toLowerCase();
       const sapShort = sapLower.split('.').pop() || sapLower;
       return schemaKeyFields.includes(sapLower) || schemaKeyFields.includes(sapShort);
     });
 
+    const joinBaseKeys = (state.joinConfig?.joins || []).flatMap(j => {
+      const kps = j.key_pairs?.length ? j.key_pairs : (j.base_key ? [{ base_key: j.base_key, join_key: j.join_key }] : []);
+      return kps.map((kp: any) => kp.base_key).filter(Boolean);
+    });
+
     const candidateKeys = [
-      keyMapping?.src,
-      ...(state.joinConfig?.joins || []).map(j => j.base_key),
+      ...keyMappings.map(m => m.src),
+      ...joinBaseKeys,
       ...schemaKeyFields
     ].filter(Boolean);
+
+    // Collect all matched key values from row
+    const foundKeyPairs: { field: string; value: string }[] = [];
+    const usedCands = new Set<string>();
 
     for (const cand of candidateKeys) {
       if (!cand) continue;
       const candLower = cand.toLowerCase();
       const candShort = candLower.split('.').pop() || candLower;
+      if (usedCands.has(candShort)) continue;
+
       for (const k of Object.keys(row)) {
         const kLower = k.toLowerCase();
         const kShort = kLower.split('.').pop() || kLower;
         if (kLower === candLower || kShort === candShort || kLower.endsWith(`.${candShort}`)) {
           const v = String(row[k] ?? '').trim();
           if (v && !['nan', 'none', 'null', '<null / empty>', 'undefined'].includes(v.toLowerCase())) {
-            return { keyField: k, keyValue: v, label: `${k}: ${v}` };
+            foundKeyPairs.push({ field: k, value: v });
+            usedCands.add(candShort);
+            break;
           }
         }
       }
+    }
+
+    if (foundKeyPairs.length > 0) {
+      if (foundKeyPairs.length === 1) {
+        return {
+          keyField: foundKeyPairs[0].field,
+          keyValue: foundKeyPairs[0].value,
+          label: `${foundKeyPairs[0].field}: ${foundKeyPairs[0].value}`
+        };
+      }
+      // Composite key representation
+      const compositeFields = foundKeyPairs.map(kp => kp.field).join(' + ');
+      const compositeValues = foundKeyPairs.map(kp => kp.value).join(' · ');
+      const compositeLabel = foundKeyPairs.map(kp => `${kp.field}: ${kp.value}`).join(' | ');
+      return {
+        keyField: compositeFields,
+        keyValue: compositeValues,
+        label: compositeLabel
+      };
     }
 
     // 2. Fallback to first non-empty column in row
@@ -843,11 +878,28 @@ export function Step3Extract() {
           </PageHeader>
 
           {has && (
-            <StatsGrid>
-              <StatBox value={state.extracted.length} label="Records Extracted" subtitle="Source rows" color="var(--color-primary-500)" />
-              <StatBox value={state.headers.length || Object.keys(state.extracted[0] || {}).length} label="Source Columns" color="var(--color-teal)" />
-              <StatBox value={state.mapping.length} label="Fields Mapped" color="var(--color-success)" />
-              <StatBox value={state.mapping.filter((m) => m.tr && m.tr !== 'none').length} label="Transforms" color="var(--color-warning)" />
+            <StatsGrid cols={3}>
+              <StatBox 
+                value={state.extracted.length} 
+                label="Records Extracted" 
+                subtitle="Source rows" 
+                color="var(--color-primary-500)" 
+                icon={<Database className="w-5 h-5 text-blue-500" />}
+              />
+              <StatBox 
+                value={state.headers.length || Object.keys(state.extracted[0] || {}).length} 
+                label="Source Columns" 
+                subtitle="Schema dimensions"
+                color="var(--color-teal)" 
+                icon={<Columns3 className="w-5 h-5 text-teal-500" />}
+              />
+              <StatBox 
+                value={state.mapping.length} 
+                label="Fields Mapped" 
+                subtitle="Target field mappings"
+                color="var(--color-success)" 
+                icon={<CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+              />
             </StatsGrid>
           )}
 

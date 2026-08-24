@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
-import { Sun, Moon, Settings, Bell, Search, Menu } from 'lucide-react';
+import { Sun, Moon, Settings, Bell, Search, Menu, ChevronRight, Folder, Database, Layers } from 'lucide-react';
 import { STEPS } from '@/config/steps';
 
 export function Header() {
@@ -18,17 +18,39 @@ export function Header() {
   const currentStepLabel = currentStepObj.label;
 
   return (
-    <header className="shrink-0 relative z-50 h-16 flex items-center px-6 gap-4">
+    <header className="shrink-0 relative z-50 h-16 flex items-center px-6 gap-4 border-b border-[var(--border)]/40 bg-[var(--bg-primary)]/80 backdrop-blur-md">
       {/* Breadcrumb / Title */}
       <div className="flex items-center gap-3">
         <button className="lg:hidden w-8 h-8 flex items-center justify-center rounded-lg text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)] transition-colors">
           <Menu className="w-5 h-5" />
         </button>
-        <div className="flex flex-col">
-          <span className="text-[10px] font-mono font-semibold tracking-wider text-[var(--text-tertiary)] uppercase">
-            {state.projectName ? `${state.projectName}${state.obj ? ` / ${state.obj}` : ''} / ${currentStepLabel}` : `No Project / ${currentStepLabel}`}
-          </span>
-          <span className="text-lg font-bold text-[var(--text-primary)] tracking-tight">
+        <div className="flex flex-col gap-0.5">
+          {/* Highlighted Breadcrumb Pill Navigation */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Project Pill */}
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/10 dark:bg-blue-500/15 border border-blue-500/25 text-blue-600 dark:text-blue-400 text-[10px] font-mono font-bold tracking-wide shadow-xs">
+              <Folder className="w-3 h-3 text-blue-500" />
+              <span>{state.projectName || 'NO PROJECT'}</span>
+            </div>
+
+            <ChevronRight className="w-3 h-3 text-[var(--text-tertiary)] shrink-0 opacity-60" />
+
+            {/* Object Pill */}
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold tracking-wide shadow-xs">
+              <Database className="w-3 h-3 text-emerald-500" />
+              <span>{state.obj || 'CUSTOMER'}</span>
+            </div>
+
+            <ChevronRight className="w-3 h-3 text-[var(--text-tertiary)] shrink-0 opacity-60" />
+
+            {/* Step Pill */}
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/10 dark:bg-purple-500/15 border border-purple-500/25 text-purple-600 dark:text-purple-400 text-[10px] font-mono font-bold tracking-wide shadow-xs">
+              <Layers className="w-3 h-3 text-purple-500" />
+              <span>{currentStepLabel}</span>
+            </div>
+          </div>
+
+          <span className="text-base font-bold text-[var(--text-primary)] tracking-tight">
             {currentStepLabel}
           </span>
         </div>
