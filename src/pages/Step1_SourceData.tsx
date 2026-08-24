@@ -56,8 +56,128 @@ export function Step1SourceData() {
   const [fileSchemas, setFileSchemas] = useState<{ filename: string; headers: string[] }[]>(() => state.fileSchemas || []);
   const [joinConfig, setJoinConfig] = useState<{
     base_file: string;
-    joins: { join_file: string; base_key: string; join_key: string }[];
-  }>(() => state.joinConfig?.base_file ? state.joinConfig : { base_file: '', joins: [] });
+    joins: {
+      join_file: string;
+      source_file?: string;
+      base_key?: string;
+      join_key?: string;
+      key_pairs?: { base_key: string; join_key: string }[];
+    }[];
+  }>(() => {
+    const raw = state.joinConfig?.base_file ? state.joinConfig : { base_file: '', joins: [] };
+    return { base_file: raw.base_file, joins: raw.joins || [] };
+  });
+
+  const addJoinKeyPair = (joinIdx: number) => {
+    setJoinConfig((prev) => {
+      const curCfg = prev.base_file ? prev : (state.joinConfig || { base_file: '', joins: [] });
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const kps = j.key_pairs?.length
+          ? [...j.key_pairs]
+          : [{ base_key: j.base_key || '', join_key: j.join_key || '' }];
+        kps.push({ base_key: '', join_key: '' });
+        return {
+          ...j,
+          base_key: kps[0]?.base_key || '',
+          join_key: kps[0]?.join_key || '',
+          key_pairs: kps
+        };
+      });
+      const newCfg = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+      return newCfg;
+    });
+  };
+
+  const removeJoinKeyPair = (joinIdx: number, keyPairIdx: number) => {
+    setJoinConfig((prev) => {
+      const curCfg = prev.base_file ? prev : (state.joinConfig || { base_file: '', joins: [] });
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const kps = (j.key_pairs || [{ base_key: j.base_key || '', join_key: j.join_key || '' }]).filter((_, k) => k !== keyPairIdx);
+        const finalKps = kps.length > 0 ? kps : [{ base_key: '', join_key: '' }];
+        return {
+          ...j,
+          base_key: finalKps[0]?.base_key || '',
+          join_key: finalKps[0]?.join_key || '',
+          key_pairs: finalKps
+        };
+      });
+      const newCfg = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+      return newCfg;
+    });
+  };
+
+  const updateJoinSourceFile = (joinIdx: number, newSourceFile: string) => {
+    setJoinConfig((prev) => {
+      const curCfg = prev.base_file ? prev : (state.joinConfig || { base_file: '', joins: [] });
+      const srcSchema = displayedSchemas.find(s => s.filename === newSourceFile);
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const joinSchema = displayedSchemas.find(s => s.filename === j.join_file);
+        
+        // Auto-match keys between newSourceFile and j.join_file
+        const matchedPairs: { base_key: string; join_key: string }[] = [];
+        if (srcSchema && joinSchema) {
+          for (const jh of joinSchema.headers) {
+            for (const sh of srcSchema.headers) {
+              const jClean = jh.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const sClean = sh.toLowerCase().replace(/[^a-z0-9]/g, '');
+              if (
+                (jClean === sClean || (jClean.includes('id') && sClean.includes('id')) || (jClean.includes('code') && sClean.includes('code'))) &&
+                !matchedPairs.some(p => p.base_key === sh || p.join_key === jh)
+              ) {
+                matchedPairs.push({ base_key: sh, join_key: jh });
+                break;
+              }
+            }
+          }
+        }
+
+        const finalPairs = matchedPairs.length > 0
+          ? matchedPairs
+          : [{ base_key: srcSchema?.headers[0] || '', join_key: joinSchema?.headers[0] || '' }];
+
+        return {
+          ...j,
+          source_file: newSourceFile,
+          base_key: finalPairs[0].base_key,
+          join_key: finalPairs[0].join_key,
+          key_pairs: finalPairs
+        };
+      });
+
+      const newCfg = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+      return newCfg;
+    });
+  };
+
+  const updateJoinKeyPair = (joinIdx: number, keyPairIdx: number, side: 'base_key' | 'join_key', val: string) => {
+    setJoinConfig((prev) => {
+      const curCfg = prev.base_file ? prev : (state.joinConfig || { base_file: '', joins: [] });
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const kps = j.key_pairs?.length
+          ? [...j.key_pairs]
+          : [{ base_key: j.base_key || '', join_key: j.join_key || '' }];
+        if (kps[keyPairIdx]) {
+          kps[keyPairIdx] = { ...kps[keyPairIdx], [side]: val };
+        }
+        return {
+          ...j,
+          base_key: kps[0]?.base_key || '',
+          join_key: kps[0]?.join_key || '',
+          key_pairs: kps
+        };
+      });
+      const newCfg = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+      return newCfg;
+    });
+  };
   const [isMerging, setIsMerging] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -128,27 +248,33 @@ export function Step1SourceData() {
       const defaultBase = schemas[0]?.filename || '';
       const defaultJoins = schemas.slice(1).map(s => {
         const baseSchema = schemas[0];
-        let matchedBaseKey = '';
-        let matchedJoinKey = '';
+        const matchedPairs: { base_key: string; join_key: string }[] = [];
         if (baseSchema) {
           for (const jh of s.headers) {
             for (const bh of baseSchema.headers) {
               const jClean = jh.toLowerCase().replace(/[^a-z0-9]/g, '');
               const bClean = bh.toLowerCase().replace(/[^a-z0-9]/g, '');
-              if (jClean === bClean || (jClean.includes('id') && bClean.includes('id'))) {
-                matchedJoinKey = jh;
-                matchedBaseKey = bh;
+              if (
+                (jClean === bClean || (jClean.includes('id') && bClean.includes('id'))) &&
+                !matchedPairs.some(p => p.base_key === bh || p.join_key === jh)
+              ) {
+                matchedPairs.push({ base_key: bh, join_key: jh });
                 break;
               }
             }
-            if (matchedJoinKey) break;
           }
         }
 
+        const finalPairs = matchedPairs.length > 0
+          ? matchedPairs
+          : [{ base_key: baseSchema?.headers[0] || '', join_key: s.headers[0] || '' }];
+
         return {
           join_file: s.filename,
-          base_key: matchedBaseKey || (baseSchema?.headers[0] || ''),
-          join_key: matchedJoinKey || (s.headers[0] || '')
+          source_file: defaultBase,
+          base_key: finalPairs[0].base_key,
+          join_key: finalPairs[0].join_key,
+          key_pairs: finalPairs
         };
       });
 
@@ -178,22 +304,150 @@ export function Step1SourceData() {
     const newFiles = Array.from(newFileList);
     if (newFiles.length === 0) return;
 
-    // Combine avoiding exact same filename
+    // Filter out files that already exist by name
     const existingNames = new Set(displayedFiles.map(f => f.name));
-    const combined = [...stagedFiles, ...newFiles.filter(f => !existingNames.has(f.name))];
-    setStagedFiles(combined);
-    await fetchFileSchemas(combined);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    const trulyNewFiles = newFiles.filter(f => !existingNames.has(f.name));
+    if (trulyNewFiles.length === 0) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    const updatedStaged = [...stagedFiles, ...trulyNewFiles];
+    setStagedFiles(updatedStaged);
+
+    setIsUploading(true);
+    const formData = new FormData();
+    trulyNewFiles.forEach(f => formData.append('files', f));
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload-preview`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) throw new Error('Failed to preview file schemas');
+      const data = await res.json();
+      const newSchemas: { filename: string; headers: string[] }[] = data.files || [];
+
+      const currentSchemas = displayedSchemas;
+      const combinedSchemas = [...currentSchemas, ...newSchemas];
+      setFileSchemas(combinedSchemas);
+
+      const currentMeta = displayedFiles;
+      const combinedMeta = [...currentMeta, ...trulyNewFiles.map(f => ({ name: f.name, size: f.size }))];
+
+      const curCfg = joinConfig.base_file ? joinConfig : (state.joinConfig || { base_file: '', joins: [] });
+      const effectiveBase = curCfg.base_file || combinedSchemas[0]?.filename || '';
+      const baseSchema = combinedSchemas.find(s => s.filename === effectiveBase) || combinedSchemas[0];
+
+      // Keep existing joins intact
+      const existingJoins = curCfg.joins || [];
+      const existingJoinFiles = new Set(existingJoins.map(j => j.join_file));
+
+      // Append default joins for newly added files (excluding the base file)
+      const newJoinsToAdd = combinedSchemas
+        .filter(s => s.filename !== effectiveBase && !existingJoinFiles.has(s.filename))
+        .map(s => {
+          const matchedPairs: { base_key: string; join_key: string }[] = [];
+          if (baseSchema) {
+            for (const jh of s.headers) {
+              for (const bh of baseSchema.headers) {
+                const jClean = jh.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const bClean = bh.toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (
+                  (jClean === bClean || (jClean.includes('id') && bClean.includes('id'))) &&
+                  !matchedPairs.some(p => p.base_key === bh || p.join_key === jh)
+                ) {
+                  matchedPairs.push({ base_key: bh, join_key: jh });
+                  break;
+                }
+              }
+            }
+          }
+
+          const finalPairs = matchedPairs.length > 0
+            ? matchedPairs
+            : [{ base_key: baseSchema?.headers[0] || '', join_key: s.headers[0] || '' }];
+
+          return {
+            join_file: s.filename,
+            source_file: effectiveBase,
+            base_key: finalPairs[0].base_key,
+            join_key: finalPairs[0].join_key,
+            key_pairs: finalPairs
+          };
+        });
+
+      const nextConfig = {
+        base_file: effectiveBase,
+        joins: [...existingJoins, ...newJoinsToAdd]
+      };
+
+      setJoinConfig(nextConfig);
+      dispatch({
+        type: 'BATCH_UPDATE',
+        updates: {
+          fileSchemas: combinedSchemas,
+          uploadedFilesMeta: combinedMeta,
+          joinConfig: nextConfig
+        }
+      });
+    } catch (err: any) {
+      toast(err.message || 'Error loading file schemas', 'err');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
-  const handleRemoveStagedFile = async (fileName: string) => {
-    const updated = stagedFiles.filter(f => f.name !== fileName);
-    setStagedFiles(updated);
-    if (updated.length === 0) {
+  const handleRemoveStagedFile = (fileName: string) => {
+    const updatedStaged = stagedFiles.filter(f => f.name !== fileName);
+    const updatedMeta = (state.uploadedFilesMeta || []).filter(f => f.name !== fileName);
+    const updatedSchemas = (fileSchemas.length > 0 ? fileSchemas : (state.fileSchemas || [])).filter(s => s.filename !== fileName);
+
+    setStagedFiles(updatedStaged);
+    setFileSchemas(updatedSchemas);
+
+    const totalRemaining = updatedStaged.length > 0 ? updatedStaged.length : updatedMeta.length;
+
+    if (totalRemaining === 0) {
       handleClearStagedFiles();
-    } else {
-      await fetchFileSchemas(updated);
+      return;
     }
+
+    // Recompute joinConfig for remaining files
+    const curCfg = joinConfig.base_file ? joinConfig : (state.joinConfig || { base_file: '', joins: [] });
+    let newBase = curCfg.base_file;
+    if (newBase === fileName) {
+      newBase = updatedSchemas[0]?.filename || updatedMeta[0]?.name || '';
+    }
+
+    const remainingJoins = (curCfg.joins || [])
+      .filter(j => j.join_file !== fileName)
+      .map(j => {
+        let src = j.source_file;
+        if (src === fileName) {
+          src = newBase;
+        }
+        return {
+          ...j,
+          source_file: src
+        };
+      });
+
+    const newCfg = {
+      base_file: newBase,
+      joins: remainingJoins
+    };
+
+    setJoinConfig(newCfg);
+    dispatch({
+      type: 'BATCH_UPDATE',
+      updates: {
+        uploadedFilesMeta: updatedMeta,
+        fileSchemas: updatedSchemas,
+        joinConfig: newCfg
+      }
+    });
   };
 
   const handleClearStagedFiles = () => {
@@ -261,9 +515,12 @@ export function Step1SourceData() {
       toast('Please select a Primary / Base Table', 'err');
       return;
     }
-    const missingJoin = displayedJoinConfig.joins.find(j => !j.base_key || !j.join_key);
+    const missingJoin = displayedJoinConfig.joins.find(j => {
+      const kps = j.key_pairs?.length ? j.key_pairs : [{ base_key: j.base_key, join_key: j.join_key }];
+      return kps.length === 0 || kps.some(kp => !kp.base_key || !kp.join_key);
+    });
     if (missingJoin) {
-      toast(`Please select join keys for ${missingJoin.join_file}`, 'err');
+      toast(`Please select join keys for all conditions in ${missingJoin.join_file}`, 'err');
       return;
     }
 
@@ -281,8 +538,16 @@ export function Step1SourceData() {
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || 'Failed to merge files');
+        const errData = await res.json().catch(() => null);
+        let errorMsg = 'Failed to merge files';
+        if (typeof errData?.detail === 'string') {
+          errorMsg = errData.detail;
+        } else if (Array.isArray(errData?.detail)) {
+          errorMsg = errData.detail.map((e: any) => typeof e === 'string' ? e : (e.msg || JSON.stringify(e))).join(', ');
+        } else if (errData?.message) {
+          errorMsg = String(errData.message);
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await res.json();
@@ -296,7 +561,7 @@ export function Step1SourceData() {
       });
       toast(`Successfully joined ${displayedFiles.length} files! Loaded ${data.headers.length} columns and ${data.data.length} rows.`, 'ok');
     } catch (err: any) {
-      toast(err.message, 'err');
+      toast(err?.message || 'Merge failed', 'err');
     } finally {
       setIsMerging(false);
       hideLoad();
@@ -749,10 +1014,19 @@ export function Step1SourceData() {
                                   const newBaseJoins = displayedFiles.filter(f => f.name !== val).map(f => {
                                     const baseS = displayedSchemas.find(s => s.filename === val);
                                     const joinS = displayedSchemas.find(s => s.filename === f.name);
+                                    const existing = displayedJoinConfig.joins.find(j => j.join_file === f.name);
+                                    const kps = existing?.key_pairs?.length
+                                      ? existing.key_pairs
+                                      : [{
+                                          base_key: existing?.base_key || baseS?.headers[0] || '',
+                                          join_key: existing?.join_key || joinS?.headers[0] || ''
+                                        }];
+
                                     return {
                                       join_file: f.name,
-                                      base_key: baseS?.headers[0] || '',
-                                      join_key: joinS?.headers[0] || ''
+                                      base_key: kps[0].base_key,
+                                      join_key: kps[0].join_key,
+                                      key_pairs: kps
                                     };
                                   });
                                   const newCfg = {
@@ -768,70 +1042,124 @@ export function Step1SourceData() {
 
                             {/* Joins for each secondary file */}
                             {displayedJoinConfig.base_file && displayedJoinConfig.joins.map((join, idx) => {
-                              const baseSchema = displayedSchemas.find(s => s.filename === displayedJoinConfig.base_file);
+                              const activeSourceFile = join.source_file || displayedJoinConfig.base_file;
+                              const sourceSchema = displayedSchemas.find(s => s.filename === activeSourceFile)
+                                || displayedSchemas.find(s => s.filename === displayedJoinConfig.base_file);
                               const joinSchema = displayedSchemas.find(s => s.filename === join.join_file);
+                              const keyPairs = join.key_pairs?.length
+                                ? join.key_pairs
+                                : [{ base_key: join.base_key || '', join_key: join.join_key || '' }];
+
+                              const otherAvailableFiles = displayedFiles.filter(f => f.name !== join.join_file);
 
                               return (
                                 <div
                                   key={join.join_file + idx}
-                                  className="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/40 space-y-2.5"
+                                  className="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/40 space-y-3"
                                 >
-                                  <div className="flex items-center justify-between">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div className="flex items-center gap-2">
                                       <Layers className="w-3.5 h-3.5 text-emerald-500" />
                                       <span className="text-[12px] font-semibold text-[var(--text-primary)]">
                                         Join: {join.join_file}
                                       </span>
                                     </div>
-                                    <span className="text-[10px] font-mono text-[var(--text-tertiary)]">LEFT JOIN</span>
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-1.5 bg-[var(--bg-secondary)] px-2 py-0.5 rounded-lg border border-[var(--border)]">
+                                        <span className="text-[10px] text-[var(--text-tertiary)] font-mono font-medium">Join With:</span>
+                                        <div className="w-44">
+                                          <Select
+                                            value={activeSourceFile}
+                                            onChange={(v) => updateJoinSourceFile(idx, v)}
+                                            options={otherAvailableFiles.map(f => ({
+                                              value: f.name,
+                                              label: f.name === displayedJoinConfig.base_file ? `${f.name} (Base)` : f.name
+                                            }))}
+                                          />
+                                        </div>
+                                      </div>
+                                      {keyPairs.length > 1 && (
+                                        <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                          {keyPairs.length} KEY CONDITIONS
+                                        </span>
+                                      )}
+                                      <span className="text-[10px] font-mono text-[var(--text-tertiary)]">LEFT JOIN</span>
+                                    </div>
                                   </div>
 
-                                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                                    <div>
-                                      <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
-                                        {displayedJoinConfig.base_file} Primary Key
-                                      </label>
-                                      <Select
-                                        value={join.base_key}
-                                        searchable
-                                        onChange={(v) => {
-                                          const newJoins = [...displayedJoinConfig.joins];
-                                          newJoins[idx].base_key = v;
-                                          const newCfg = { ...displayedJoinConfig, joins: newJoins };
-                                          setJoinConfig(newCfg);
-                                          dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
-                                        }}
-                                        options={[
-                                          { value: '', label: 'Select Primary Key...' },
-                                          ...(baseSchema?.headers.map(h => ({ value: h, label: h })) || [])
-                                        ]}
-                                      />
-                                    </div>
+                                  {/* List of join key pairs */}
+                                  <div className="space-y-2.5">
+                                    {keyPairs.map((kp, kIdx) => (
+                                      <React.Fragment key={kIdx}>
+                                        {kIdx > 0 && (
+                                          <div className="flex items-center justify-center -my-1">
+                                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-[9px] font-bold tracking-wider">
+                                              AND (COMPOSITE KEY)
+                                            </span>
+                                          </div>
+                                        )}
+                                        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-end gap-2 bg-[var(--bg-secondary)]/50 p-2.5 rounded-lg border border-[var(--border)]/60 w-full max-w-full">
+                                          <div className="min-w-0">
+                                            <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
+                                              {activeSourceFile} Key {keyPairs.length > 1 ? `#${kIdx + 1}` : 'Key'}
+                                            </label>
+                                            <Select
+                                              value={kp.base_key}
+                                              searchable
+                                              onChange={(v) => updateJoinKeyPair(idx, kIdx, 'base_key', v)}
+                                              options={[
+                                                { value: '', label: `Select ${activeSourceFile} Key...` },
+                                                ...(sourceSchema?.headers.map(h => ({ value: h, label: h })) || [])
+                                              ]}
+                                            />
+                                          </div>
 
-                                    <div className="flex flex-col items-center justify-center pt-4">
-                                      <ArrowRight className="w-4 h-4 text-emerald-500" />
-                                    </div>
+                                          <div className="flex flex-col items-center justify-center pb-2 shrink-0">
+                                            <ArrowRight className="w-4 h-4 text-emerald-500" />
+                                          </div>
 
-                                    <div>
-                                      <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
-                                        {join.join_file} Foreign Key
-                                      </label>
-                                      <Select
-                                        value={join.join_key}
-                                        searchable
-                                        onChange={(v) => {
-                                          const newJoins = [...displayedJoinConfig.joins];
-                                          newJoins[idx].join_key = v;
-                                          const newCfg = { ...displayedJoinConfig, joins: newJoins };
-                                          setJoinConfig(newCfg);
-                                          dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
-                                        }}
-                                        options={[
-                                          { value: '', label: 'Select Foreign Key...' },
-                                          ...(joinSchema?.headers.map(h => ({ value: h, label: h })) || [])
-                                        ]}
-                                      />
-                                    </div>
+                                          <div className="min-w-0">
+                                            <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
+                                              {join.join_file} Key {keyPairs.length > 1 ? `#${kIdx + 1}` : 'Foreign Key'}
+                                            </label>
+                                            <Select
+                                              value={kp.join_key}
+                                              searchable
+                                              onChange={(v) => updateJoinKeyPair(idx, kIdx, 'join_key', v)}
+                                              options={[
+                                                { value: '', label: `Select ${join.join_file} Key...` },
+                                                ...(joinSchema?.headers.map(h => ({ value: h, label: h })) || [])
+                                              ]}
+                                            />
+                                          </div>
+
+                                          <div className="flex items-center justify-center pb-1 w-8 shrink-0">
+                                            {kIdx > 0 ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => removeJoinKeyPair(idx, kIdx)}
+                                                className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                                                title="Remove this composite key condition"
+                                              >
+                                                <Trash2 className="w-4 h-4" />
+                                              </button>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
+
+                                  {/* Add additional key condition button */}
+                                  <div className="pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => addJoinKeyPair(idx)}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 cursor-pointer transition-colors"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                      Add Composite Key Condition
+                                    </button>
                                   </div>
                                 </div>
                               );
@@ -841,7 +1169,15 @@ export function Step1SourceData() {
                               variant="primary"
                               className="w-full justify-center mt-2"
                               onClick={handleMergeAndLoadFiles}
-                              disabled={isMerging || isUploading || !displayedJoinConfig.base_file || displayedJoinConfig.joins.some(j => !j.base_key || !j.join_key)}
+                              disabled={
+                                isMerging ||
+                                isUploading ||
+                                !displayedJoinConfig.base_file ||
+                                displayedJoinConfig.joins.some(j => {
+                                  const kps = j.key_pairs?.length ? j.key_pairs : [{ base_key: j.base_key, join_key: j.join_key }];
+                                  return kps.length === 0 || kps.some(kp => !kp.base_key || !kp.join_key);
+                                })
+                              }
                               icon={<GitMerge className="w-4 h-4" />}
                             >
                               {isMerging ? 'Merging Tables...' : `Merge & Load ${displayedFiles.length} Tables`}

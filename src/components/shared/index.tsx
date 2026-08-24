@@ -57,22 +57,31 @@ interface StatBoxProps {
   label: string;
   subtitle?: string;
   color?: string;
+  icon?: ReactNode;
 }
-export function StatBox({ value, label, subtitle, color = 'var(--color-primary-500)' }: StatBoxProps) {
+export function StatBox({ value, label, subtitle, color = 'var(--color-primary-500)', icon }: StatBoxProps) {
   return (
-    <div className="glass-panel rounded-2xl p-5 relative overflow-hidden group">
+    <div className="glass-panel rounded-2xl p-4 sm:p-5 relative overflow-hidden group">
       <div className="absolute inset-0 bg-gradient-to-br from-primary-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-      <div className="relative z-10">
-        <div className="font-mono text-3xl font-black tracking-tight mb-1" style={{ color }}>{value}</div>
-        <div className="text-[13px] font-bold text-[var(--text-secondary)]">{label}</div>
-        {subtitle && <div className="text-[11px] text-[var(--text-tertiary)] mt-1">{subtitle}</div>}
+      <div className="relative z-10 flex items-start gap-3.5">
+        {icon && (
+          <div className="p-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] shrink-0 group-hover:scale-105 transition-transform shadow-xs flex items-center justify-center mt-0.5" style={{ color }}>
+            {icon}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-3xl font-black tracking-tight leading-none mb-1.5" style={{ color }}>{value}</div>
+          <div className="text-[13px] font-bold text-[var(--text-secondary)] truncate">{label}</div>
+          {subtitle && <div className="text-[11px] text-[var(--text-tertiary)] mt-0.5 truncate">{subtitle}</div>}
+        </div>
       </div>
     </div>
   );
 }
 
-export function StatsGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{children}</div>;
+export function StatsGrid({ children, cols }: { children: ReactNode; cols?: number }) {
+  const colClass = cols === 3 ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-2 lg:grid-cols-4';
+  return <div className={`grid ${colClass} gap-3`}>{children}</div>;
 }
 
 /* ── Badge ── */

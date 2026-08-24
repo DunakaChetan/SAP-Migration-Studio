@@ -95,6 +95,43 @@
       "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
       "source": "cleanse",
       "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-24T13:05:48.246918+00:00",
+      "description": "Email address must not use the dummy domain @example.com",
+      "error_message": "Email address cannot use the placeholder domain @example.com.",
+      "field": "SMTP_ADDR",
+      "id": "DYNAMIC_1",
+      "label": "Invalid Placeholder Email Domain",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "severity": "ERROR",
+      "source": "validate",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-24T13:05:53.570087+00:00",
+      "description": "Email address must not use the @example.com domain.",
+      "error_message": "Email address contains invalid domain @example.com.",
+      "field": "SMTP_ADDR",
+      "id": "RULE_1",
+      "label": "Invalid Email Domain",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "severity": "ERROR",
+      "source": "validation_dynamic_rule",
+      "target_object": "CUSTOMER"
+    },
+    {
+      "created_at": "2026-08-24T13:07:16.719927+00:00",
+      "description": "",
+      "field": "GENERAL",
+      "id": "DYN_1787576834133",
+      "label": "DYN_1787576834133",
+      "priority": 100,
+      "project_id": "26bcb9d9-b81d-4c43-b58e-570317165910",
+      "source": "cleanse",
+      "target_object": "CUSTOMER"
     }
   ],
   "version": "1.0"

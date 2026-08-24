@@ -296,33 +296,111 @@ async def upload_merge(
             
         merged_df = dfs[base_filename].fillna("")
         
-        for join in joins:
-            join_file = join.get("join_file")
-            base_key = join.get("base_key")
-            join_key = join.get("join_key")
+        # Process joins in dependency order (topological execution)
+        merged_files = {base_filename}
+        column_aliases = {}
+        pending_joins = list(joins)
+        max_iterations = len(pending_joins) * 4
+        iteration = 0
+
+        while pending_joins and iteration < max_iterations:
+            iteration += 1
+            # Find a join whose source_file is already merged
+            join_to_process = None
+            join_index = -1
+
+            for idx, j in enumerate(pending_joins):
+                src_f = j.get("source_file") or base_filename
+                if src_f in merged_files:
+                    join_to_process = j
+                    join_index = idx
+                    break
+
+            if not join_to_process:
+                # If no direct match in merged_files, pick the first available
+                join_to_process = pending_joins[0]
+                join_index = 0
+
+            pending_joins.pop(join_index)
+
+            join_file = join_to_process.get("join_file")
+            source_file = join_to_process.get("source_file") or base_filename
             
-            if join_file in dfs:
+            # Extract list of key pairs (composite support) or fallback to single base_key/join_key
+            key_pairs = join_to_process.get("key_pairs") or []
+            if not key_pairs:
+                b_k = join_to_process.get("base_key")
+                j_k = join_to_process.get("join_key")
+                if b_k and j_k:
+                    key_pairs = [{"base_key": b_k, "join_key": j_k}]
+            
+            raw_left_keys = [str(kp.get("base_key", "")).strip() for kp in key_pairs if kp.get("base_key")]
+            right_keys = [str(kp.get("join_key", "")).strip() for kp in key_pairs if kp.get("join_key")]
+            
+            if join_file in dfs and raw_left_keys and right_keys and len(raw_left_keys) == len(right_keys):
                 join_df = dfs[join_file].fillna("")
                 file_tag = join_file.split(".")[0]
-                
-                # Suffix overlapping columns to avoid errors and preserve data
+                source_tag = source_file.split(".")[0] if source_file else ""
+
+                # Resolve actual column name in merged_df for each left key
+                actual_left_keys = []
+                for k in raw_left_keys:
+                    if k in merged_df.columns:
+                        actual_left_keys.append(k)
+                    elif f"{k}_{source_tag}" in merged_df.columns:
+                        actual_left_keys.append(f"{k}_{source_tag}")
+                    elif k in column_aliases and column_aliases[k] in merged_df.columns:
+                        actual_left_keys.append(column_aliases[k])
+                    elif f"{source_file}.{k}" in column_aliases and column_aliases[f"{source_file}.{k}"] in merged_df.columns:
+                        actual_left_keys.append(column_aliases[f"{source_file}.{k}"])
+                    else:
+                        # Case insensitive or normalized search in merged_df
+                        k_clean = k.lower().replace("_", "").replace(" ", "").replace("-", "")
+                        matched = None
+                        for c in merged_df.columns:
+                            c_clean = c.lower().replace("_", "").replace(" ", "").replace("-", "")
+                            if c.lower() == k.lower() or c_clean == k_clean or c.lower().endswith("." + k.lower()):
+                                matched = c
+                                break
+                        # If still not found, check if it's an ID field that matches any primary ID column
+                        if not matched and ('id' in k_clean or 'key' in k_clean):
+                            for c in merged_df.columns:
+                                c_clean = c.lower().replace("_", "").replace(" ", "").replace("-", "")
+                                if 'id' in c_clean or 'key' in c_clean or 'kunnr' in c_clean:
+                                    matched = c
+                                    break
+                        actual_left_keys.append(matched or k)
+
+                # Check if any left key is missing in merged_df
+                missing_keys = [k for k in actual_left_keys if k not in merged_df.columns]
+                if missing_keys and pending_joins:
+                    # Source table columns not ready yet; re-queue to merge after other tables
+                    pending_joins.append(join_to_process)
+                    continue
+
+                # Suffix overlapping non-key columns to avoid errors and preserve data
                 merged_df = pd.merge(
                     merged_df, 
                     join_df, 
-                    left_on=base_key, 
-                    right_on=join_key, 
+                    left_on=actual_left_keys if len(actual_left_keys) > 1 else actual_left_keys[0], 
+                    right_on=right_keys if len(right_keys) > 1 else right_keys[0], 
                     how='left',
                     suffixes=('', f'_{file_tag}')
                 )
 
-                # Remove redundant foreign key column so only the primary key is kept for mapping
-                if join_key and join_key != base_key and join_key in merged_df.columns:
-                    merged_df.drop(columns=[join_key], inplace=True)
-                
-                # If foreign key had the same name and was suffixed, drop the redundant suffixed column
-                suffixed_fk = f"{join_key}_{file_tag}"
-                if suffixed_fk in merged_df.columns:
-                    merged_df.drop(columns=[suffixed_fk], inplace=True)
+                # Remove redundant foreign key columns so only the primary keys are kept for mapping
+                for b_k, j_k in zip(actual_left_keys, right_keys):
+                    column_aliases[j_k] = b_k
+                    column_aliases[f"{join_file}.{j_k}"] = b_k
+                    if j_k and j_k != b_k and j_k in merged_df.columns:
+                        merged_df.drop(columns=[j_k], inplace=True)
+                    
+                    # If foreign key had the same name and was suffixed, drop the redundant suffixed column
+                    suffixed_fk = f"{j_k}_{file_tag}"
+                    if suffixed_fk in merged_df.columns:
+                        merged_df.drop(columns=[suffixed_fk], inplace=True)
+
+                merged_files.add(join_file)
                 
         merged_df = merged_df.fillna("").replace(["nan", "None", "<NA>"], "")
         headers = list(merged_df.columns)
