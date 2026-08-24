@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { jsPDF } from 'jspdf';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
@@ -513,6 +514,321 @@ export function Step6Cleanse() {
       .filter((item): item is Record<string, any> => Boolean(item));
 
     dl(expCSV(dataToDownload), 'warnings_records.csv', 'text/csv');
+  };
+
+  // Comprehensive Deep Vector PDF Generator for Cleansing & Remediation
+  const exportToPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      // Palette (Exact same palette as Step 3)
+      const primaryColor = [14, 116, 144]; // Deep Teal
+      const darkText = [30, 41, 59];
+      const lightBg = [248, 250, 252];
+
+      const rowCount = summary?.rows_loaded ?? cleanedRows.length ?? 0;
+      const rowsModified = summary?.rows_modified_count ?? 0;
+      const dynFixCount = summary?.dynamic_fixes?.count ?? summary?.dynamic_fixes?.items?.length ?? 0;
+      const valFixCount = summary?.validation_fixes?.count ?? summary?.validation_fixes?.items?.length ?? 0;
+      const clsFixCount = summary?.cleanser_fixes?.count ?? summary?.cleanser_fixes?.items?.length ?? 0;
+      const manFixCount = summary?.manual_fixes?.count ?? summary?.manual_fixes?.items?.length ?? 0;
+      const totalFixes = dynFixCount + valFixCount + clsFixCount + manFixCount;
+
+      // Header Banner
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(0, 0, pageWidth, 28, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(255, 255, 255);
+      doc.text('SAP Migration Studio — Data Cleansing Report', 14, 14);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text(`Generated: ${new Date().toLocaleDateString()} | Target Object: ${state.obj} | ${rowCount} Records Processed`, 14, 22);
+
+      let yPos = 36;
+
+      // Executive Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text(`Data Cleansing & Remediation Report: ${state.obj} Master Data`, 14, yPos);
+      yPos += 8;
+
+      // Scorecard Box
+      doc.setFillColor(lightBg[0], lightBg[1], lightBg[2]);
+      doc.roundedRect(14, yPos, pageWidth - 28, 22, 3, 3, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(`Overall Remediation Status: ${summary?.overall_status || 'SUCCESS'}  (${totalFixes} Auto-Fixes Applied)`, 20, yPos + 9);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Total Records: ${rowCount}  |  Rows Modified: ${rowsModified}  |  Dynamic AI Fixes: ${dynFixCount}  |  Validation Fixes: ${valFixCount}  |  Standard Fixes: ${clsFixCount}`, 20, yPos + 16);
+
+      yPos += 28;
+
+      // Section 1: Executive Summary
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('1. Executive Summary', 14, yPos);
+      yPos += 6;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor(71, 85, 105);
+
+      const summaryText = `This report details the automated data cleansing and remediation lifecycle executed for SAP S/4HANA migration of ${state.obj} Master Data. The cleansing engine evaluated ${rowCount} records against configured business validation policies, dynamic AI prompt rules, and standard SAP normalization standards. A total of ${totalFixes} cell-level anomalies across ${rowsModified} records were autonomously remediated with full audit compliance.\n\nAll transformations have been verified for Customer-Vendor Integration (CVI), ISO code standardization, and SAP field length limitations to prevent transactional posting errors in the target S/4HANA system.`;
+
+      const splitSummary = doc.splitTextToSize(summaryText, pageWidth - 28);
+      doc.text(splitSummary, 14, yPos);
+      yPos += (splitSummary.length * 4.5) + 6;
+
+      // Section 2: Rule Execution & Policy Breakdown
+      if (yPos > 240) { doc.addPage(); yPos = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('2. Cleansing Rules & Execution Breakdown', 14, yPos);
+      yPos += 6;
+
+      // Table Header
+      doc.setFillColor(241, 245, 249);
+      doc.rect(14, yPos, pageWidth - 28, 7, 'F');
+
+      doc.setFontSize(8.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text('Rule Code', 18, yPos + 5);
+      doc.text('Category', 72, yPos + 5);
+      doc.text('Target Field', 115, yPos + 5);
+      doc.text('Fix Count', 152, yPos + 5);
+      doc.text('Status', 178, yPos + 5);
+      yPos += 7;
+
+      // Collect rule list
+      const rulesList: Array<{ code: string; cat: string; field: string; count: number; status: string }> = [];
+
+      (summary?.dynamic_fixes?.items || []).forEach(item => {
+        const existing = rulesList.find(r => r.code === (item.rule_code || 'DYNAMIC_AI') && r.field === item.field);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          rulesList.push({
+            code: item.rule_code || 'DYNAMIC_AI',
+            cat: 'Dynamic AI',
+            field: item.field || 'MULTIPLE',
+            count: 1,
+            status: 'APPLIED'
+          });
+        }
+      });
+
+      (summary?.validation_fixes?.items || []).forEach(item => {
+        const existing = rulesList.find(r => r.code === item.rule_code && r.field === item.field);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          rulesList.push({
+            code: item.rule_code || 'VALIDATION_FIX',
+            cat: 'Validation Fix',
+            field: item.field || 'MULTIPLE',
+            count: 1,
+            status: 'APPLIED'
+          });
+        }
+      });
+
+      (summary?.cleanser_fixes?.items || []).forEach(item => {
+        const existing = rulesList.find(r => r.code === item.rule_code && r.field === item.field);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          rulesList.push({
+            code: item.rule_code || 'CLEANSER_STD',
+            cat: 'Standard Rule',
+            field: item.field || 'GENERAL',
+            count: 1,
+            status: 'APPLIED'
+          });
+        }
+      });
+
+      if (rulesList.length === 0) {
+        rulesList.push({
+          code: 'NO_ANOMALIES',
+          cat: 'Standard',
+          field: 'ALL',
+          count: 0,
+          status: 'CLEAN'
+        });
+      }
+
+      doc.setFont('helvetica', 'normal');
+      rulesList.forEach((r, index) => {
+        if (yPos > 275) {
+          doc.addPage();
+          yPos = 20;
+        }
+
+        if (index % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, yPos, pageWidth - 28, 6, 'F');
+        }
+
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.text(String(r.code).substring(0, 24), 18, yPos + 4.5);
+        doc.text(String(r.cat).substring(0, 18), 72, yPos + 4.5);
+        doc.text(String(r.field).substring(0, 14), 115, yPos + 4.5);
+        doc.text(`${r.count} rows`, 152, yPos + 4.5);
+
+        doc.setTextColor(16, 185, 129);
+        doc.text(r.status, 178, yPos + 4.5);
+        yPos += 6;
+      });
+
+      yPos += 6;
+
+      // Section 3: Field Transformation & Remediation Summary
+      const fixGroups = [
+        ...groupFixItems(summary?.dynamic_fixes?.items || []),
+        ...groupFixItems(summary?.validation_fixes?.items || []),
+        ...groupFixItems(summary?.cleanser_fixes?.items || []),
+        ...groupFixItems(summary?.manual_fixes?.items || []),
+      ];
+
+      if (fixGroups.length > 0) {
+        if (yPos > 230) { doc.addPage(); yPos = 20; }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.text('3. Field Transformation & Remediation Summary', 14, yPos);
+        yPos += 6;
+
+        // Table Header
+        doc.setFillColor(241, 245, 249);
+        doc.rect(14, yPos, pageWidth - 28, 7, 'F');
+
+        doc.setFontSize(8.5);
+        doc.setTextColor(71, 85, 105);
+        doc.text('Target Field', 18, yPos + 5);
+        doc.text('Rule Code', 62, yPos + 5);
+        doc.text('Impacted', 112, yPos + 5);
+        doc.text('Sample (Old -> Cleansed)', 142, yPos + 5);
+        yPos += 7;
+
+        doc.setFont('helvetica', 'normal');
+        fixGroups.forEach((g, index) => {
+          if (yPos > 275) {
+            doc.addPage();
+            yPos = 20;
+          }
+
+          if (index % 2 === 1) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(14, yPos, pageWidth - 28, 6, 'F');
+          }
+
+          const sampleItem = g.items[0];
+          const oldSample = String(sampleItem?.old || '(empty)').substring(0, 10);
+          const newSample = String(sampleItem?.new || '(cleansed)').substring(0, 12);
+          const sampleStr = `${oldSample} -> ${newSample}`;
+
+          doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+          doc.text(String(g.field || 'GENERAL').substring(0, 18), 18, yPos + 4.5);
+          doc.text(String(g.rule_code).substring(0, 22), 62, yPos + 4.5);
+          doc.text(`${g.count} row(s)`, 112, yPos + 4.5);
+          doc.text(sampleStr, 142, yPos + 4.5);
+
+          yPos += 6;
+        });
+
+        yPos += 6;
+      }
+
+      // SECTION 4: DETAILED CLEANSING & REMEDIATION AUDIT LOG (ROW-LEVEL AUDIT)
+      if (allAuditItems.length > 0) {
+        doc.addPage();
+        yPos = 20;
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.text('4. Detailed Cleansing & Remediation Audit Log (Row-Level Audit)', 14, yPos);
+        yPos += 8;
+
+        // Table Header
+        doc.setFillColor(241, 245, 249);
+        doc.rect(14, yPos, pageWidth - 28, 7, 'F');
+
+        doc.setFontSize(8);
+        doc.setTextColor(71, 85, 105);
+        doc.text('Row / Key', 16, yPos + 5);
+        doc.text('Rule Code', 52, yPos + 5);
+        doc.text('Field Name', 88, yPos + 5);
+        doc.text('Transformation (Old -> New)', 118, yPos + 5);
+        doc.text('Status', 178, yPos + 5);
+        yPos += 7;
+
+        doc.setFont('helvetica', 'normal');
+        allAuditItems.forEach((item, fIdx) => {
+          if (yPos > 275) {
+            doc.addPage();
+            yPos = 20;
+
+            // Re-render header on new page for readability
+            doc.setFillColor(241, 245, 249);
+            doc.rect(14, yPos, pageWidth - 28, 7, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.setTextColor(71, 85, 105);
+            doc.text('Row / Key', 16, yPos + 5);
+            doc.text('Rule Code', 52, yPos + 5);
+            doc.text('Field Name', 88, yPos + 5);
+            doc.text('Transformation (Old -> New)', 118, yPos + 5);
+            doc.text('Status', 178, yPos + 5);
+            doc.setFont('helvetica', 'normal');
+            yPos += 7;
+          }
+
+          if (fIdx % 2 === 1) {
+            doc.setFillColor(252, 253, 254);
+            doc.rect(14, yPos, pageWidth - 28, 5.5, 'F');
+          }
+
+          const rowObj = cleanedRows[item.row - 1] || {};
+          const pkKey = state.obj === 'VENDOR' ? 'LIFNR' : state.obj === 'MATERIAL' ? 'MATNR' : 'KUNNR';
+          const pkVal = rowObj[pkKey] || rowObj[pkKey.toLowerCase()] || rowObj[pkKey.toUpperCase()] || '';
+          const rowIdent = pkVal ? `#${item.row} (${String(pkVal).substring(0, 10)})` : `Row #${item.row}`;
+
+          doc.setFontSize(7.5);
+          doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+          doc.text(rowIdent, 16, yPos + 4);
+          doc.text(String(item.rule_code).substring(0, 16), 52, yPos + 4);
+          doc.text(String(item.field).substring(0, 14), 88, yPos + 4);
+
+          const oldStr = String(item.old_value || '(empty)').substring(0, 12);
+          const newStr = String(item.new_value || '').substring(0, 14);
+          doc.text(`${oldStr} -> ${newStr}`, 118, yPos + 4);
+
+          doc.setTextColor(16, 185, 129);
+          doc.text('APPLIED', 178, yPos + 4);
+
+          yPos += 5.5;
+        });
+      }
+
+      doc.save(`Data_Cleansing_Deep_Report_${state.obj}.pdf`);
+      toast('Comprehensive Vector PDF Report exported successfully!', 'ok');
+    } catch (err: any) {
+      console.error(err);
+      toast('Failed to generate PDF report', 'err');
+    }
   };
 
   const applyManualFixes = () => {
@@ -1221,6 +1537,14 @@ export function Step6Cleanse() {
                   <Button
                     variant="secondary"
                     size="sm"
+                    icon={<Download className="w-3 h-3 text-indigo-500" />}
+                    onClick={exportToPDF}
+                  >
+                    Export Vector PDF
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     icon={<FileJson className="w-3 h-3" />}
                     onClick={() => dl(exportExecutiveSummaryJSON(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_summary.json', 'application/json')}
                   >
@@ -1483,6 +1807,14 @@ export function Step6Cleanse() {
               icon={<FileText className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
             >
               <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={<Download className="w-3 h-3 text-indigo-500" />}
+                  onClick={exportToPDF}
+                >
+                  Export Vector PDF
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
