@@ -26,9 +26,9 @@ class ExtractAgent:
         
         base_url = base_url.rstrip('/')
         if target_object in ['CUSTOMER', 'VENDOR', 'Customer', 'Vendor']:
-            api_path = f"/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_BusinessPartner?$select={select_query}&$top=1000"
+            api_path = f"/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_BusinessPartner?$select={select_query}"
         elif target_object in ['MATERIAL', 'Material']:
-            api_path = f"/sap/opu/odata/sap/API_PRODUCT_SRV/A_Product?$select={select_query}&$top=1000"
+            api_path = f"/sap/opu/odata/sap/API_PRODUCT_SRV/A_Product?$select={select_query}"
         else:
             raise ValueError(f"Unsupported target object: {target_object}")
 
@@ -53,7 +53,20 @@ class ExtractAgent:
             raise Exception(f"Failed to fetch data from SAP: {res.status_code} {res.text[:200]}")
 
         data = res.json()
-        results = data.get("d", {}).get("results", [])
+        results = []
+        if isinstance(data, dict):
+            if "d" in data:
+                d_val = data["d"]
+                if isinstance(d_val, dict) and "results" in d_val:
+                    results = d_val["results"]
+                elif isinstance(d_val, list):
+                    results = d_val
+            elif "value" in data:
+                results = data["value"]
+            elif "results" in data:
+                results = data["results"]
+        elif isinstance(data, list):
+            results = data
 
         # 3. Apply Transformations
         harmonized_results = []

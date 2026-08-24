@@ -143,7 +143,7 @@ export function Step3Extract() {
 
     dispatch({ type: 'SET_FIELD', field: 'aiReport', value: null });
 
-    if (state.src === 'LIVE_SAP') {
+    if (state.src === 'LIVE_SAP' || state.src === 'SAP_ECC') {
       showLoad('Extracting from SAP…', 'Connecting to live system and generating AI Quality Report', [
         'Connecting source…', 'Running $select query…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
       ]);
@@ -159,6 +159,7 @@ export function Step3Extract() {
             client: state.connClient,
             username: state.connUser,
             password: state.connPass,
+            system_type: state.src || 'SAP_ECC',
             target_object: objName,
             mappings: state.mapping,
           })
@@ -166,7 +167,14 @@ export function Step3Extract() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.detail || 'SAP extraction failed');
+          const errMsg = typeof errData.detail === 'string'
+            ? errData.detail
+            : (Array.isArray(errData.detail)
+                ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
+                : (typeof errData.detail === 'object' && errData.detail !== null
+                    ? JSON.stringify(errData.detail)
+                    : (errData.message || 'SAP extraction failed')));
+          throw new Error(errMsg);
         }
 
         const data = await res.json();
@@ -187,11 +195,36 @@ export function Step3Extract() {
         toast(err.message, 'err');
       }
     } else {
-      const sourceData = (state.rawData && state.rawData.length > 0)
-        ? state.rawData
-        : ((state.uploadedData && state.uploadedData.length > 0)
-            ? state.uploadedData
+      let sourceData = (state.uploadedData && state.uploadedData.length > 0)
+        ? state.uploadedData
+        : ((state.rawData && state.rawData.length > 0)
+            ? state.rawData
             : (state.extracted && state.extracted.length > 0 ? state.extracted : []));
+
+      if (state.src === 'ORACLE_EBS' && sourceData.length <= 10) {
+        try {
+          const oracleRes = await fetch('/Oracle.xlsx');
+          if (oracleRes.ok) {
+            const blob = await oracleRes.blob();
+            const file = new File([blob], 'Oracle.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const formData = new FormData();
+            formData.append('file', file);
+            const upRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, {
+              method: 'POST',
+              body: formData
+            });
+            if (upRes.ok) {
+              const upData = await upRes.json();
+              if (upData.data && upData.data.length > 0) {
+                sourceData = upData.data;
+                dispatch({ type: 'SET_FIELD', field: 'uploadedData', value: upData.data });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not auto-fetch full Oracle dataset, proceeding with existing data', e);
+        }
+      }
 
       if (sourceData.length === 0) {
         toast('No source dataset found. Please upload your files in Step 1 (Source Data) first.', 'err');
@@ -217,7 +250,14 @@ export function Step3Extract() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.detail || 'Extraction failed');
+          const errMsg = typeof errData.detail === 'string'
+            ? errData.detail
+            : (Array.isArray(errData.detail)
+                ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
+                : (typeof errData.detail === 'object' && errData.detail !== null
+                    ? JSON.stringify(errData.detail)
+                    : (errData.message || 'Extraction failed')));
+          throw new Error(errMsg);
         }
 
         const data = await res.json();

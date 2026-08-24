@@ -570,7 +570,7 @@ export function Step1SourceData() {
 
   const handleLoadOracle = async () => {
     setIsUploading(true);
-    showLoad('Loading Oracle Extract...', 'Parsing Oracle.xlsx', ['Reading columns...']);
+    showLoad('Loading Oracle Extract...', 'Parsing Oracle sample data', ['Reading columns...', 'Extracting 10 sample rows...']);
     try {
       const response = await fetch('/Oracle.xlsx');
       if (!response.ok) throw new Error('Failed to fetch Oracle.xlsx from public folder');
@@ -592,9 +592,16 @@ export function Step1SourceData() {
       }
 
       const data = await res.json();
-      dispatch({ type: 'SET_FIELD', field: 'headers', value: data.headers });
-      dispatch({ type: 'SET_FIELD', field: 'uploadedData', value: data.data });
-      toast(`Successfully loaded ${data.headers.length} columns and ${data.data.length} rows from Oracle.xlsx!`, 'ok');
+      const sampleData = (data.data || []).slice(0, 10);
+      dispatch({
+        type: 'BATCH_UPDATE',
+        updates: {
+          headers: data.headers || [],
+          rawData: sampleData,
+          uploadedData: data.data || []
+        }
+      });
+      toast(`Successfully loaded ${data.headers?.length || 0} columns and ${sampleData.length} sample rows from Oracle EBS!`, 'ok');
     } catch (err: any) {
       toast(err.message, 'err');
     } finally {

@@ -19,10 +19,10 @@ router = APIRouter(prefix="/api/sap/extract", tags=["Extract"])
 
 class ConnectionRequest(BaseModel):
     base_url: str
-    client: str
-    username: str
-    password: str
-    system_type: str
+    client: Optional[str] = ""
+    username: Optional[str] = ""
+    password: Optional[str] = ""
+    system_type: Optional[str] = "SAP_ECC"
 
 class FetchSampleRequest(ConnectionRequest):
     target_object: str
@@ -159,6 +159,7 @@ class ExecuteExtractionRequest(ConnectionRequest):
     mappings: list
 
 @router.post("/execute")
+@router.post("/live")
 def execute_extraction(req: ExecuteExtractionRequest):
     if not req.base_url:
         raise HTTPException(status_code=400, detail="Base URL is required")
