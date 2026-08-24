@@ -670,6 +670,94 @@ export function Step4Harmonize() {
   const [customPrompts, setCustomPrompts] = useState<string[]>([]);
   const [newPromptInput, setNewPromptInput] = useState('');
 
+  // Fetch saved dynamic harmonization rules on mount
+  useEffect(() => {
+    if (state.projectId && state.obj) {
+      const fetchSavedHarmonizeRules = async () => {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_BACKEND_URL || ''}/api/validate/rules?project_id=${state.projectId}&target_object=${state.obj}&source=harmonize`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.rules && data.rules.length > 0) {
+              const loadedPrompts = data.rules.map((r: any) => r.prompt || r.description || r.label).filter(Boolean);
+              if (loadedPrompts.length > 0) {
+                setCustomPrompts(loadedPrompts);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Failed to fetch saved harmonize rules", e);
+        }
+      };
+      fetchSavedHarmonizeRules();
+    }
+  }, [state.projectId, state.obj]);
+
+  const saveHarmonizeRulesToDB = async () => {
+    if (!state.projectId) {
+      toast('No project selected to save rules', 'err');
+      return;
+    }
+    if (customPrompts.length === 0) {
+      toast('No custom prompts to save', 'err');
+      return;
+    }
+    showLoad('Saving rules...', 'Compiling and saving dynamic harmonization rules to database');
+    try {
+      let compiledRules: any[] = [];
+      try {
+        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/generate-rules`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompts: customPrompts, target_object: state.obj || sapObject })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          compiledRules = json.rules || [];
+        }
+      } catch (compileErr) {
+        console.warn('Dynamic prompt compilation notice:', compileErr);
+      }
+
+      const payloadRules = customPrompts.map((p, idx) => {
+        const comp = compiledRules[idx] || {};
+        return {
+          id: comp.id || `DYN_HARM_${Date.now()}_${idx}`,
+          prompt: p,
+          label: comp.label || p,
+          description: comp.description || p,
+          field: comp.field || 'GENERAL',
+          python_code: comp.python_code || '',
+          error_message: comp.error_message || '',
+          severity: comp.severity || 'INFO',
+          enabled: true
+        };
+      });
+
+      const res2 = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: state.projectId,
+          target_object: state.obj || sapObject,
+          rules: payloadRules,
+          source: 'harmonize'
+        })
+      });
+
+      const resJson = await res2.json().catch(() => null);
+      if (!res2.ok) {
+        throw new Error((resJson && (resJson.detail || resJson.message)) || 'Failed to save rules');
+      }
+
+      hideLoad();
+      toast('Dynamic harmonization rules saved to project', 'ok');
+    } catch (err: any) {
+      hideLoad();
+      toast(err.message || 'Failed to save rules', 'err');
+    }
+  };
+
   const enabledRuleCount = RULE_LIST.filter(r => (ruleConfig[r.key] !== undefined ? ruleConfig[r.key].enabled : true)).length;
   const totalRuleCount = RULE_LIST.length;
 
@@ -1375,7 +1463,16 @@ export function Step4Harmonize() {
               title="Dynamic AI Rules"
               subtitle="Custom harmonization transforms"
               icon={<Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />}
-            />
+            >
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<Save className="w-3.5 h-3.5" />}
+                onClick={saveHarmonizeRulesToDB}
+              >
+                Save Rules
+              </Button>
+            </CardHeader>
             <CardBody className="p-3 space-y-3">
               {/* Input & Add Prompt */}
               <div className="flex items-center gap-1.5">

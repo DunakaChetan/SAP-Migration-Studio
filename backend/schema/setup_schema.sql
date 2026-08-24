@@ -199,12 +199,16 @@ CREATE POLICY "Public Access for cleansed_data" ON cleansed_data
 -- STEP 7.5: Dynamic Rules Storage
 -- ==========================================
 
+DROP TABLE IF EXISTS dynamic_rules CASCADE;
+
 CREATE TABLE IF NOT EXISTS dynamic_rules (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     object_id UUID REFERENCES sap_objects(id) ON DELETE CASCADE,
+    source TEXT NOT NULL DEFAULT 'validate',
     payload JSONB NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, object_id, source)
 );
 
 ALTER TABLE dynamic_rules ENABLE ROW LEVEL SECURITY;

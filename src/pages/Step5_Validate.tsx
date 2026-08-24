@@ -91,6 +91,10 @@ export function Step5Validate() {
               setSavedDynamicRules(data.rules);
               dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: data.rules });
               setSelectedDynamicRules(Object.fromEntries(data.rules.map((r: any) => [r.id, true])));
+              const loadedPrompts = data.rules.map((r: any) => r.prompt).filter(Boolean);
+              if (loadedPrompts.length > 0) {
+                setCustomPrompts(loadedPrompts);
+              }
             }
           }
         } catch (e) {

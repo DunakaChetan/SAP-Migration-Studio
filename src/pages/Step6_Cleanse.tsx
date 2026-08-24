@@ -976,12 +976,39 @@ export function Step6Cleanse() {
     showLoad('Saving rules...', 'Compiling and saving dynamic rules to database');
     try {
       const activeDynamicRules = cleanserDynamicRules.filter(r => r.enabled);
+      const promptsToCompile = activeDynamicRules.map(r => r.prompt).filter(Boolean);
 
-      const payloadRules = activeDynamicRules.map(r => ({
-        id: r.id,
-        prompt: r.prompt,
-        enabled: r.enabled
-      }));
+      let compiledRules: any[] = [];
+      if (promptsToCompile.length > 0) {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/generate-rules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompts: promptsToCompile, target_object: state.obj })
+          });
+          if (res.ok) {
+            const json = await res.json();
+            compiledRules = json.rules || [];
+          }
+        } catch (compileErr) {
+          console.warn('Dynamic prompt compilation notice:', compileErr);
+        }
+      }
+
+      const payloadRules = activeDynamicRules.map((r, idx) => {
+        const comp = compiledRules[idx] || {};
+        return {
+          id: r.id || comp.id,
+          prompt: r.prompt,
+          label: comp.label || r.prompt,
+          description: comp.description || r.prompt,
+          field: comp.field || 'GENERAL',
+          python_code: comp.python_code || '',
+          error_message: comp.error_message || '',
+          severity: comp.severity || 'ERROR',
+          enabled: r.enabled
+        };
+      });
 
       // Save the rules directly to /api/validate/rules/save
       const res2 = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {

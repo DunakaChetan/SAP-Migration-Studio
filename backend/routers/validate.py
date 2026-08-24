@@ -149,12 +149,14 @@ Output MUST be a JSON object with key "rules" containing a list of rule objects:
             
             cleaned_rules.append({
                 "id": r.get("id") or f"DYNAMIC_RULE_{idx}",
+                "prompt": prompt_str,
                 "label": r.get("label") or f"Custom Rule {idx}",
                 "description": r.get("description") or prompt_str,
                 "field": r.get("field") or "GENERAL",
                 "python_code": sanitized_code,
                 "error_message": r.get("error_message") or r.get("label") or "Custom rule violation",
-                "severity": (r.get("severity") or "ERROR").upper()
+                "severity": (r.get("severity") or "ERROR").upper(),
+                "enabled": True
             })
         return {"rules": cleaned_rules}
     except Exception as e:
@@ -307,18 +309,20 @@ def save_validation(req: SaveValidationRequest):
             "payload": req.payload
         }).execute()
 
-        # Save dynamic rules to database if provided
+        # Save dynamic rules to database if provided (scoped strictly to source='validate')
         if req.dynamic_rules is not None:
             client.table("dynamic_rules") \
                 .delete() \
                 .eq("project_id", req.project_id) \
                 .eq("object_id", object_id) \
+                .eq("source", "validate") \
                 .execute()
 
             if req.dynamic_rules:
                 client.table("dynamic_rules").insert({
                     "project_id": req.project_id,
                     "object_id": object_id,
+                    "source": "validate",
                     "payload": req.dynamic_rules
                 }).execute()
         
@@ -342,94 +346,68 @@ def save_dynamic_rules(req: SaveDynamicRulesRequest):
         # Resolve target_object name to object_id
         res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
         if not res_obj.data:
-            raise HTTPException(status_code=400, detail=f"SAP object '{req.target_object}' not found.")
+            clean_name = "Customer" if "CUSTOMER" in req.target_object.upper() else ("Vendor" if "VENDOR" in req.target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+            if not res_obj.data:
+                raise HTTPException(status_code=400, detail=f"SAP object '{req.target_object}' not found.")
         object_id = res_obj.data[0]["id"]
+        source_name = req.source or "validate"
+        rules_payload = req.rules or []
 
-        # Fetch existing rules to preserve rules from other sources
-        res_existing = client.table("dynamic_rules").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).execute()
-        existing_rules = res_existing.data[0].get("payload", []) if res_existing.data and res_existing.data[0].get("payload") else []
-        
-        # Filter out rules matching the current source so we can replace them
-        other_rules = [r for r in existing_rules if r.get("source") != req.source]
-        
-        # Tag new rules with the current source
-        new_rules = req.rules or []
-        for r in new_rules:
-            r["source"] = req.source
-            
-        combined_rules = other_rules + new_rules
-
-        # Remove previous dynamic rules for this project/object
-        del_res = client.table("dynamic_rules") \
+        # Remove previous dynamic rules for this project/object and specific source
+        client.table("dynamic_rules") \
             .delete() \
             .eq("project_id", req.project_id) \
             .eq("object_id", object_id) \
+            .eq("source", source_name) \
             .execute()
 
-        insert_resp = None
-        if combined_rules:
-            insert_resp = client.table("dynamic_rules").insert({
+        if rules_payload:
+            client.table("dynamic_rules").insert({
                 "project_id": req.project_id,
                 "object_id": object_id,
-                "payload": combined_rules
+                "source": source_name,
+                "payload": rules_payload
             }).execute()
 
-        # ALSO persist to local JSON store and attempt to upload to Supabase Storage (if configured)
-        storage_result = None
-        try:
-            from services.cleanser_dynamic_rules import upsert_rules, DEFAULT_STORE_PATH
-
-            # Upsert into local file store (backend/output/cleanser_dynamic_rules.json by default)
-            upserted = upsert_rules(combined_rules, project_id=req.project_id, target_object=req.target_object)
-
-            # Attempt upload to Supabase Storage bucket named 'dynamic_rules' (best-effort)
-            try:
-                # Read file contents
-                path = DEFAULT_STORE_PATH
-                with path.open('rb') as fh:
-                    content = fh.read()
-                # Use storage API if available
-                if hasattr(client, 'storage'):
-                    bucket = 'dynamic_rules'
-                    remote_path = f"{req.project_id}_{req.target_object}_dynamic_rules.json"
-                    try:
-                        storage_resp = client.storage.from_(bucket).upload(remote_path, content, {'upsert': True})
-                        storage_result = getattr(storage_resp, 'data', storage_resp)
-                    except Exception as e:
-                        try:
-                            storage_resp = client.storage.from_(bucket).upload(remote_path, fh)
-                            storage_result = getattr(storage_resp, 'data', storage_resp)
-                        except Exception:
-                            storage_result = {"error": str(e)}
-                else:
-                    storage_result = {"warning": "supabase client has no storage attribute"}
-            except Exception as e:
-                storage_result = {"error": f"local store write or upload failed: {str(e)}"}
-        except Exception as e:
-            storage_result = {"error": f"persist-to-local failed: {str(e)}"}
-
-        resp_payload = {"status": "success", "message": "Dynamic rules saved to database."}
-        return resp_payload
+        return {"status": "success", "message": f"Dynamic rules for '{source_name}' saved to database."}
     except Exception as e:
         logger.exception("Failed to save dynamic rules")
         raise HTTPException(status_code=500, detail=f"Failed to save dynamic rules: {str(e)}")
 
+
 @router.get("/validate/rules")
-def get_dynamic_rules(project_id: str, target_object: str, source: str = "validate"):
+def get_dynamic_rules(project_id: str, target_object: str, source: Optional[str] = "validate"):
     try:
         client = supabase_service.get_client()
         res_obj = client.table("sap_objects").select("id").ilike("name", target_object).execute()
         if not res_obj.data:
-            return {"rules": []}
+            clean_name = "Customer" if "CUSTOMER" in target_object.upper() else ("Vendor" if "VENDOR" in target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+            if not res_obj.data:
+                return {"rules": []}
         object_id = res_obj.data[0]["id"]
 
-        res = client.table("dynamic_rules").select("payload").eq("project_id", project_id).eq("object_id", object_id).execute()
-        if res.data and res.data[0].get("payload"):
-            rules = res.data[0]["payload"]
-            if source:
-                rules = [r for r in rules if r.get("source") == source]
-            return {"rules": rules}
-        return {"rules": []}
+        query = client.table("dynamic_rules").select("payload, source").eq("project_id", project_id).eq("object_id", object_id)
+        if source and source != "all":
+            query = query.eq("source", source)
+
+        res = query.execute()
+        if not res.data:
+            return {"rules": []}
+
+        if source and source != "all":
+            payload = res.data[0].get("payload", [])
+            return {"rules": payload if isinstance(payload, list) else []}
+
+        all_rules = []
+        for row in res.data:
+            p = row.get("payload", [])
+            if isinstance(p, list):
+                all_rules.extend(p)
+            elif isinstance(p, dict):
+                all_rules.append(p)
+        return {"rules": all_rules}
     except Exception as e:
         logger.exception("Failed to fetch dynamic rules")
         raise HTTPException(status_code=500, detail=f"Failed to fetch dynamic rules: {str(e)}")
