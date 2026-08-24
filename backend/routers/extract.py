@@ -417,7 +417,37 @@ def execute_file_extraction(req: ExecuteFileRequest):
                 src_short = src_full.split(".")[-1]
                 if src_short != src_full:
                     harmonized_row[src_short] = val
-                
+
+                sap_full = m.get('sap')
+                if sap_full:
+                    harmonized_row[sap_full] = val
+                    sap_short = sap_full.split(".")[-1]
+                    if sap_short:
+                        harmonized_row[sap_short] = val
+
+            # Sync standard synonyms per row so no column displays as empty if a synonym has data
+            syn_groups = [
+                ["CITY", "CITY1", "CITY2", "HOME_CITY", "ORT01"],
+                ["STATE", "REGION", "REGIO", "UF"],
+                ["POST_CODE1", "POSTAL_CODE", "PSTLZ", "POSTCODE"],
+                ["STREET", "STRAS", "ADDRESS1"],
+                ["COUNTRY", "LAND1", "COUNTRY_CODE"],
+                ["KUNNR", "BPEXT", "ACCOUNT_NUMBER", "CUSTOMER_NUMBER"],
+                ["NAMEORG1", "NAME1", "PARTY_NAME"],
+                ["SMTP_ADDR", "EMAIL", "EMAIL_ADDRESS"],
+                ["TELNR_LONG", "PHONE", "TELF1"],
+            ]
+            for group in syn_groups:
+                donor_val = None
+                for key in group:
+                    if key in harmonized_row and harmonized_row[key] and str(harmonized_row[key]).strip() not in ["", "nan", "None", "null"]:
+                        donor_val = harmonized_row[key]
+                        break
+                if donor_val is not None:
+                    for key in group:
+                        if key not in harmonized_row or not harmonized_row[key] or str(harmonized_row[key]).strip() in ["", "nan", "None", "null"]:
+                            harmonized_row[key] = donor_val
+
             harmonized_results.append(harmonized_row)
         
         quality_report = agent.generate_eda_quality_report(

@@ -110,6 +110,47 @@ export function filterRowsByKey(
  * For a given table definition t (from extractedTables), and data rows (from extract, harmonize, or cleanse),
  * resolve the columns to display and map the row data so every column value is correctly populated.
  */
+// Standard SAP <-> ERP / Source field synonyms
+const FIELD_SYNONYMS: Record<string, string[]> = {
+  city: ['city', 'city1', 'city2', 'home_city', 'ort01', 'town', 'municipality', 'billing_city', 'shipping_city', 'city_name'],
+  city1: ['city1', 'city', 'city2', 'home_city', 'ort01'],
+  city2: ['city2', 'city', 'city1', 'home_city', 'ort01'],
+  home_city: ['home_city', 'city', 'city1', 'city2', 'ort01'],
+  ort01: ['ort01', 'city', 'city1', 'city2', 'home_city'],
+  state: ['state', 'region', 'regio', 'uf', 'province', 'district', 'state_province', 'billing_state'],
+  region: ['region', 'state', 'regio', 'uf', 'province', 'district'],
+  regio: ['regio', 'region', 'state', 'uf', 'province'],
+  uf: ['uf', 'state', 'region', 'regio'],
+  post_code1: ['post_code1', 'postal_code', 'postalcode', 'pstlz', 'zip', 'zip_code', 'zipcode', 'post_code', 'post_code2', 'post_code3'],
+  postal_code: ['postal_code', 'post_code1', 'postalcode', 'pstlz', 'zip', 'zip_code', 'zipcode', 'post_code'],
+  pstlz: ['pstlz', 'postal_code', 'post_code1', 'zip', 'zip_code'],
+  country: ['country', 'land1', 'country_code', 'ctry', 'nation', 'nationality', 'billing_country', 'ship_country'],
+  land1: ['land1', 'country', 'country_code', 'ctry'],
+  street: ['street', 'stras', 'address1', 'street_address', 'addr1', 'address_line1', 'street1', 'address'],
+  stras: ['stras', 'street', 'address1', 'street_address'],
+  address1: ['address1', 'street', 'stras', 'street_address', 'addr1'],
+  kunnr: ['kunnr', 'bpext', 'customer_number', 'account_number', 'party_number', 'customer_no', 'partner', 'id', 'customer'],
+  bpext: ['bpext', 'kunnr', 'account_number', 'customer_number', 'party_number', 'partner'],
+  nameorg1: ['nameorg1', 'name1', 'party_name', 'organization_name', 'name', 'company_name', 'customer_name'],
+  name1: ['name1', 'nameorg1', 'party_name', 'organization_name', 'name', 'company_name'],
+  party_name: ['party_name', 'nameorg1', 'name1', 'company_name', 'name'],
+  natpers: ['natpers', 'party_type', 'person_type', 'business_type'],
+  smtp_addr: ['smtp_addr', 'email', 'email_address', 'mail', 'contact_email'],
+  email: ['email', 'smtp_addr', 'email_address', 'mail'],
+  telnr_long: ['telnr_long', 'phone', 'phone_number', 'telf1', 'telephone', 'mobile_number', 'cell_phone'],
+  phone: ['phone', 'telnr_long', 'phone_number', 'telf1', 'telephone'],
+  telf1: ['telf1', 'phone', 'telnr_long', 'phone_number', 'telephone'],
+  waers: ['waers', 'currency', 'currency_code', 'ccy', 'doc_curr'],
+  currency: ['currency', 'waers', 'currency_code', 'ccy'],
+  zterm: ['zterm', 'payment_terms', 'pay_terms', 'payterms', 'terms_of_payment'],
+  payment_terms: ['payment_terms', 'zterm', 'pay_terms', 'payterms'],
+  bukrs: ['bukrs', 'company_code', 'org_id', 'company'],
+  vkorg: ['vkorg', 'sales_org', 'sales_organization'],
+  vtweg: ['vtweg', 'dist_channel', 'distribution_channel'],
+  spart: ['spart', 'division'],
+  akont: ['akont', 'recon_account', 'reconciliation_account'],
+};
+
 export function getTableDisplayData(
   table: TableInfo,
   rows: Record<string, any>[],
@@ -142,11 +183,17 @@ export function getTableDisplayData(
     const srcCandidates = [srcBase, srcClean, srcStr].filter(Boolean);
 
     [srcClean.toLowerCase(), srcBase.toLowerCase(), srcStr.toLowerCase()].forEach(k => {
-      if (k) srcToSapMap.set(k, sapCandidates);
+      if (k) {
+        const prev = srcToSapMap.get(k) || [];
+        srcToSapMap.set(k, Array.from(new Set([...prev, ...sapCandidates])));
+      }
     });
 
     [sapClean.toLowerCase(), sapBase.toLowerCase(), sapStr.toLowerCase()].forEach(k => {
-      if (k) sapToSrcMap.set(k, srcCandidates);
+      if (k) {
+        const prev = sapToSrcMap.get(k) || [];
+        sapToSrcMap.set(k, Array.from(new Set([...prev, ...srcCandidates])));
+      }
     });
   });
 
@@ -214,6 +261,31 @@ export function getTableDisplayData(
       }
     }
 
+    // 4. Check standard ERP/SAP semantic synonyms
+    const synonyms = FIELD_SYNONYMS[colLower] || FIELD_SYNONYMS[colCleanLower] || FIELD_SYNONYMS[colBaseLower] || [];
+    for (const syn of synonyms) {
+      if (sampleRow[syn] !== undefined && String(sampleRow[syn]).trim() !== '') {
+        columnBindings.push({ displayCol: col, actualKey: syn });
+        return;
+      }
+      const synLower = syn.toLowerCase();
+      if (rowKeysLower.has(synLower)) {
+        const actual = rowKeysLower.get(synLower)!;
+        if (String(sampleRow[actual] || '').trim() !== '') {
+          columnBindings.push({ displayCol: col, actualKey: actual });
+          return;
+        }
+      }
+    }
+    for (const syn of synonyms) {
+      const synLower = syn.toLowerCase();
+      if (rowKeysLower.has(synLower)) {
+        const actual = rowKeysLower.get(synLower)!;
+        columnBindings.push({ displayCol: col, actualKey: actual });
+        return;
+      }
+    }
+
     // Fallback: keep col
     columnBindings.push({ displayCol: col, actualKey: col });
   });
@@ -229,11 +301,23 @@ export function getTableDisplayData(
 
   const finalColumns = columnBindings.map(b => b.displayCol);
 
-  // Normalize rows so row[displayCol] = row[actualKey]
+  // Normalize rows so row[displayCol] = row[actualKey], with fallback for empty values from synonym columns
   const normalizedRows = rows.map(r => {
     const projected: Record<string, any> = {};
     columnBindings.forEach(b => {
-      projected[b.displayCol] = r[b.actualKey] !== undefined ? r[b.actualKey] : (r[b.displayCol] ?? '');
+      let val = r[b.actualKey] !== undefined ? r[b.actualKey] : (r[b.displayCol] ?? '');
+      // If value is empty or undefined, try fallback synonyms for this column
+      if (val === '' || val === null || val === undefined) {
+        const colLow = b.displayCol.toLowerCase().replace(/^\[\d+\]\s*/, '').split('.').pop() || '';
+        const syns = FIELD_SYNONYMS[colLow] || [];
+        for (const s of syns) {
+          if (r[s] !== undefined && r[s] !== '' && r[s] !== null) {
+            val = r[s];
+            break;
+          }
+        }
+      }
+      projected[b.displayCol] = val !== undefined ? val : '';
     });
     if (r.SOURCE !== undefined && projected.SOURCE === undefined) {
       projected.SOURCE = r.SOURCE;

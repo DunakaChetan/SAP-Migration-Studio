@@ -426,8 +426,7 @@ class HarmonizationAgent:
             renames = {col: col.split(".")[-1] for col in df.columns if "." in col}
             return df.rename(columns=renames) if renames else df.copy()
 
-        result = pd.DataFrame()
-        mapped_src_cols = set()
+        result = pd.DataFrame(index=df.index)
 
         for m in mappings:
             if not m.src or not m.sap:
@@ -441,9 +440,7 @@ class HarmonizationAgent:
 
             # Pass 1: Exact match check (full string match)
             for col in df.columns:
-                if col in mapped_src_cols:
-                    continue
-                col_clean = str(col).strip()
+                col_clean = re.sub(r"^\[\d+\]", "", str(col).strip())
                 if col_clean.lower() == src_lower:
                     matched_col = col
                     break
@@ -451,9 +448,7 @@ class HarmonizationAgent:
             # Pass 2: Base name match check (short field name after dot)
             if matched_col is None:
                 for col in df.columns:
-                    if col in mapped_src_cols:
-                        continue
-                    col_clean = str(col).strip()
+                    col_clean = re.sub(r"^\[\d+\]", "", str(col).strip())
                     col_base = col_clean.split(".")[-1].lower()
                     if src_base == col_base:
                         matched_col = col
@@ -463,9 +458,7 @@ class HarmonizationAgent:
             if matched_col is None and m.sap:
                 sap_base = m.sap.split(".")[-1].lower()
                 for col in df.columns:
-                    if col in mapped_src_cols:
-                        continue
-                    col_clean = str(col).strip()
+                    col_clean = re.sub(r"^\[\d+\]", "", str(col).strip())
                     col_base = col_clean.split(".")[-1].lower()
                     if col_base == sap_base:
                         matched_col = col
@@ -520,7 +513,6 @@ class HarmonizationAgent:
                 orig_series = df[matched_col].astype(str)
                 transformed_series = df[matched_col].apply(tf_fn)
                 result[target_col] = transformed_series
-                mapped_src_cols.add(matched_col)
 
                 # Log transformations that actually changed values
                 tag_map = {
@@ -547,11 +539,68 @@ class HarmonizationAgent:
                         mapped = transformed_series.at[idx]
                         self.fix_log.append(f"[{tag}] Row {idx + 1} ({target_col}): '{raw}' → '{mapped}'")
 
-        # Preserve unmapped source columns (short name after dot)
+        # Preserve all original source columns (short name after dot) if not already populated with valid data
         for col in df.columns:
-            if col not in mapped_src_cols:
-                short_col = col.split(".")[-1] if "." in col else col
+            short_col = col.split(".")[-1] if "." in col else col
+            short_col = re.sub(r"^\[\d+\]", "", short_col).strip()
+            if short_col not in result.columns:
                 result[short_col] = df[col]
+            else:
+                curr_s = result[short_col].fillna("").astype(str).str.strip()
+                if (curr_s == "").all() or (curr_s == "nan").all():
+                    result[short_col] = df[col]
+
+        # Ensure standard address / key / contact fields sync across standard SAP/ERP synonyms if missing or empty
+        synonym_groups = [
+            ["CITY", "CITY1", "CITY2", "HOME_CITY", "ORT01"],
+            ["STATE", "REGION", "REGIO", "UF"],
+            ["POST_CODE1", "POSTAL_CODE", "PSTLZ", "POSTCODE", "POST_CODE"],
+            ["STREET", "STRAS", "ADDRESS1", "ADDR1"],
+            ["COUNTRY", "LAND1", "COUNTRY_CODE"],
+            ["KUNNR", "BPEXT", "ACCOUNT_NUMBER", "CUSTOMER_NUMBER", "PARTY_NUMBER"],
+            ["NAMEORG1", "NAME1", "PARTY_NAME"],
+            ["SMTP_ADDR", "EMAIL", "EMAIL_ADDRESS"],
+            ["TELNR_LONG", "PHONE", "TELF1", "PHONE_NUMBER"],
+            ["AKONT", "RECON_ACCOUNT"],
+            ["WAERS", "CURRENCY", "CURRENCY_CODE"],
+            ["ZTERM", "PAYMENT_TERMS", "PAY_TERMS"],
+            ["BUKRS", "COMPANY_CODE", "ORG_ID"],
+            ["VKORG", "SALES_ORG"],
+            ["VTWEG", "DIST_CHANNEL"],
+            ["SPART", "DIVISION"],
+        ]
+        for syn_group in synonym_groups:
+            donor_series = None
+            # Find the best donor series (with most non-empty values)
+            for col_name in syn_group:
+                if col_name in result.columns:
+                    s = result[col_name].dropna().astype(str).str.strip()
+                    valid_count = ((s != "") & (s != "nan") & (s != "none") & (s != "null")).sum()
+                    if valid_count > 0:
+                        donor_series = result[col_name]
+                        break
+            if donor_series is None:
+                for col_name in syn_group:
+                    for df_c in df.columns:
+                        clean_df_c = re.sub(r"^\[\d+\]", "", str(df_c)).strip()
+                        clean_base = clean_df_c.split(".")[-1]
+                        if clean_base.upper() == col_name.upper():
+                            s = df[df_c].dropna().astype(str).str.strip()
+                            valid_count = ((s != "") & (s != "nan") & (s != "none") & (s != "null")).sum()
+                            if valid_count > 0:
+                                donor_series = df[df_c]
+                                break
+                    if donor_series is not None:
+                        break
+
+            if donor_series is not None:
+                for col_name in syn_group:
+                    if col_name in result.columns:
+                        curr_s = result[col_name].fillna("").astype(str).str.strip()
+                        if ((curr_s == "") | (curr_s == "nan") | (curr_s == "none") | (curr_s == "null")).all():
+                            result[col_name] = donor_series
+                    else:
+                        result[col_name] = donor_series
 
         return result
 
