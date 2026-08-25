@@ -10,6 +10,7 @@ import {
   PageLayout, PageGrid, GridCol, PageHeader, Divider, SidebarItem, Select, ConfirmModal
 } from '@/components/shared';
 import { Zap, ArrowRight, Link2, Database, LayoutTemplate, FileSpreadsheet, Layers, Cloud, HardDrive, Users, Building2, Package, Cable, Settings2, Download, FolderGit2, Plus, Edit3, Save, Trash2, X, GitMerge, FileText, CheckCircle2 } from 'lucide-react';
+import { saveStagedFilesToDB, loadStagedFilesFromDB, removeStagedFileFromDB, clearAllStagedFilesFromDB } from '@/lib/file-storage';
 
 const objIcons = {
   users: <Users className="w-4 h-4 text-blue-500" />,
@@ -53,7 +54,13 @@ export function Step1SourceData() {
   const [isFetchingSample, setIsFetchingSample] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
-  const [fileSchemas, setFileSchemas] = useState<{ filename: string; headers: string[] }[]>(() => state.fileSchemas || []);
+  const [fileSchemas, setFileSchemas] = useState<{ filename: string; headers: string[] }[]>(() => {
+    try {
+      const saved = localStorage.getItem('sap_migration_file_schemas');
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return state.fileSchemas || [];
+  });
   const [joinConfig, setJoinConfig] = useState<{
     base_file: string;
     joins: {
@@ -64,6 +71,10 @@ export function Step1SourceData() {
       key_pairs?: { base_key: string; join_key: string }[];
     }[];
   }>(() => {
+    try {
+      const saved = localStorage.getItem('sap_migration_join_config');
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
     const raw = state.joinConfig?.base_file ? state.joinConfig : { base_file: '', joins: [] };
     return { base_file: raw.base_file, joins: raw.joins || [] };
   });
@@ -117,7 +128,7 @@ export function Step1SourceData() {
       const newJoins = (curCfg.joins || []).map((j, i) => {
         if (i !== joinIdx) return j;
         const joinSchema = displayedSchemas.find(s => s.filename === j.join_file);
-        
+
         // Auto-match keys between newSourceFile and j.join_file
         const matchedPairs: { base_key: string; join_key: string }[] = [];
         if (srcSchema && joinSchema) {
@@ -183,6 +194,14 @@ export function Step1SourceData() {
 
   useEffect(() => {
     fetchProjects();
+    loadStagedFilesFromDB().then((persistedFiles) => {
+      if (persistedFiles && persistedFiles.length > 0) {
+        setStagedFiles(persistedFiles);
+        if (fileSchemas.length === 0) {
+          fetchFileSchemas(persistedFiles);
+        }
+      }
+    });
   }, []);
 
   const fetchProjects = async () => {
@@ -314,6 +333,7 @@ export function Step1SourceData() {
 
     const updatedStaged = [...stagedFiles, ...trulyNewFiles];
     setStagedFiles(updatedStaged);
+    saveStagedFilesToDB(updatedStaged);
 
     setIsUploading(true);
     const formData = new FormData();
@@ -383,6 +403,10 @@ export function Step1SourceData() {
       };
 
       setJoinConfig(nextConfig);
+      try {
+        localStorage.setItem('sap_migration_file_schemas', JSON.stringify(combinedSchemas));
+        localStorage.setItem('sap_migration_join_config', JSON.stringify(nextConfig));
+      } catch (e) { }
       dispatch({
         type: 'BATCH_UPDATE',
         updates: {
@@ -399,13 +423,14 @@ export function Step1SourceData() {
     }
   };
 
-  const handleRemoveStagedFile = (fileName: string) => {
+  const handleRemoveStagedFile = async (fileName: string) => {
     const updatedStaged = stagedFiles.filter(f => f.name !== fileName);
     const updatedMeta = (state.uploadedFilesMeta || []).filter(f => f.name !== fileName);
     const updatedSchemas = (fileSchemas.length > 0 ? fileSchemas : (state.fileSchemas || [])).filter(s => s.filename !== fileName);
 
     setStagedFiles(updatedStaged);
     setFileSchemas(updatedSchemas);
+    await removeStagedFileFromDB(fileName);
 
     const totalRemaining = updatedStaged.length > 0 ? updatedStaged.length : updatedMeta.length;
 
@@ -440,6 +465,10 @@ export function Step1SourceData() {
     };
 
     setJoinConfig(newCfg);
+    try {
+      localStorage.setItem('sap_migration_file_schemas', JSON.stringify(updatedSchemas));
+      localStorage.setItem('sap_migration_join_config', JSON.stringify(newCfg));
+    } catch (e) { }
     dispatch({
       type: 'BATCH_UPDATE',
       updates: {
@@ -450,10 +479,15 @@ export function Step1SourceData() {
     });
   };
 
-  const handleClearStagedFiles = () => {
+  const handleClearStagedFiles = async () => {
     setStagedFiles([]);
     setFileSchemas([]);
     setJoinConfig({ base_file: '', joins: [] });
+    await clearAllStagedFilesFromDB();
+    try {
+      localStorage.removeItem('sap_migration_file_schemas');
+      localStorage.removeItem('sap_migration_join_config');
+    } catch (e) { }
     dispatch({
       type: 'BATCH_UPDATE',
       updates: {
@@ -670,7 +704,31 @@ export function Step1SourceData() {
     }
   };
 
-  const pickSrc = (k: string) => dispatch({ type: 'SET_FIELD', field: 'src', value: k });
+  const pickSrc = async (k: string) => {
+    if (k !== state.src) {
+      setStagedFiles([]);
+      setFileSchemas([]);
+      setJoinConfig({ base_file: '', joins: [] });
+      await clearAllStagedFilesFromDB();
+      try {
+        localStorage.removeItem('sap_migration_file_schemas');
+        localStorage.removeItem('sap_migration_join_config');
+      } catch (e) { }
+      dispatch({
+        type: 'BATCH_UPDATE',
+        updates: {
+          src: k,
+          uploadedFilesMeta: [],
+          fileSchemas: [],
+          joinConfig: { base_file: '', joins: [] },
+          headers: [],
+          rawData: [],
+          uploadedData: []
+        }
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
   const pickObj = (k: string) => dispatch({ type: 'SET_FIELD', field: 'obj', value: k });
 
   const testConn = async () => {
@@ -779,8 +837,8 @@ export function Step1SourceData() {
   };
 
   const has = state.rawData.length > 0 || state.uploadedData.length > 0;
-  const displayedFiles = stagedFiles.length > 0 
-    ? stagedFiles.map(f => ({ name: f.name, size: f.size })) 
+  const displayedFiles = stagedFiles.length > 0
+    ? stagedFiles.map(f => ({ name: f.name, size: f.size }))
     : (state.uploadedFilesMeta || []);
   const displayedSchemas = fileSchemas.length > 0 ? fileSchemas : (state.fileSchemas || []);
   const displayedJoinConfig = joinConfig.base_file ? joinConfig : (state.joinConfig || { base_file: '', joins: [] });
@@ -1025,9 +1083,9 @@ export function Step1SourceData() {
                                     const kps = existing?.key_pairs?.length
                                       ? existing.key_pairs
                                       : [{
-                                          base_key: existing?.base_key || baseS?.headers[0] || '',
-                                          join_key: existing?.join_key || joinS?.headers[0] || ''
-                                        }];
+                                        base_key: existing?.base_key || baseS?.headers[0] || '',
+                                        join_key: existing?.join_key || joinS?.headers[0] || ''
+                                      }];
 
                                     return {
                                       join_file: f.name,
@@ -1390,7 +1448,7 @@ export function Step1SourceData() {
           {has && (
             <Card>
               <CardHeader title="Source Data Preview" subtitle={`${state.src} → ${OBJS[state.obj]?.label} | ${state.headers.length} columns`}>
-                <Badge variant="neutral">{state.rawData.length} records</Badge>
+                <Badge variant="neutral">Showing 10 of {state.rawData.length} records</Badge>
                 <Button variant="secondary" size="sm" icon={<Download className="w-3.5 h-3.5" />} onClick={() => {
                   import('@/lib/utils').then(({ expCSV, dl }) => {
                     dl(expCSV(state.rawData), 'raw_source_data.csv', 'text/csv');
@@ -1398,7 +1456,7 @@ export function Step1SourceData() {
                 }}>Export</Button>
               </CardHeader>
               <CardBody>
-                <DataTable rows={state.rawData} cols={state.headers} />
+                <DataTable rows={state.rawData.slice(0, 10)} cols={state.headers} />
               </CardBody>
             </Card>
           )}

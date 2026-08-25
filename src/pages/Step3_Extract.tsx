@@ -14,10 +14,7 @@ import {
   BarChart2, ShieldAlert, Search, FileSpreadsheet, Layers, ChevronDown, ChevronUp,
   RefreshCw, CheckCircle2, Eye, Filter, X, FileText, AlertCircle, Key, Database, Columns3
 } from 'lucide-react';
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  CartesianGrid, Legend, Brush
-} from 'recharts';
+import ReactECharts from 'echarts-for-react';
 import { jsPDF } from 'jspdf';
 import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
 import type { TableInfo } from '@/components/shared/TableFilterToolbar';
@@ -29,8 +26,8 @@ export function Step3Extract() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { showLoad, tick, hideLoad } = useLoading();
-  const [rowLimit, setRowLimit] = useState(5000);
-  const [activeTab, setActiveTab] = useState<'table' | 'completeness' | 'cardinality'>('table');
+  const [rowLimit, setRowLimit] = useState(100);
+  const [activeTab, setActiveTab] = useState<'table' | 'barcol' | 'radar'>('table');
   const [edaSearch, setEdaSearch] = useState('');
   const [edaSort, setEdaSort] = useState<'default' | 'null_desc' | 'anomalies_desc' | 'name'>('default');
   const [showAllRisks, setShowAllRisks] = useState(false);
@@ -1133,16 +1130,16 @@ export function Step3Extract() {
                         Data Table
                       </button>
                       <button
-                        onClick={() => setActiveTab('completeness')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'completeness' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                        onClick={() => setActiveTab('barcol')}
+                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'barcol' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                       >
-                        Completeness & Anomalies
+                        Field Quality
                       </button>
                       <button
-                        onClick={() => setActiveTab('cardinality')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'cardinality' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                        onClick={() => setActiveTab('radar')}
+                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'radar' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
                       >
-                        Cardinality Spectrum
+                        Quality Radar
                       </button>
                     </div>
                   </div>
@@ -1291,140 +1288,305 @@ export function Step3Extract() {
                     </div>
                   )}
 
-                  {/* Chart 1: Modern Field Completeness & Quality Spectrum */}
-                  {activeTab === 'completeness' && (
-                    <div className="space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-[var(--text-secondary)]">
-                        <div>Interactive breakdown of Populated vs Missing (Null) values and Format Anomalies across fields.</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-mono text-[var(--text-tertiary)]">Sort:</span>
-                          <select
-                            value={edaSort}
-                            onChange={(e: any) => setEdaSort(e.target.value)}
-                            className="text-[10.5px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[var(--text-primary)] outline-none"
-                          >
-                            <option value="default">Default Order</option>
-                            <option value="null_desc">Most Nulls First</option>
-                            <option value="anomalies_desc">Most Anomalies First</option>
-                            <option value="name">A-Z</option>
-                          </select>
+                  {/* Chart 1: ECharts Stacked Bar Column — Field Quality Breakdown */}
+                  {activeTab === 'barcol' && (() => {
+                    const total = state.extracted.length || state.rawData.length || 1;
+                    const barFields = [...displayEdaStats].slice(0, 20);
+                    const fieldLabels = barFields.map((f: any) => f.field.length > 18 ? f.field.slice(0, 16) + '…' : f.field);
+
+                    const barOption: any = {
+                      color: ['#10b981', '#ef4444', '#f59e0b'],
+                      tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(99,102,241,0.06)' } },
+                        backgroundColor: 'rgba(15,23,42,0.95)',
+                        borderColor: 'rgba(99,102,241,0.3)',
+                        borderWidth: 1,
+                        textStyle: { color: '#e2e8f0', fontSize: 12 },
+                        formatter: (params: any) => {
+                          const idx = params[0]?.dataIndex;
+                          const f = barFields[idx];
+                          if (!f) return '';
+                          const pop = f.populated_count || 0;
+                          const nul = f.null_count || 0;
+                          const ano = f.format_anomaly_count || 0;
+                          const popPct = Math.round((pop / total) * 100);
+                          const nulPct = Math.round((nul / total) * 100);
+                          const anoPct = Math.round((ano / total) * 100);
+                          return `<div style="font-weight:700;margin-bottom:6px;color:#a5b4fc;font-size:13px">${f.field}</div>
+                            <div style="display:flex;align-items:center;gap:6px;margin:3px 0"><span style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block"></span> Populated: <b>${pop.toLocaleString()}</b> (${popPct}%)</div>
+                            <div style="display:flex;align-items:center;gap:6px;margin:3px 0"><span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block"></span> Missing: <b>${nul.toLocaleString()}</b> (${nulPct}%)</div>
+                            <div style="display:flex;align-items:center;gap:6px;margin:3px 0"><span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span> Anomalies: <b>${ano.toLocaleString()}</b> (${anoPct}%)</div>
+                            <div style="margin-top:6px;padding-top:5px;border-top:1px solid rgba(148,163,184,0.2);font-size:11px;color:#94a3b8">Status: <b style="color:${f.status === 'HEALTHY' ? '#10b981' : f.status === 'WARNING' ? '#f59e0b' : '#ef4444'}">${f.status || 'HEALTHY'}</b></div>`;
+                        }
+                      },
+                      legend: {
+                        data: ['Populated', 'Missing (Null)', 'Format Anomalies'],
+                        bottom: 0,
+                        textStyle: { color: '#94a3b8', fontSize: 11 },
+                        itemWidth: 14,
+                        itemHeight: 10,
+                        selectedMode: true
+                      },
+                      grid: {
+                        left: '3%',
+                        right: '4%',
+                        top: 40,
+                        bottom: 50,
+                        containLabel: true
+                      },
+                      xAxis: {
+                        type: 'category',
+                        data: fieldLabels,
+                        axisLabel: {
+                          color: '#94a3b8',
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          rotate: barFields.length > 10 ? 35 : 0,
+                          interval: 0
+                        },
+                        axisLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
+                        axisTick: { show: false }
+                      },
+                      yAxis: {
+                        type: 'value',
+                        name: 'Record Count',
+                        nameTextStyle: { color: '#64748b', fontSize: 10, fontFamily: 'monospace' },
+                        axisLabel: {
+                          color: '#94a3b8',
+                          fontSize: 10,
+                          formatter: (v: number) => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v
+                        },
+                        axisLine: { show: false },
+                        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.08)', type: 'dashed' } }
+                      },
+                      series: [
+                        {
+                          name: 'Populated',
+                          type: 'bar',
+                          stack: 'quality',
+                          barMaxWidth: 32,
+                          itemStyle: {
+                            borderRadius: [0, 0, 0, 0],
+                            color: {
+                              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                              colorStops: [
+                                { offset: 0, color: '#34d399' },
+                                { offset: 1, color: '#10b981' }
+                              ]
+                            }
+                          },
+                          emphasis: {
+                            itemStyle: { shadowBlur: 8, shadowColor: 'rgba(16,185,129,0.4)' }
+                          },
+                          data: barFields.map((f: any) => f.populated_count || 0)
+                        },
+                        {
+                          name: 'Missing (Null)',
+                          type: 'bar',
+                          stack: 'quality',
+                          barMaxWidth: 32,
+                          itemStyle: {
+                            borderRadius: [0, 0, 0, 0],
+                            color: {
+                              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                              colorStops: [
+                                { offset: 0, color: '#f87171' },
+                                { offset: 1, color: '#ef4444' }
+                              ]
+                            }
+                          },
+                          emphasis: {
+                            itemStyle: { shadowBlur: 8, shadowColor: 'rgba(239,68,68,0.4)' }
+                          },
+                          data: barFields.map((f: any) => f.null_count || 0)
+                        },
+                        {
+                          name: 'Format Anomalies',
+                          type: 'bar',
+                          stack: 'quality',
+                          barMaxWidth: 32,
+                          itemStyle: {
+                            borderRadius: [4, 4, 0, 0],
+                            color: {
+                              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                              colorStops: [
+                                { offset: 0, color: '#fbbf24' },
+                                { offset: 1, color: '#f59e0b' }
+                              ]
+                            }
+                          },
+                          emphasis: {
+                            itemStyle: { shadowBlur: 8, shadowColor: 'rgba(245,158,11,0.4)' }
+                          },
+                          data: barFields.map((f: any) => f.format_anomaly_count || 0)
+                        }
+                      ],
+                      dataZoom: [
+                        {
+                          type: 'slider',
+                          show: barFields.length > 12,
+                          xAxisIndex: 0,
+                          bottom: 30,
+                          height: 16,
+                          startValue: 0,
+                          endValue: Math.min(14, barFields.length - 1),
+                          borderColor: 'rgba(148,163,184,0.15)',
+                          backgroundColor: 'rgba(15,23,42,0.3)',
+                          fillerColor: 'rgba(99,102,241,0.15)',
+                          handleStyle: { color: '#6366f1', borderColor: '#818cf8' },
+                          textStyle: { color: '#94a3b8', fontSize: 9 },
+                          dataBackground: {
+                            lineStyle: { color: 'rgba(99,102,241,0.3)' },
+                            areaStyle: { color: 'rgba(99,102,241,0.08)' }
+                          }
+                        },
+                        { type: 'inside', xAxisIndex: 0 }
+                      ],
+                      toolbox: {
+                        show: true,
+                        right: 12,
+                        top: 4,
+                        feature: {
+                          magicType: { type: ['stack', 'tiled'], title: { stack: 'Stacked', tiled: 'Side by Side' }, iconStyle: { borderColor: '#94a3b8' } },
+                          saveAsImage: { title: 'Save', pixelRatio: 2, iconStyle: { borderColor: '#94a3b8' } },
+                          restore: { title: 'Reset', iconStyle: { borderColor: '#94a3b8' } }
+                        },
+                        iconStyle: { borderColor: '#64748b' }
+                      }
+                    };
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="text-[11px] text-[var(--text-secondary)]">
+                          Stacked bar breakdown of Populated, Missing, and Anomalies per field. Use the slider to scroll, toggle stacked/side-by-side with the toolbar, and click legend items to show/hide.
+                        </div>
+                        <div style={{ width: '100%', height: 420 }}>
+                          <ReactECharts option={barOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
                         </div>
                       </div>
+                    );
+                  })()}
 
-                      <div style={{ width: '100%', height: 380 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={displayEdaStats}
-                            margin={{ top: 20, right: 20, bottom: 30, left: 0 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.4} />
-                            <XAxis
-                              dataKey="field"
-                              tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
-                              tickFormatter={(v: string) => v.length > 12 ? v.slice(0, 12) + '…' : v}
-                              axisLine={false}
-                              tickLine={false}
-                              interval={0}
-                              angle={-25}
-                              textAnchor="end"
-                            />
-                            <YAxis
-                              tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
-                              axisLine={false}
-                              tickLine={false}
-                            />
-                            <Tooltip
-                              contentStyle={{
-                                background: 'var(--bg-elevated)',
-                                borderColor: 'var(--border)',
-                                borderRadius: 10,
-                                fontSize: 11,
-                                boxShadow: '0 8px 30px rgba(0,0,0,0.12)'
-                              }}
-                              formatter={(value: any, name: any) => [
-                                `${value} rows`,
-                                name === 'populated_count' ? 'Populated' : (name === 'null_count' ? 'Missing (Null)' : 'Format Anomalies')
-                              ]}
-                            />
-                            <Legend
-                              verticalAlign="top"
-                              height={36}
-                              formatter={(v) => v === 'populated_count' ? 'Populated' : (v === 'null_count' ? 'Missing (Null)' : 'Format Anomalies')}
-                            />
-                            <Bar dataKey="populated_count" name="populated_count" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} maxBarSize={36} />
-                            <Bar dataKey="null_count" name="null_count" stackId="a" fill="#ef4444" radius={[0, 0, 0, 0]} maxBarSize={36} />
-                            <Bar dataKey="format_anomaly_count" name="format_anomaly_count" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={36} />
-                            <Brush dataKey="field" height={26} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(18, displayEdaStats.length - 1)} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
+                  {/* Chart 2: ECharts Quality Radar — Multi-dimensional field quality spider */}
+                  {activeTab === 'radar' && (() => {
+                    const total = state.extracted.length || state.rawData.length || 1;
+                    const radarFields = [...edaStats]
+                      .map((f: any) => ({
+                        field: f.field,
+                        populatedPct: Math.round(((f.populated_count || 0) / total) * 100),
+                        uniquePct: Math.round(((f.unique_count || 0) / total) * 100),
+                        anomalyPct: Math.round(((f.format_anomaly_count || 0) / total) * 100),
+                        nullPct: Math.round(((f.null_count || 0) / total) * 100),
+                        status: f.status || 'HEALTHY'
+                      }))
+                      .sort((a, b) => (b.nullPct + b.anomalyPct) - (a.nullPct + a.anomalyPct))
+                      .slice(0, 8);
 
-                  {/* Chart 2: Cardinality Spectrum */}
-                  {activeTab === 'cardinality' && (
-                    <div className="space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-[var(--text-secondary)]">
-                        <div>Distinct value count (Cardinality). Constant fields (1 unique value) highlighted in purple.</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-mono text-[var(--text-tertiary)]">Sort:</span>
-                          <select
-                            value={edaSort}
-                            onChange={(e: any) => setEdaSort(e.target.value)}
-                            className="text-[10.5px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[var(--text-primary)] outline-none"
-                          >
-                            <option value="default">Default Order</option>
-                            <option value="name">A-Z</option>
-                          </select>
+                    const radarOption: any = {
+                      color: ['#6366f1', '#10b981', '#f59e0b', '#ec4899'],
+                      tooltip: {
+                        trigger: 'item',
+                        backgroundColor: 'rgba(15,23,42,0.95)',
+                        borderColor: 'rgba(99,102,241,0.3)',
+                        borderWidth: 1,
+                        textStyle: { color: '#e2e8f0', fontSize: 12 },
+                        formatter: (params: any) => {
+                          const data = params.data;
+                          const indicators = radarFields.map(f => f.field);
+                          let html = `<div style="font-weight:700;margin-bottom:6px;color:#a5b4fc">${params.seriesName}</div>`;
+                          data.value.forEach((v: number, i: number) => {
+                            html += `<div style="display:flex;justify-content:space-between;gap:16px"><span>${indicators[i]}</span><span style="font-weight:600">${v}%</span></div>`;
+                          });
+                          return html;
+                        }
+                      },
+                      legend: {
+                        data: ['Populated %', 'Uniqueness %', 'Null %', 'Anomaly %'],
+                        bottom: 0,
+                        textStyle: { color: '#94a3b8', fontSize: 11 },
+                        itemWidth: 12,
+                        itemHeight: 8,
+                        selectedMode: true
+                      },
+                      radar: {
+                        indicator: radarFields.map(f => ({ name: f.field.length > 16 ? f.field.slice(0, 14) + '…' : f.field, max: 100 })),
+                        center: ['50%', '48%'],
+                        radius: '65%',
+                        axisName: {
+                          color: '#94a3b8',
+                          fontSize: 10,
+                          fontFamily: 'monospace'
+                        },
+                        splitNumber: 5,
+                        splitArea: {
+                          areaStyle: {
+                            color: ['rgba(99,102,241,0.02)', 'rgba(99,102,241,0.04)', 'rgba(99,102,241,0.06)', 'rgba(99,102,241,0.08)', 'rgba(99,102,241,0.10)']
+                          }
+                        },
+                        axisLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
+                        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } }
+                      },
+                      series: [{
+                        name: 'Populated %',
+                        type: 'radar',
+                        symbol: 'circle',
+                        symbolSize: 6,
+                        lineStyle: { width: 2 },
+                        areaStyle: { opacity: 0.15 },
+                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.3 } },
+                        data: [{ value: radarFields.map(f => f.populatedPct), name: 'Populated %' }]
+                      }, {
+                        name: 'Uniqueness %',
+                        type: 'radar',
+                        symbol: 'circle',
+                        symbolSize: 6,
+                        lineStyle: { width: 2 },
+                        areaStyle: { opacity: 0.15 },
+                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.3 } },
+                        data: [{ value: radarFields.map(f => Math.min(f.uniquePct, 100)), name: 'Uniqueness %' }]
+                      }, {
+                        name: 'Null %',
+                        type: 'radar',
+                        symbol: 'diamond',
+                        symbolSize: 6,
+                        lineStyle: { width: 2, type: 'dashed' },
+                        areaStyle: { opacity: 0.08 },
+                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.2 } },
+                        data: [{ value: radarFields.map(f => f.nullPct), name: 'Null %' }]
+                      }, {
+                        name: 'Anomaly %',
+                        type: 'radar',
+                        symbol: 'triangle',
+                        symbolSize: 6,
+                        lineStyle: { width: 2, type: 'dotted' },
+                        areaStyle: { opacity: 0.08 },
+                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.2 } },
+                        data: [{ value: radarFields.map(f => f.anomalyPct), name: 'Anomaly %' }]
+                      }],
+                      toolbox: {
+                        show: true,
+                        right: 12,
+                        top: 8,
+                        feature: {
+                          saveAsImage: { title: 'Save', pixelRatio: 2, iconStyle: { borderColor: '#94a3b8' } },
+                          restore: { title: 'Reset', iconStyle: { borderColor: '#94a3b8' } }
+                        },
+                        iconStyle: { borderColor: '#64748b' }
+                      }
+                    };
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="text-[11px] text-[var(--text-secondary)]">
+                          Multi-dimensional quality spider chart — compare populated%, uniqueness, nulls, and anomalies across top fields. Click legend items to toggle dimensions.
+                        </div>
+                        <div style={{ width: '100%', height: 420 }}>
+                          <ReactECharts option={radarOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
                         </div>
                       </div>
-
-                      <div style={{ width: '100%', height: 380 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            data={displayEdaStats}
-                            margin={{ top: 20, right: 20, bottom: 30, left: 0 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} opacity={0.4} />
-                            <XAxis
-                              dataKey="field"
-                              tick={{ fontSize: 9.5, fill: 'var(--text-tertiary)' }}
-                              tickFormatter={(v: string) => v.length > 12 ? v.slice(0, 12) + '…' : v}
-                              axisLine={false}
-                              tickLine={false}
-                              interval={0}
-                              angle={-25}
-                              textAnchor="end"
-                            />
-                            <YAxis
-                              tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }}
-                              axisLine={false}
-                              tickLine={false}
-                            />
-                            <Tooltip
-                              contentStyle={{
-                                background: 'var(--bg-elevated)',
-                                borderColor: 'var(--border)',
-                                borderRadius: 10,
-                                fontSize: 11,
-                                boxShadow: '0 8px 30px rgba(0,0,0,0.12)'
-                              }}
-                              formatter={(value: any) => [`${value} distinct values`, 'Cardinality']}
-                            />
-                            <Bar dataKey="unique_count" name="Distinct Unique Values" radius={[4, 4, 0, 0]} maxBarSize={36}>
-                              {displayEdaStats.map((entry: any, index: number) => (
-                                <Cell
-                                  key={`cell-${index}`}
-                                  fill={entry.is_constant ? '#8b5cf6' : (entry.unique_count > 50 ? '#06b6d4' : '#6366f1')}
-                                />
-                              ))}
-                            </Bar>
-                            <Brush dataKey="field" height={26} stroke="var(--border)" fill="var(--bg-tertiary)" tickFormatter={() => ''} startIndex={0} endIndex={Math.min(18, displayEdaStats.length - 1)} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* End Tabs */}
                 </div>
