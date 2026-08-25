@@ -132,24 +132,27 @@ function groupFixItems(items: FixItem[] = []): FixGroup[] {
   return Array.from(map.values());
 }
 
+function formatCsvVal(val: unknown): string {
+  const v = val !== undefined && val !== null ? String(val) : '';
+  if (/^0\d+$/.test(v) && v.length > 1) {
+    return `="${v}"`;
+  }
+  return `"${v.replace(/"/g, '""')}"`;
+}
+
 function exportAuditLogCSV(summary: CleanserSummary, projectName: string, targetObject: string): string {
   const timestamp = new Date().toISOString();
   const lines = [
-    `# SAP Migration Studio — Detailed Cleansing Audit Log`,
-    `# Project Name: "${projectName}"`,
-    `# Target Object: "${targetObject}"`,
-    `# Exported At: "${timestamp}"`,
-    `# Overall Status: "${summary.overall_status || 'SUCCESS'}"`,
-    `# Total Rows Modified: ${summary.rows_modified_count ?? 0}`,
-    `#`,
     `Timestamp,Project Name,Target Object,Phase,Rule Code,Row Number,Field Name,Original Value,Cleansed Value,Status`
   ];
 
   const appendFixes = (phase: string, items?: FixItem[]) => {
     (items || []).forEach((item) => {
-      const oldVal = String(item.old ?? '').replace(/"/g, '""');
-      const newVal = String(item.new ?? '').replace(/"/g, '""');
-      lines.push(`"${timestamp}","${projectName}","${targetObject}","${phase}","${item.rule_code || 'RULE'}",${item.row},"${item.field}","${oldVal}","${newVal}","APPLIED"`);
+      const rawOld = String(item.old ?? '');
+      const rawNew = String(item.new ?? '');
+      if (rawOld !== rawNew) {
+        lines.push(`"${timestamp}","${projectName}","${targetObject}","${phase}","${item.rule_code || 'RULE'}",${item.row},"${item.field}",${formatCsvVal(rawOld)},${formatCsvVal(rawNew)},"APPLIED"`);
+      }
     });
   };
 
@@ -160,30 +163,18 @@ function exportAuditLogCSV(summary: CleanserSummary, projectName: string, target
   return lines.join('\n');
 }
 
-function exportExecutiveSummaryCSV(summary: CleanserSummary, projectName: string, targetObject: string): string {
-  const timestamp = new Date().toISOString();
+function exportExecutiveSummaryCSV(summary: CleanserSummary, projectName: string, targetObject: string, cleanedRows?: Record<string, any>[]): string {
   const lines: string[] = [
-    `# SAP Migration Studio — Executive Cleansing Summary Report`,
-    `# Project Name: "${projectName}"`,
-    `# Target Object: "${targetObject}"`,
-    `# Exported At: "${timestamp}"`,
-    `# Overall Status: "${summary.overall_status || 'SUCCESS'}"`,
-    `# Total Rows Loaded: ${summary.rows_loaded ?? 0}`,
-    `# Total Rows Modified: ${summary.rows_modified_count ?? 0}`,
-    `# Total Dynamic AI Fixes: ${summary.dynamic_fixes?.count ?? summary.dynamic_fixes?.items?.length ?? 0}`,
-    `# Total Validation Fixes: ${summary.validation_fixes?.count ?? summary.validation_fixes?.items?.length ?? 0}`,
-    `# Total Cleanser Normalizations: ${summary.cleanser_fixes?.count ?? summary.cleanser_fixes?.items?.length ?? 0}`,
-    `# Total Manual Fixes: ${summary.manual_fixes?.count ?? summary.manual_fixes?.items?.length ?? 0}`,
-    `# Total Warnings / Manual Review Items: ${summary.warnings?.length ?? 0}`,
-    `#`,
     `Category,Phase,Rule Code,Row Number,Field Name,Original Value,Cleansed Value,Reason / Status`
   ];
 
   const appendItems = (category: string, phase: string, items?: FixItem[]) => {
     (items || []).forEach((item) => {
-      const oldVal = String(item.old ?? '').replace(/"/g, '""');
-      const newVal = String(item.new ?? '').replace(/"/g, '""');
-      lines.push(`"${category}","${phase}","${item.rule_code || 'RULE'}",${item.row},"${item.field}","${oldVal}","${newVal}","APPLIED"`);
+      const rawOld = String(item.old ?? '');
+      const rawNew = String(item.new ?? '');
+      if (rawOld !== rawNew) {
+        lines.push(`"${category}","${phase}","${item.rule_code || 'RULE'}",${item.row},"${item.field}",${formatCsvVal(rawOld)},${formatCsvVal(rawNew)},"APPLIED"`);
+      }
     });
   };
 
@@ -193,11 +184,17 @@ function exportExecutiveSummaryCSV(summary: CleanserSummary, projectName: string
   appendItems('Manual Remediation', 'Manual Fix', summary.manual_fixes?.items);
 
   (summary.warnings || []).forEach((w: any) => {
-    const row = typeof w === 'object' && w ? (w.row || 'N/A') : 'N/A';
+    const rowNum = typeof w === 'object' && w && typeof w.row === 'number' ? w.row : 'N/A';
     const field = typeof w === 'object' && w ? (w.field || 'GENERAL') : 'GENERAL';
     const ruleCode = typeof w === 'object' && w ? (w.rule_code || 'WARNING') : 'WARNING';
     const reason = String(typeof w === 'object' && w ? (w.reason || w.message || '') : w).replace(/"/g, '""');
-    lines.push(`"Manual Review Warning","Warning","${ruleCode}",${row},"${field}","","","${reason}"`);
+
+    let origVal = '';
+    if (typeof rowNum === 'number' && rowNum > 0 && cleanedRows && cleanedRows[rowNum - 1] && field && field !== 'GENERAL') {
+      origVal = String(cleanedRows[rowNum - 1][field] ?? '');
+    }
+
+    lines.push(`"Manual Review Warning","Warning","${ruleCode}",${rowNum},"${field}",${formatCsvVal(origVal)},"(Pending Manual Fix)","${reason}"`);
   });
 
   return lines.join('\n');
@@ -1599,7 +1596,7 @@ export function Step6Cleanse() {
                     variant="secondary"
                     size="sm"
                     icon={<FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />}
-                    onClick={() => dl(exportExecutiveSummaryCSV(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_summary.csv', 'text/csv')}
+                    onClick={() => dl(exportExecutiveSummaryCSV(summary, state.projectId || 'Default Project', state.obj || 'Customer Master', cleanedRows), 'cleansing_summary.csv', 'text/csv')}
                   >
                     Export CSV
                   </Button>

@@ -1695,17 +1695,6 @@ export function Step4Harmonize() {
       const outputRowCount = stats.total_output || (result?.final_table || []).length || inputRowCount;
 
       const lines: string[] = [
-        `# SAP Migration Studio — Data Harmonization Audit & Transformation Report`,
-        `# Project Name: "${state.projectId || 'Default Project'}"`,
-        `# Target Object: "${state.obj || 'CUSTOMER'}"`,
-        `# Primary Source: "${state.src || primarySource || 'Default Source'}"`,
-        `# Exported At: "${timestamp}"`,
-        `# Input Records: ${inputRowCount}`,
-        `# Harmonized Output Records: ${outputRowCount}`,
-        `# Deduplicated Records Removed: ${stats.deduped || 0}`,
-        `# Empty Records Filtered: ${stats.empty_removed || 0}`,
-        `# Total Harmonization Columns: ${stats.columns || result?.columns?.length || 0}`,
-        `#`,
         `Index,Category,Rule_Tag,Row_Number,PK_Identifier,Field_Name,Original_Value,Harmonized_Value,Status,Details`
       ];
 
@@ -1789,14 +1778,14 @@ export function Step4Harmonize() {
         }
 
         const safeDetail = details.replace(/"/g, '""');
-        const safeOld = origVal.replace(/"/g, '""');
-        const safeNew = harmonizedVal.replace(/"/g, '""');
+        const safeOld = /^0\d+$/.test(origVal) && origVal.length > 1 ? `="${origVal}"` : `"${origVal.replace(/"/g, '""')}"`;
+        const safeNew = /^0\d+$/.test(harmonizedVal) && harmonizedVal.length > 1 ? `="${harmonizedVal}"` : `"${harmonizedVal.replace(/"/g, '""')}"`;
         const safeCategory = category.replace(/"/g, '""');
         const safeTag = ruleTag.replace(/"/g, '""');
         const safePk = pkInfo.replace(/"/g, '""');
         const safeField = (fieldName || 'N/A').replace(/"/g, '""');
 
-        lines.push(`${index + 1},"${safeCategory}","${safeTag}",${rowNum || 'N/A'},"${safePk}","${safeField}","${safeOld}","${safeNew}","${status}","${safeDetail}"`);
+        lines.push(`${index + 1},"${safeCategory}","${safeTag}",${rowNum || 'N/A'},"${safePk}","${safeField}",${safeOld},${safeNew},"${status}","${safeDetail}"`);
       });
 
       const csvContent = lines.join('\n');
