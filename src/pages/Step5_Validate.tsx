@@ -536,104 +536,184 @@ export function Step5Validate() {
       // Palette
       const primaryColor = [14, 116, 144]; // Deep Teal
       const darkText = [30, 41, 59];
+      const mutedText = [100, 116, 139];
       const lightBg = [248, 250, 252];
+      const tableHeaderBg = [230, 238, 245];
+      const tableAltRowBg = [245, 248, 251];
+      const successColor = [16, 185, 129];
+      const dangerColor = [220, 38, 38];
 
       // Header Banner
       doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       doc.rect(0, 0, pageWidth, 28, 'F');
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
+      doc.setFontSize(15);
       doc.setTextColor(255, 255, 255);
-      doc.text('SAP Migration Studio — Validation Report', 14, 14);
+      doc.text('SAP Migration Studio — Data Validation Audit Report', 14, 13);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.text(`Generated: ${new Date().toLocaleDateString()} | Target Object: ${state.obj} | Rules Executed: ${report.length}`, 14, 22);
+      doc.setFontSize(8.5);
+      doc.text(`Generated: ${new Date().toLocaleDateString()} | Target Object: ${state.obj || 'Customer'} | Source: ${state.src || 'Harmonized'}`, 14, 21);
 
       let yPos = 36;
 
       // Executive Title
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
+      doc.setFontSize(13);
       doc.setTextColor(darkText[0], darkText[1], darkText[2]);
-      doc.text(`Data Quality Validation: ${state.obj}`, 14, yPos);
-      yPos += 8;
+      doc.text(`Data Quality Validation: ${state.obj || 'Customer'} Master Data`, 14, yPos);
+      yPos += 7;
 
       // Scorecard Box
       doc.setFillColor(lightBg[0], lightBg[1], lightBg[2]);
-      doc.roundedRect(14, yPos, pageWidth - 28, 22, 3, 3, 'F');
+      doc.roundedRect(14, yPos, pageWidth - 28, 22, 2.5, 2.5, 'F');
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
+      doc.setFontSize(10.5);
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       const totalErrors = report.reduce((sum, r) => sum + r.failCount, 0);
       const totalChecks = report.reduce((sum, r) => sum + r.totalChecked, 0);
-      const passRate = totalChecks ? (((totalChecks - totalErrors) / totalChecks) * 100).toFixed(1) : 0;
+      const passRate = totalChecks ? (((totalChecks - totalErrors) / totalChecks) * 100).toFixed(1) : '100.0';
       
-      doc.text(`Overall Validation Pass Rate: ${passRate}%`, 20, yPos + 9);
+      doc.text(`Overall Validation Pass Rate: ${passRate}%`, 20, yPos + 8);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139);
-      doc.text(`Total Rules: ${report.length}  |  Total Checks: ${totalChecks}  |  Total Failures: ${totalErrors}`, 20, yPos + 16);
+      doc.setFontSize(8.5);
+      doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+      doc.text(`Total Rules: ${report.length}  |  Total Checks: ${totalChecks}  |  Total Failures: ${totalErrors}`, 20, yPos + 15);
 
-      yPos += 32;
+      yPos += 28;
 
-      // Section 1: Rule Summary
+      // Section 1: Executive Summary
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(darkText[0], darkText[1], darkText[2]);
-      doc.text('1. Rule Execution Summary', 14, yPos);
-      yPos += 8;
+      doc.text('1. Executive Validation Summary', 14, yPos);
+      yPos += 6;
 
-      report.forEach(r => {
-        if (yPos > 270) { doc.addPage(); yPos = 20; }
-        
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
-        doc.text(`${r.label} ${r.is_dynamic ? '(AI Rule)' : ''}`, 14, yPos);
-        
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.setTextColor(r.failCount > 0 ? 220 : 22, r.failCount > 0 ? 38 : 163, r.failCount > 0 ? 38 : 74);
-        doc.text(`Failures: ${r.failCount} / ${r.totalChecked}`, 140, yPos);
-        yPos += 5;
-        
-        doc.setFontSize(8.5);
-        doc.setTextColor(100, 116, 139);
-        const splitDesc = doc.splitTextToSize(r.description, pageWidth - 28);
-        doc.text(splitDesc, 14, yPos);
-        yPos += (splitDesc.length * 4) + 4;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      const summaryNarrative = `The Validation Engine checked ${totalChecks} data points across ${state.obj || 'Customer'} records from the ${state.src || 'Harmonization'} step. It applied ${report.length} strict SAP domain logic checks and custom AI rules. A total of ${totalErrors} anomalies were detected, resulting in an overall pass rate of ${passRate}%. Ensure critical errors are addressed in Step 6 (Cleanse) prior to final S/4HANA deployment.`;
+      const splitSummary = doc.splitTextToSize(summaryNarrative, pageWidth - 28);
+      doc.text(splitSummary, 14, yPos);
+      yPos += (splitSummary.length * 4.5) + 6;
 
-        if (r.failCount > 0) {
-            yPos += 2;
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(8);
-            doc.text('Sample Failures:', 14, yPos);
-            yPos += 4;
-            
-            doc.setFont('helvetica', 'normal');
-            r.failures.slice(0, 3).forEach(f => {
-                if (yPos > 280) { doc.addPage(); yPos = 20; }
-                const failText = `• Row ${f.idx}: Field [${f.field}] = "${f.value}" - ${f.message}`;
-                const splitFail = doc.splitTextToSize(failText, pageWidth - 32);
-                doc.text(splitFail, 18, yPos);
-                yPos += (splitFail.length * 4) + 1;
-            });
-            if (r.failures.length > 3) {
-                doc.setTextColor(14, 116, 144);
-                doc.text(`... and ${r.failures.length - 3} more.`, 18, yPos);
-                yPos += 4;
-            }
-            yPos += 4;
-        } else {
-            yPos += 2;
+      // Section 2: Validation Rule Matrix
+      if (yPos > 240) { doc.addPage(); yPos = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('2. Validation Rule Matrix', 14, yPos);
+      yPos += 6;
+
+      // Rules Table Header
+      doc.setFillColor(tableHeaderBg[0], tableHeaderBg[1], tableHeaderBg[2]);
+      doc.rect(14, yPos, pageWidth - 28, 6.5, 'F');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text('Validation Rule & Scope', 18, yPos + 4.5);
+      doc.text('Status', 120, yPos + 4.5);
+      doc.text('Failure Rate', 150, yPos + 4.5);
+      yPos += 6.5;
+
+      doc.setFont('helvetica', 'normal');
+      report.forEach((r, idx) => {
+        if (yPos > 275) { doc.addPage(); yPos = 20; }
+        
+        if (idx % 2 === 1) {
+          doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
+          doc.rect(14, yPos, pageWidth - 28, 6, 'F');
         }
+
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.setFontSize(8);
+        const title = r.label || r.rule;
+        const tag = r.is_dynamic ? '[AI]' : '[SAP]';
+        doc.text(`${tag} ${title}`, 18, yPos + 4.2);
+
+        if (r.failCount === 0) {
+          doc.setTextColor(successColor[0], successColor[1], successColor[2]);
+          doc.text('PASS', 120, yPos + 4.2);
+        } else {
+          doc.setTextColor(dangerColor[0], dangerColor[1], dangerColor[2]);
+          doc.text('FAIL', 120, yPos + 4.2);
+        }
+
+        doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+        doc.text(`${r.failCount} / ${r.totalChecked}`, 150, yPos + 4.2);
+        yPos += 6;
       });
 
-      doc.save(`Data_Validation_Report_${state.obj}.pdf`);
+      yPos += 6;
+
+      // Section 3: Detailed Anomalies Log (Columnar)
+      if (yPos > 230) { doc.addPage(); yPos = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('3. Detailed Anomalies Log (Row-Level Audit)', 14, yPos);
+      yPos += 6;
+      
+      const failedRules = report.filter(r => r.failCount > 0);
+      if (failedRules.length === 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(successColor[0], successColor[1], successColor[2]);
+        doc.text('No anomalies detected across any rules!', 14, yPos);
+      } else {
+        // Flatten all failures into a single array for table rendering
+        const allFailures: { ruleTag: string, f: any }[] = [];
+        failedRules.forEach(r => {
+          r.failures.forEach(f => {
+            allFailures.push({ ruleTag: r.label || r.rule, f });
+          });
+        });
+
+        // Detail Table Header
+        doc.setFillColor(tableHeaderBg[0], tableHeaderBg[1], tableHeaderBg[2]);
+        doc.rect(14, yPos, pageWidth - 28, 6.5, 'F');
+        doc.setFontSize(8);
+        doc.setTextColor(71, 85, 105);
+        doc.text('Rule Tag', 18, yPos + 4.5);
+        doc.text('Row & Key Info', 55, yPos + 4.5);
+        doc.text('Field & Invalid Value', 105, yPos + 4.5);
+        doc.text('Failure Reason', 150, yPos + 4.5);
+        yPos += 6.5;
+
+        doc.setFont('helvetica', 'normal');
+        allFailures.forEach((item, idx) => {
+          if (yPos > 275) { doc.addPage(); yPos = 20; }
+          if (idx % 2 === 1) {
+            doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
+            doc.rect(14, yPos, pageWidth - 28, 5.5, 'F');
+          }
+
+          const { ruleTag, f } = item;
+          const rowData = state.validated[f.idx]?.row || {};
+          const pkValue = getPrimaryKeyValue(rowData, state.obj) || 'N/A';
+          const rowKeyText = `Row ${f.idx + 1} [PK: ${pkValue}]`;
+          const fieldValText = `[${f.field}] = "${f.value}"`;
+
+          doc.setFontSize(7.5);
+          doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+          doc.text(ruleTag.substring(0, 22), 18, yPos + 4);
+
+          doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+          doc.text(rowKeyText.substring(0, 30), 55, yPos + 4);
+
+          doc.setTextColor(dangerColor[0], dangerColor[1], dangerColor[2]);
+          doc.text(fieldValText.substring(0, 28), 105, yPos + 4);
+
+          doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+          doc.text(f.message.substring(0, 40), 150, yPos + 4);
+
+          yPos += 5.5;
+        });
+      }
+
+      doc.save(`Data_Validation_Report_${state.obj || 'Customer'}.pdf`);
       toast('Validation PDF Report exported successfully!', 'ok');
     } catch (error) {
       console.error('PDF generation error:', error);
