@@ -600,10 +600,10 @@ function PreviewCard({
               <div
                 key={grp.id}
                 className={`rounded-lg border transition-all ${isDynamic
-                    ? 'border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/20 text-purple-800 dark:text-purple-300'
-                    : isInit
-                      ? 'border-gray-200 dark:border-gray-800 bg-[var(--bg-tertiary)]/50 text-[var(--text-tertiary)]'
-                      : 'border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-950/15 text-[var(--text-primary)]'
+                  ? 'border-purple-200 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/20 text-purple-800 dark:text-purple-300'
+                  : isInit
+                    ? 'border-gray-200 dark:border-gray-800 bg-[var(--bg-tertiary)]/50 text-[var(--text-tertiary)]'
+                    : 'border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-950/15 text-[var(--text-primary)]'
                   }`}
               >
                 {/* Summary Header Line */}
@@ -1221,9 +1221,9 @@ export function Step4Harmonize() {
     ? true
     : (stagedSecondaryFiles.length > 0
       ? (!!displayedJoinConfig.base_file && displayedJoinConfig.joins.every(j => {
-          const kps = j.key_pairs?.length ? j.key_pairs : [{ base_key: j.base_key, join_key: j.join_key }];
-          return kps.length > 0 && kps.every(kp => kp.base_key && kp.join_key);
-        }))
+        const kps = j.key_pairs?.length ? j.key_pairs : [{ base_key: j.base_key, join_key: j.join_key }];
+        return kps.length > 0 && kps.every(kp => kp.base_key && kp.join_key);
+      }))
       : primaryRowCount > 0);
 
   async function runHarmonization(isPreview: boolean = true, silent: boolean = false) {
@@ -2490,8 +2490,8 @@ export function Step4Harmonize() {
                         onClick={() => setExpandedRuleKey(isExpanded ? null : rule.key)}
                         title={`Configure parameters for ${rule.title}`}
                         className={`p-1.5 rounded-lg transition-colors ml-2 cursor-pointer shrink-0 ${isExpanded
-                            ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300'
-                            : 'hover:bg-purple-100 dark:hover:bg-purple-900/40 text-gray-400 hover:text-purple-600'
+                          ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300'
+                          : 'hover:bg-purple-100 dark:hover:bg-purple-900/40 text-gray-400 hover:text-purple-600'
                           }`}
                       >
                         <Pencil className="w-3.5 h-3.5" />
