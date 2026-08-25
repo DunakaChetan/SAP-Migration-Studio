@@ -575,6 +575,8 @@ export function Step3Extract() {
       const primaryColor = [14, 116, 144]; // Deep Teal
       const darkText = [30, 41, 59];
       const lightBg = [248, 250, 252];
+      const tableHeaderBg = [230, 238, 245]; // Darkened elegant table header
+      const tableAltRowBg = [245, 248, 251]; // Alternate row darkening
 
       // Header Banner
       doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
@@ -687,7 +689,7 @@ export function Step3Extract() {
       yPos += 8;
 
       // Table Header
-      doc.setFillColor(241, 245, 249);
+      doc.setFillColor(tableHeaderBg[0], tableHeaderBg[1], tableHeaderBg[2]);
       doc.rect(14, yPos, pageWidth - 28, 7, 'F');
 
       doc.setFontSize(8.5);
@@ -707,7 +709,7 @@ export function Step3Extract() {
         }
 
         if (index % 2 === 1) {
-          doc.setFillColor(248, 250, 252);
+          doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
           doc.rect(14, yPos, pageWidth - 28, 6, 'F');
         }
 
@@ -751,7 +753,7 @@ export function Step3Extract() {
           }
 
           // Field Box Header
-          doc.setFillColor(241, 245, 249);
+          doc.setFillColor(tableHeaderBg[0], tableHeaderBg[1], tableHeaderBg[2]);
           doc.rect(14, yPos, pageWidth - 28, 7, 'F');
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(9);
@@ -761,7 +763,7 @@ export function Step3Extract() {
           yPos += 8;
 
           // Failure Table Header
-          doc.setFillColor(248, 250, 252);
+          doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
           doc.rect(14, yPos, pageWidth - 28, 5.5, 'F');
           doc.setFontSize(7.5);
           doc.setTextColor(100, 116, 139);
@@ -782,7 +784,7 @@ export function Step3Extract() {
             }
 
             if (fIdx % 2 === 1) {
-              doc.setFillColor(252, 253, 254);
+              doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
               doc.rect(14, yPos, pageWidth - 28, 5, 'F');
             }
 

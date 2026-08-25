@@ -770,6 +770,7 @@ export function Step7Transform() {
                               <DataTable
                                 rows={paginatedRows}
                                 cols={tableCols}
+                                keyCols={allKeyColumns}
                               />
                               <TablePaginationFooter
                                 currentPage={currentPage}

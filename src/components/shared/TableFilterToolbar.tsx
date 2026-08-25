@@ -3,10 +3,10 @@ import { Search, ChevronDown, ChevronUp, Check, X, Layers, CheckCheck, Hash, Plu
 
 /* ─── Main Primary Key Column Detection ─── */
 const MAIN_KEY_PATTERNS = [
-  'KUNNR', 'LIFNR', 'MATNR', 'CUSTOMER_NUMBER', 'VENDOR_NUMBER',
-  'MATERIAL_NUMBER', 'PARTY_NUMBER', 'BP_NUMBER', 'BUSINESS_PARTNER',
-  'CUSTOMER_ID', 'VENDOR_ID', 'MATERIAL_ID', 'PARTY_ID', 'ACCOUNT_ID',
-  'CUSTOMERNO', 'CUST_ID', 'CUST_NO'
+  'KUNNR', 'LIFNR', 'MATNR', 'BPEXT', 'BP_EXT', 'PARTNER', 'BU_PARTNER',
+  'CUSTOMER_NUMBER', 'VENDOR_NUMBER', 'MATERIAL_NUMBER', 'PARTY_NUMBER', 'ACCOUNT_NUMBER',
+  'BP_NUMBER', 'BUSINESS_PARTNER', 'CUSTOMER_ID', 'VENDOR_ID', 'MATERIAL_ID',
+  'PARTY_ID', 'ACCOUNT_ID', 'CUSTOMERNO', 'CUST_ID', 'CUST_NO'
 ];
 
 export function isKeyColumn(colName: string): boolean {

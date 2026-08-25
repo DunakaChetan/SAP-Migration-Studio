@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
 import { dl, expCSV } from '@/lib/utils';
+import { jsPDF } from 'jspdf';
 import {
   PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button,
   StatBox, StatsGrid, DataTable, PageHeader, EmptyState
@@ -264,7 +265,7 @@ const RULE_LIST: RuleDef[] = [
 ];
 
 /* ─── Harmonization Report Card ─── */
-function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
+function HarmonizationReportCard({ result, onExportPDF }: { result: HarmonizationResult; onExportPDF?: () => void }) {
   const [showLogDetails, setShowLogDetails] = useState(false);
 
   const fixLog = result.fix_log || [];
@@ -317,7 +318,19 @@ function HarmonizationReportCard({ result }: { result: HarmonizationResult }) {
       <CardHeader
         title="Harmonization Changes & Audit Report"
         subtitle="Summary of standardized fields, rule fixes and source origins"
-      />
+      >
+        {onExportPDF && (
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Download className="w-3.5 h-3.5 text-purple-500" />}
+            onClick={onExportPDF}
+            className="ml-auto"
+          >
+            Export Vector PDF
+          </Button>
+        )}
+      </CardHeader>
       <CardBody className="p-4 space-y-4">
         {/* Metric Cards Grid */}
         <div className="grid grid-cols-4 gap-3">
@@ -939,6 +952,275 @@ export function Step4Harmonize() {
     window.open(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/download/${result.session_id}`, '_blank');
   }
 
+  // Comprehensive Harmonization Vector PDF Generator
+  const exportHarmonizationPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      // Palette - Exact Deep Teal theme matching Step 3 Extract
+      const primaryColor = [14, 116, 144]; // Deep Teal
+      const darkText = [30, 41, 59];       // #1E293B
+      const mutedText = [100, 116, 139];   // #64748B
+      const lightBg = [248, 250, 252];     // #F8FAFC
+      const tableHeaderBg = [230, 238, 245]; // Darkened elegant table header
+      const tableAltRowBg = [245, 248, 251]; // Alternate row darkening
+      const successColor = [16, 185, 129]; // #10B981
+      const dangerColor = [220, 38, 38];   // #DC2626
+
+      const fixLog = result?.fix_log || previewData?.fixLog || [];
+      const stats = result?.stats || previewData?.stats || {};
+      const outputRows = result?.final_table || [];
+      const inputRowCount = stats.total_input || state.extracted?.length || state.rawData?.length || 0;
+      const outputRowCount = stats.total_output || outputRows.length || inputRowCount;
+
+      // Header Banner
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(0, 0, pageWidth, 28, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(15);
+      doc.setTextColor(255, 255, 255);
+      doc.text('SAP Migration Studio — Data Harmonization Audit Report', 14, 13);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.text(
+        `Generated: ${new Date().toLocaleDateString()} | Target Object: ${state.obj || 'CUSTOMER'} | Source: ${state.src || primarySource} | Mode: ${mode.toUpperCase()}`,
+        14,
+        21
+      );
+
+      let yPos = 36;
+
+      // Executive Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text(`Harmonization & Transformation Executive Report: ${state.obj || 'Customer'} Master Data`, 14, yPos);
+      yPos += 7;
+
+      // Scorecard Box
+      doc.setFillColor(lightBg[0], lightBg[1], lightBg[2]);
+      doc.roundedRect(14, yPos, pageWidth - 28, 22, 2.5, 2.5, 'F');
+
+      // Metric Line 1
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      const totalTransforms = fixLog.filter(l => l.startsWith('[') && !l.includes('[Init]') && !l.includes('[Mapping]') && !l.includes('[Merge]') && !l.includes('[ColumnNaming]')).length;
+      doc.text(`Harmonization Pipeline Execution: ${totalTransforms} Transformations Applied`, 20, yPos + 8);
+
+      // Metric Line 2
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+      doc.text(
+        `Input Rows: ${inputRowCount}  |  Harmonized Output: ${outputRowCount}  |  Deduplicated: ${stats.deduped || 0}  |  Empty Filtered: ${stats.empty_removed || 0}  |  Output Cols: ${stats.columns || result?.columns?.length || 0}`,
+        20,
+        yPos + 15
+      );
+
+      yPos += 28;
+
+      // Section 1: Executive Summary
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('1. Executive Harmonization & Cleansing Summary', 14, yPos);
+      yPos += 6;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      const summaryNarrative = `The Harmonization Agent processed ${inputRowCount} source records from ${state.src || primarySource} against the SAP S/4HANA ${state.obj || 'Customer'} target schema. The pipeline executed ${enabledRuleCount} active harmonization rules, standardizing values into strict SAP domain formats (including ISO country codes, currency formats, payment terms, phone/fax sanitation, and whitespace normalization). A total of ${outputRowCount} clean, unified records were produced with 0 fatal data conflicts.`;
+      const splitSummary = doc.splitTextToSize(summaryNarrative, pageWidth - 28);
+      doc.text(splitSummary, 14, yPos);
+      yPos += (splitSummary.length * 4.5) + 6;
+
+      // Section 2: Active Rules Matrix
+      if (yPos > 240) { doc.addPage(); yPos = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('2. Configured Harmonization Rules & Parameters', 14, yPos);
+      yPos += 6;
+
+      // Rules Table Header
+      doc.setFillColor(tableHeaderBg[0], tableHeaderBg[1], tableHeaderBg[2]);
+      doc.rect(14, yPos, pageWidth - 28, 6.5, 'F');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text('Rule Name & Scope', 18, yPos + 4.5);
+      doc.text('Status', 90, yPos + 4.5);
+      doc.text('Parameter Settings / Custom Instructions', 120, yPos + 4.5);
+      yPos += 6.5;
+
+      doc.setFont('helvetica', 'normal');
+      RULE_LIST.forEach((rule, idx) => {
+        if (yPos > 275) { doc.addPage(); yPos = 20; }
+        const cfg = ruleConfig[rule.key] || { enabled: true };
+        const isEnabled = cfg.enabled !== false;
+
+        if (idx % 2 === 1) {
+          doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
+          doc.rect(14, yPos, pageWidth - 28, 6, 'F');
+        }
+
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.setFontSize(8);
+        doc.text(rule.title, 18, yPos + 4.2);
+
+        if (isEnabled) {
+          doc.setTextColor(successColor[0], successColor[1], successColor[2]);
+          doc.text('ENABLED', 90, yPos + 4.2);
+        } else {
+          doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+          doc.text('DISABLED', 90, yPos + 4.2);
+        }
+
+        doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+        const paramStr = cfg.custom_instruction ? `Custom: ${cfg.custom_instruction}` : (rule.sub || 'Standard SAP mapping');
+        doc.text(doc.splitTextToSize(paramStr, 70)[0] || '', 120, yPos + 4.2);
+        yPos += 6;
+      });
+
+      yPos += 6;
+
+      // Section 3: Transformation Category Breakdown
+      if (yPos > 230) { doc.addPage(); yPos = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('3. Transformation Event Breakdown by Category', 14, yPos);
+      yPos += 6;
+
+      const catList = [
+        { title: 'Dedup & Filtering', items: fixLog.filter(l => l.includes('[Dedup]') || l.includes('[EmptyFilter]') || l.includes('[HeaderCleanup]')) },
+        { title: 'Country, Currency & ISO Standardization', items: fixLog.filter(l => l.includes('[Country→ISO]') || l.includes('[Currency→ISO]')) },
+        { title: 'Date & Phone Cleanup', items: fixLog.filter(l => l.includes('[Date→YYYYMMDD]') || l.includes('[PhoneClean]')) },
+        { title: 'Whitespace Normalization & Text Truncation', items: fixLog.filter(l => l.includes('[WhitespaceTrim]') || l.includes('[Trunc35]') || l.includes('[UPPER]') || l.includes('[Pad10]')) },
+        { title: 'Dynamic AI & Custom Rules', items: fixLog.filter(l => l.includes('[DynamicAI]')) }
+      ];
+
+      doc.setFillColor(tableHeaderBg[0], tableHeaderBg[1], tableHeaderBg[2]);
+      doc.rect(14, yPos, pageWidth - 28, 6.5, 'F');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text('Category', 18, yPos + 4.5);
+      doc.text('Events', 120, yPos + 4.5);
+      doc.text('Status', 160, yPos + 4.5);
+      yPos += 6.5;
+
+      doc.setFont('helvetica', 'normal');
+      catList.forEach((cat, idx) => {
+        if (yPos > 275) { doc.addPage(); yPos = 20; }
+        if (idx % 2 === 1) {
+          doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
+          doc.rect(14, yPos, pageWidth - 28, 6, 'F');
+        }
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.setFontSize(8);
+        doc.text(cat.title, 18, yPos + 4.2);
+        doc.text(`${cat.items.length} events`, 120, yPos + 4.2);
+
+        if (cat.items.length > 0) {
+          doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+          doc.text('TRANSFORMED', 160, yPos + 4.2);
+        } else {
+          doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+          doc.text('NO CHANGES', 160, yPos + 4.2);
+        }
+        yPos += 6;
+      });
+
+      yPos += 6;
+
+      // Section 4: Detailed Transformation Log (Row Level Audit)
+      const detailLogs = fixLog.filter(l => l.includes('::Detail]') || (l.startsWith('[') && l.includes('Row ') && l.includes('→')));
+      if (detailLogs.length > 0) {
+        doc.addPage();
+        yPos = 20;
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.text('4. Detailed Harmonization Audit & Transformation Registry (Row-Level Audit)', 14, yPos);
+        yPos += 6;
+
+        // Detail Table Header
+        doc.setFillColor(tableHeaderBg[0], tableHeaderBg[1], tableHeaderBg[2]);
+        doc.rect(14, yPos, pageWidth - 28, 6.5, 'F');
+        doc.setFontSize(8);
+        doc.setTextColor(71, 85, 105);
+        doc.text('Rule Tag', 18, yPos + 4.5);
+        doc.text('Row & Key Info', 55, yPos + 4.5);
+        doc.text('Original Value', 105, yPos + 4.5);
+        doc.text('Harmonized Target Value', 150, yPos + 4.5);
+        yPos += 6.5;
+
+        doc.setFont('helvetica', 'normal');
+        detailLogs.slice(0, 150).forEach((entry, idx) => {
+          if (yPos > 275) { doc.addPage(); yPos = 20; }
+          if (idx % 2 === 1) {
+            doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
+            doc.rect(14, yPos, pageWidth - 28, 5.5, 'F');
+          }
+
+          const tagMatch = entry.match(/^\[([^\]]+)\]\s*(.*)$/);
+          const rawTag = tagMatch ? tagMatch[1].replace('::Detail', '') : 'Rule';
+          const content = tagMatch ? tagMatch[2] : entry;
+
+          const arrowParts = content.split('→');
+          const leftPart = arrowParts[0] || '';
+          const rightPart = arrowParts[1] || '';
+
+          const rowKeyMatch = leftPart.match(/(Row\s*\d+(\s*\[[^\]]+\])?\s*(\([^\)]+\))?):?\s*['"]?(.*)/);
+          const rowKeyText = rowKeyMatch ? rowKeyMatch[1] : leftPart.substring(0, 25);
+          const oldVal = rowKeyMatch ? (rowKeyMatch[4] || '').replace(/['"]$/, '').trim() : '';
+          const newVal = rightPart.replace(/^['"]|['"]$/g, '').trim();
+
+          doc.setFontSize(7.5);
+          doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+          doc.text(rawTag.substring(0, 18), 18, yPos + 4);
+
+          doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+          doc.text(rowKeyText.substring(0, 26), 55, yPos + 4);
+
+          doc.setTextColor(dangerColor[0], dangerColor[1], dangerColor[2]);
+          doc.text(oldVal.substring(0, 22) || '—', 105, yPos + 4);
+
+          doc.setTextColor(successColor[0], successColor[1], successColor[2]);
+          doc.text(newVal.substring(0, 25) || '—', 150, yPos + 4);
+
+          yPos += 5.5;
+        });
+
+        if (detailLogs.length > 150) {
+          doc.setFontSize(7);
+          doc.setTextColor(mutedText[0], mutedText[1], mutedText[2]);
+          doc.text(`... and ${detailLogs.length - 150} more transformed values (Full dataset available in exported CSV)`, 18, yPos + 4);
+          yPos += 5;
+        }
+      }
+
+      // Add Page Numbers
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(160, 174, 192);
+        doc.text(`SAP Migration Studio  |  Harmonization Report  |  Page ${i} of ${totalPages}`, pageWidth / 2, 290, { align: 'center' });
+      }
+
+      doc.save(`Harmonization_Audit_Report_${state.obj || 'Customer'}.pdf`);
+      toast('Comprehensive Vector PDF Audit Report exported successfully!', 'ok');
+    } catch (err: any) {
+      console.error(err);
+      toast('Failed to generate Harmonization PDF report', 'err');
+    }
+  };
+
   return (
     <PageLayout>
       <PageGrid>
@@ -1205,6 +1487,7 @@ export function Step4Harmonize() {
                           <DataTable
                             rows={paginatedRows}
                             cols={tableCols}
+                            keyCols={allKeyColumns}
                           />
                           <TablePaginationFooter
                             currentPage={currentPage}
@@ -1224,7 +1507,7 @@ export function Step4Harmonize() {
           })()}
 
           {/* Harmonization Changes & Audit Report */}
-          {result && <HarmonizationReportCard result={result} />}
+          {result && <HarmonizationReportCard result={result} onExportPDF={exportHarmonizationPDF} />}
 
           {!result && !previewData && (
             <Card>

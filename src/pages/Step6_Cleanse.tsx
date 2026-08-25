@@ -1710,7 +1710,7 @@ export function Step6Cleanse() {
                                 Export {t.table_name}
                               </Button>
                             </div>
-                            <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} />
+                            <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} keyCols={allKeyColumns} />
                             {tableRows.length > 15 && (
                               <div className="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-[var(--border)]">
                                 Showing 15 of {tableRows.length} rows · Export CSV for full table

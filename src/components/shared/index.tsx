@@ -189,20 +189,41 @@ export function DataTable({ rows, cols, keyCols }: { rows: Record<string, unknow
   if (!rows?.length) return <div className="py-6 text-center text-[var(--text-tertiary)] text-sm">No data</div>;
   const c = cols.length ? cols : Object.keys(rows[0] || {});
 
-  const isKey = (colName: string) => {
-    if (keyCols?.length) {
-      return keyCols.some(k => k === colName || colName.toLowerCase() === k.toLowerCase() || colName.toLowerCase().endsWith(`.${k.toLowerCase()}`));
-    }
-    const colLower = colName.toLowerCase().trim();
+  const isKey = (colName: string): boolean => {
+    if (!colName) return false;
+    const colClean = colName.replace(/^\[\d+\]\s*/, '').trim();
+    const colLower = colClean.toLowerCase();
     const short = colLower.split('.').pop() || colLower;
+
+    // 1. Check if explicitly in keyCols (exact, lower, short, or dot/underscore suffix)
+    if (keyCols?.length) {
+      const match = keyCols.some(k => {
+        if (!k) return false;
+        const kClean = k.replace(/^\[\d+\]\s*/, '').trim().toLowerCase();
+        const kShort = kClean.split('.').pop() || kClean;
+        return (
+          kClean === colLower ||
+          kShort === short ||
+          colLower.endsWith(`.${kClean}`) ||
+          kClean.endsWith(`.${colLower}`) ||
+          colLower.endsWith(`_${kClean}`) ||
+          kClean.endsWith(`_${colLower}`)
+        );
+      });
+      if (match) return true;
+    }
+
+    // 2. Comprehensive ERP/SAP Primary Key patterns
     const mainKeys = [
-      'id', 'kunnr', 'lifnr', 'matnr',
-      'customer_id', 'customerno', 'customer_number', 'customer_num', 'cust_id', 'cust_no',
-      'party_id', 'party_number', 'party_num',
-      'account_id', 'vendor_id', 'material_id'
+      'id', 'kunnr', 'lifnr', 'matnr', 'bpext', 'bp_ext', 'partner', 'bu_partner', 'business_partner',
+      'customer_number', 'customer_id', 'customerno', 'customer_num', 'cust_id', 'cust_no', 'account_number',
+      'party_number', 'party_id', 'party_num', 'account_id', 'vendor_id', 'vendor_number', 'material_id', 'material_number'
     ];
     if (mainKeys.includes(short) || mainKeys.includes(colLower)) return true;
     if (short.endsWith('_id') && !['country_id', 'state_id', 'tax_id', 'language_id', 'bank_id', 'region_id'].some(ign => short.includes(ign))) return true;
+    if (short.endsWith('_number') || short.endsWith('_num') || short.endsWith('_no')) {
+      if (['customer', 'party', 'account', 'vendor', 'material', 'bp', 'partner', 'contract', 'order', 'doc'].some(k => short.includes(k))) return true;
+    }
     return false;
   };
 
