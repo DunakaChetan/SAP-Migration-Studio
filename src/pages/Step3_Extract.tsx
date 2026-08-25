@@ -942,77 +942,6 @@ export function Step3Extract() {
             </StatsGrid>
           )}
 
-          {has ? (
-            <div className="space-y-6">
-              {/* Table Filter Toolbar */}
-              {(() => {
-                const allTables: TableInfo[] = extractedTables.length > 0 
-                  ? extractedTables 
-                  : [{ table_name: 'Extracted Records', columns: Object.keys(state.extracted[0] || {}) }];
-                const visibleTables = allTables.filter((t: any) => selectedTables.has(t.table_name));
-                // Collect all key columns across all tables for filtering
-                const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
-                const filteredRows = filterRowsByKey(state.extracted, keyFilterValue, allKeyColumns).slice(0, rowLimit);
-
-                return (
-                  <>
-                    <TableFilterToolbar
-                      tables={allTables}
-                      selectedTables={selectedTables}
-                      onSelectedTablesChange={setSelectedTables}
-                      keyFilterValue={keyFilterValue}
-                      onKeyFilterChange={setKeyFilterValue}
-                      keyColumns={allKeyColumns}
-                      accentColor="cyan"
-                    />
-                    {visibleTables.length === 0 ? (
-                      <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
-                        No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
-                      </div>
-                    ) : (
-                      visibleTables.map((t: any) => {
-                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
-                        return (
-                          <Card key={t.table_name}>
-                            <CardHeader title={`Extracted Records: ${t.table_name}`}>
-                              <div className="ml-auto flex items-center gap-2">
-                                <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
-                                  {tableCols.length} fields · {tableRows.length} rows{keyFilterValue ? ' (filtered)' : ''}
-                                </span>
-                                <Button 
-                                  variant="secondary" 
-                                  size="sm" 
-                                  icon={<Download className="w-3 h-3" />} 
-                                  onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
-                                >
-                                  Export {t.table_name}
-                                </Button>
-                              </div>
-                            </CardHeader>
-                            <CardBody>
-                              <DataTable rows={tableRows} cols={tableCols} keyCols={allKeyColumns} />
-                            </CardBody>
-                          </Card>
-                        );
-                      })
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          ) : (
-            <Card>
-              <CardHeader title="Extracted Mapped Records" />
-              <CardBody>
-                <EmptyState icon={<UploadCloud className="w-10 h-10 text-primary-500" />} message="Run extraction to see mapped data" />
-              </CardBody>
-            </Card>
-          )}
-        </GridCol>
-
-
-      </PageGrid>
-
       {/* ───────────────────────────────────────────────────── */}
       {/*     DATA QUALITY INTELLIGENCE REPORT (FULL WIDTH)    */}
       {/* ───────────────────────────────────────────────────── */}
@@ -1764,6 +1693,77 @@ export function Step3Extract() {
 
         </div>
       )}
+          {has ? (
+            <div className="space-y-6">
+              {/* Table Filter Toolbar */}
+              {(() => {
+                const allTables: TableInfo[] = extractedTables.length > 0 
+                  ? extractedTables 
+                  : [{ table_name: 'Extracted Records', columns: Object.keys(state.extracted[0] || {}) }];
+                const visibleTables = allTables.filter((t: any) => selectedTables.has(t.table_name));
+                // Collect all key columns across all tables for filtering
+                const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
+                const filteredRows = filterRowsByKey(state.extracted, keyFilterValue, allKeyColumns).slice(0, rowLimit);
+
+                return (
+                  <>
+                    <TableFilterToolbar
+                      tables={allTables}
+                      selectedTables={selectedTables}
+                      onSelectedTablesChange={setSelectedTables}
+                      keyFilterValue={keyFilterValue}
+                      onKeyFilterChange={setKeyFilterValue}
+                      keyColumns={allKeyColumns}
+                      accentColor="cyan"
+                    />
+                    {visibleTables.length === 0 ? (
+                      <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
+                        No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                      </div>
+                    ) : (
+                      visibleTables.map((t: any) => {
+                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                        return (
+                          <Card key={t.table_name}>
+                            <CardHeader title={`Extracted Records: ${t.table_name}`}>
+                              <div className="ml-auto flex items-center gap-2">
+                                <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
+                                  {tableCols.length} fields · {tableRows.length} rows{keyFilterValue ? ' (filtered)' : ''}
+                                </span>
+                                <Button 
+                                  variant="secondary" 
+                                  size="sm" 
+                                  icon={<Download className="w-3 h-3" />} 
+                                  onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
+                                >
+                                  Export {t.table_name}
+                                </Button>
+                              </div>
+                            </CardHeader>
+                            <CardBody>
+                              <DataTable rows={tableRows} cols={tableCols} keyCols={allKeyColumns} />
+                            </CardBody>
+                          </Card>
+                        );
+                      })
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
+            <Card>
+              <CardHeader title="Extracted Mapped Records" />
+              <CardBody>
+                <EmptyState icon={<UploadCloud className="w-10 h-10 text-primary-500" />} message="Run extraction to see mapped data" />
+              </CardBody>
+            </Card>
+          )}
+        </GridCol>
+
+
+      </PageGrid>
+
 
       {/* ── FAILING DATA INSPECTOR MODAL ── */}
       {inspectingField && (() => {
