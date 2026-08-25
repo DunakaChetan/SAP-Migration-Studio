@@ -71,6 +71,7 @@ async def run_harmonization(
     preview: str = Form("false"),
     rule_config_json: str = Form(""),
     custom_prompts_json: str = Form(""),
+    join_keys_json: str = Form(""),
 ):
     try:
         config = HarmonizationConfig(
@@ -95,8 +96,19 @@ async def run_harmonization(
             except Exception:
                 pass
 
+        join_keys = None
+        if join_keys_json:
+            try:
+                join_keys = json.loads(join_keys_json)
+                if not isinstance(join_keys, list):
+                    join_keys = [join_keys]
+            except Exception:
+                pass
+
         primary_content = await primary_file.read()
-        primary_df = parse_data_from_upload(primary_content, primary_file.filename or "data.csv")
+        primary_df = parse_data_from_upload(
+            primary_content, primary_file.filename or "data.csv"
+        )
 
         # Collect custom instructions for fallback LLM generator
         all_prompts = _collect_custom_prompts(rule_config, custom_prompts)
@@ -148,6 +160,7 @@ async def run_harmonization(
                 preview_only=is_preview,
                 rule_config=rule_config,
                 dynamic_rules=dynamic_rules,
+                join_keys=join_keys,
             )
         else:
             raise HTTPException(400, f"Invalid mode: {mode}. Must be 'single' or 'multi'")
@@ -307,14 +320,15 @@ async def run_harmonization_multi_flow(
     primary_source: str = Form("SAP_ECC"),
     secondary_source: str = Form("ORACLE_EBS"),
     secondary_file: UploadFile = File(...),
-    secondary_mapping_file: UploadFile = File(...),
+    secondary_mapping_file: Optional[UploadFile] = File(None),
     preview: str = Form("false"),
     rule_config_json: str = Form(""),
     custom_prompts_json: str = Form(""),
+    join_keys_json: str = Form(""),
 ):
     """
     Multi-source harmonization with primary data from DB and secondary data uploaded.
-    Supports preview mode, editable rule config, and dynamic AI rules.
+    Supports preview mode, editable rule config, dynamic AI rules, and key-based join merging.
     """
     try:
         client = supabase_service.get_client()
@@ -338,6 +352,15 @@ async def run_harmonization_multi_flow(
         if custom_prompts_json:
             try:
                 custom_prompts = json.loads(custom_prompts_json)
+            except Exception:
+                pass
+
+        join_keys = None
+        if join_keys_json:
+            try:
+                join_keys = json.loads(join_keys_json)
+                if not isinstance(join_keys, list):
+                    join_keys = [join_keys]
             except Exception:
                 pass
 
@@ -395,16 +418,16 @@ async def run_harmonization_multi_flow(
         if not primary_mappings:
             raise HTTPException(400, "No valid mappings could be constructed from the database.")
 
-        # 3. Parse Secondary file + mapping from uploads
+        # 3. Parse Secondary file + mapping from uploads (Mapping is optional)
         if not secondary_file or not secondary_file.filename:
             raise HTTPException(400, "Secondary data file is required for multi mode")
         secondary_content = await secondary_file.read()
         secondary_df = parse_data_from_upload(secondary_content, secondary_file.filename or "data.csv")
 
-        if not secondary_mapping_file or not secondary_mapping_file.filename:
-            raise HTTPException(400, "Secondary mapping file is required for multi mode")
-        sm_content = await secondary_mapping_file.read()
-        secondary_mappings = parse_mapping_from_upload(sm_content, secondary_mapping_file.filename or "mapping.csv")
+        secondary_mappings = None
+        if secondary_mapping_file and secondary_mapping_file.filename:
+            sm_content = await secondary_mapping_file.read()
+            secondary_mappings = parse_mapping_from_upload(sm_content, secondary_mapping_file.filename or "mapping.csv")
 
         # 4. Generate dynamic rules from custom prompts / custom instructions (single LLM call)
         all_prompts = _collect_custom_prompts(rule_config, custom_prompts)
@@ -420,6 +443,7 @@ async def run_harmonization_multi_flow(
             preview_only=is_preview,
             rule_config=rule_config,
             dynamic_rules=dynamic_rules,
+            join_keys=join_keys,
         )
 
         # Store result for download

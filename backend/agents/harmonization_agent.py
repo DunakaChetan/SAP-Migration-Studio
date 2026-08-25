@@ -151,24 +151,85 @@ QUANTITY_MAP: Dict[str, str] = {
 }
 
 CURRENCY_MAP: Dict[str, str] = {
-    "INDIAN RUPEE": "INR",
-    "RUPEE": "INR",
-    "RUPEES": "INR",
-    "RS": "INR",
-    "US DOLLAR": "USD",
-    "DOLLAR": "USD",
-    "EUROS": "EUR",
-    "EURO": "EUR",
-    "POUND": "GBP",
-    "STERLING": "GBP",
-    "YEN": "JPY",
-    "YUAN": "CNY",
-    "RMB": "CNY",
-    "DIRHAM": "AED",
-    "RIYAL": "SAR",
-    "FRANC": "CHF",
-    "AUS DOLLAR": "AUD",
-    "CANADIAN DOLLAR": "CAD",
+    # USD
+    "USD": "USD", "US DOLLAR": "USD", "US DOLLARS": "USD", "DOLLAR": "USD", "DOLLARS": "USD",
+    "UNITED STATES DOLLAR": "USD", "UNITED STATES DOLLARS": "USD", "AMERICAN DOLLAR": "USD", "AMERICAN DOLLARS": "USD",
+    "US$": "USD", "$": "USD", "U.S. DOLLAR": "USD", "U.S. DOLLARS": "USD",
+    # GBP
+    "GBP": "GBP", "POUND": "GBP", "POUNDS": "GBP", "STERLING": "GBP", "POUND STERLING": "GBP", "POUNDS STERLING": "GBP",
+    "BRITISH POUND": "GBP", "BRITISH POUNDS": "GBP", "GREAT BRITAIN POUND": "GBP", "GREAT BRITAIN POUNDS": "GBP",
+    "UK POUND": "GBP", "UK POUNDS": "GBP", "£": "GBP", "GB£": "GBP",
+    # EUR
+    "EUR": "EUR", "EURO": "EUR", "EUROS": "EUR", "€": "EUR", "EUROPEAN EURO": "EUR",
+    # INR
+    "INR": "INR", "INDIAN RUPEE": "INR", "INDIAN RUPEES": "INR", "RUPEE": "INR", "RUPEES": "INR",
+    "RS": "INR", "RS.": "INR", "₹": "INR", "INR RUPEE": "INR",
+    # JPY
+    "JPY": "JPY", "YEN": "JPY", "JAPANESE YEN": "JPY", "¥": "JPY", "JP¥": "JPY",
+    # CNY
+    "CNY": "CNY", "YUAN": "CNY", "CHINESE YUAN": "CNY", "RENMINBI": "CNY", "CHINESE RENMINBI": "CNY",
+    "RMB": "CNY", "CN¥": "CNY",
+    # CAD
+    "CAD": "CAD", "CANADIAN DOLLAR": "CAD", "CANADIAN DOLLARS": "CAD", "CAN DOLLAR": "CAD", "C$": "CAD", "CAD$": "CAD",
+    # AUD
+    "AUD": "AUD", "AUS DOLLAR": "AUD", "AUS DOLLARS": "AUD", "AUSTRALIAN DOLLAR": "AUD", "AUSTRALIAN DOLLARS": "AUD",
+    "A$": "AUD", "AUD$": "AUD",
+    # CHF
+    "CHF": "CHF", "SWISS FRANC": "CHF", "SWISS FRANCS": "CHF", "FRANC": "CHF", "FRANCS": "CHF",
+    # AED
+    "AED": "AED", "DIRHAM": "AED", "DIRHAMS": "AED", "UAE DIRHAM": "AED", "UAE DIRHAMS": "AED", "EMIRATI DIRHAM": "AED",
+    # SAR
+    "SAR": "SAR", "RIYAL": "SAR", "RIYALS": "SAR", "SAUDI RIYAL": "SAR", "SAUDI RIYALS": "SAR",
+    # QAR
+    "QAR": "QAR", "QATARI RIYAL": "QAR", "QATARI RIYALS": "QAR",
+    # SGD
+    "SGD": "SGD", "SINGAPORE DOLLAR": "SGD", "SINGAPORE DOLLARS": "SGD", "S$": "SGD",
+    # HKD
+    "HKD": "HKD", "HONG KONG DOLLAR": "HKD", "HONG KONG DOLLARS": "HKD", "HK$": "HKD",
+    # NZD
+    "NZD": "NZD", "NEW ZEALAND DOLLAR": "NZD", "NEW ZEALAND DOLLARS": "NZD", "NZ$": "NZD",
+    # MXN
+    "MXN": "MXN", "MEXICAN PESO": "MXN", "MEXICAN PESOS": "MXN", "PESO": "MXN", "PESOS": "MXN", "MEX$": "MXN",
+    # BRL
+    "BRL": "BRL", "BRAZILIAN REAL": "BRL", "BRAZILIAN REAIS": "BRL", "REAL": "BRL", "REAIS": "BRL", "R$": "BRL",
+    # ZAR
+    "ZAR": "ZAR", "SOUTH AFRICAN RAND": "ZAR", "RAND": "ZAR",
+    # SEK
+    "SEK": "SEK", "SWEDISH KRONA": "SEK", "SWEDISH KRONOR": "SEK", "KRONA": "SEK", "KRONOR": "SEK",
+    # NOK
+    "NOK": "NOK", "NORWEGIAN KRONE": "NOK", "NORWEGIAN KRONER": "NOK", "KRONE": "NOK", "KRONER": "NOK",
+    # DKK
+    "DKK": "DKK", "DANISH KRONE": "DKK", "DANISH KRONER": "DKK",
+    # PLN
+    "PLN": "PLN", "POLISH ZLOTY": "PLN", "ZLOTY": "PLN",
+    # TRY
+    "TRY": "TRY", "TURKISH LIRA": "TRY", "LIRA": "TRY", "₺": "TRY",
+    # RUB
+    "RUB": "RUB", "RUSSIAN RUBLE": "RUB", "RUSSIAN RUBLES": "RUB", "RUBLE": "RUB", "RUBLES": "RUB", "₽": "RUB",
+    # KRW
+    "KRW": "KRW", "SOUTH KOREAN WON": "KRW", "KOREAN WON": "KRW", "WON": "KRW", "₩": "KRW",
+    # THB
+    "THB": "THB", "THAI BAHT": "THB", "BAHT": "THB", "฿": "THB",
+    # MYR
+    "MYR": "MYR", "MALAYSIAN RINGGIT": "MYR", "RINGGIT": "MYR", "RM": "MYR",
+    # IDR
+    "IDR": "IDR", "INDONESIAN RUPIAH": "IDR", "RUPIAH": "IDR", "RP": "IDR",
+    # PHP
+    "PHP": "PHP", "PHILIPPINE PESO": "PHP", "PHILIPPINE PESOS": "PHP", "₱": "PHP",
+    # VND
+    "VND": "VND", "VIETNAMESE DONG": "VND", "DONG": "VND", "₫": "VND",
+    # EGP
+    "EGP": "EGP", "EGYPTIAN POUND": "EGP", "EGYPTIAN POUNDS": "EGP",
+    # ILS
+    "ILS": "ILS", "ISRAELI SHEKEL": "ILS", "ISRAELI NEW SHEKEL": "ILS", "SHEKEL": "ILS", "SHEKELS": "ILS", "₪": "ILS",
+    # CLP
+    "CLP": "CLP", "CHILEAN PESO": "CLP", "CHILEAN PESOS": "CLP",
+    # COP
+    "COP": "COP", "COLOMBIAN PESO": "COP", "COLOMBIAN PESOS": "COP",
+    # ARS
+    "ARS": "ARS", "ARGENTINE PESO": "ARS", "ARGENTINE PESOS": "ARS",
+    # TWD
+    "TWD": "TWD", "TAIWAN DOLLAR": "TWD", "NEW TAIWAN DOLLAR": "TWD", "NT$": "TWD",
 }
 
 PAYMENT_TERMS_MAP: Dict[str, str] = {
@@ -271,7 +332,18 @@ def _tf_country(v: Any) -> str:
 
 def _tf_currency(v: Any) -> str:
     s = str(v).strip().upper() if v is not None and str(v) != "nan" else ""
-    return CURRENCY_MAP.get(s, s)
+    if not s or s.lower() in ["none", "null", "nan", ""]:
+        return ""
+    if s in CURRENCY_MAP:
+        return CURRENCY_MAP[s]
+    # Check without dots/commas
+    s_clean = re.sub(r'[\.,;\'"]+', '', s).strip()
+    if s_clean in CURRENCY_MAP:
+        return CURRENCY_MAP[s_clean]
+    # Plural strip check (e.g., "POUNDS" -> "POUND", "DOLLARS" -> "DOLLAR")
+    if s_clean.endswith("S") and s_clean[:-1] in CURRENCY_MAP:
+        return CURRENCY_MAP[s_clean[:-1]]
+    return s
 
 def _tf_payterm(v: Any) -> str:
     s = str(v).strip().upper() if v is not None and str(v) != "nan" else ""
@@ -616,19 +688,97 @@ class HarmonizationAgent:
         self,
         primary_df: pd.DataFrame,
         secondary_df: pd.DataFrame,
+        join_keys: Optional[List[Dict[str, str]]] = None,
+        primary_source: str = "PRIMARY",
+        secondary_source: str = "SECONDARY",
     ) -> pd.DataFrame:
         """
-        Row-append merge:
-          1. Column naming uses primary table's column names for all shared/SAP columns.
-          2. New columns that exist only in secondary keep secondary's column names.
-          3. Missing columns are filled with null (NaN).
+        Merge two dataframes either via Key-Based Join (if join_keys specified)
+        or Schema-Aligned Row Append (default).
         """
-        # The primary_df columns are the "canonical" names.
-        # For any column in secondary_df that already exists in primary_df → data aligns.
-        # For any column in secondary_df NOT in primary_df → new column, primary rows get NaN.
-        # For any column in primary_df NOT in secondary_df → secondary rows get NaN.
+        valid_pairs: List[Tuple[str, str]] = []
+        if join_keys:
+            for jk in join_keys:
+                pk = jk.get("primary_key") or jk.get("base_key") or ""
+                fk = jk.get("foreign_key") or jk.get("join_key") or ""
+                if pk and fk:
+                    # Find actual matching column names in dataframes
+                    actual_pk = next((c for c in primary_df.columns if c.lower() == pk.lower() or c.lower().endswith(f".{pk.lower()}") or pk.lower().endswith(f".{c.lower()}")), None)
+                    actual_fk = next((c for c in secondary_df.columns if c.lower() == fk.lower() or c.lower().endswith(f".{fk.lower()}") or fk.lower().endswith(f".{c.lower()}")), None)
+                    if actual_pk and actual_fk:
+                        valid_pairs.append((actual_pk, actual_fk))
 
-        merged = pd.concat([primary_df, secondary_df], ignore_index=True, sort=False)
+        if not valid_pairs:
+            # Standard row-append merge
+            merged = pd.concat([primary_df, secondary_df], ignore_index=True, sort=False)
+            return merged
+
+        # Key-Based Join Merge
+        key_summary = ", ".join([f"[{pk}] = [{fk}]" for pk, fk in valid_pairs])
+        self.fix_log.append(
+            f"[MultiJoin] Joining Primary ({primary_source}) and Secondary ({secondary_source}) on key condition(s): {key_summary}"
+        )
+
+        merged_primary = primary_df.copy()
+
+        def make_key(row, cols):
+            parts = []
+            for col in cols:
+                v = str(row.get(col, '')).strip()
+                if not v or v.lower() in ['nan', 'none', 'null', '']:
+                    return None
+                # Normalize numeric identifiers (e.g. 0001 -> 1)
+                v_clean = v.lstrip('0') if v.isdigit() else v.upper()
+                parts.append(v_clean)
+            return "::".join(parts)
+
+        pk_cols = [p[0] for p in valid_pairs]
+        fk_cols = [p[1] for p in valid_pairs]
+
+        primary_key_map: Dict[str, int] = {}
+        for p_idx in merged_primary.index:
+            k = make_key(merged_primary.iloc[p_idx], pk_cols)
+            if k and k not in primary_key_map:
+                primary_key_map[k] = p_idx
+
+        # Ensure all columns from secondary exist in merged_primary
+        secondary_cols = [c for c in secondary_df.columns if c not in fk_cols]
+        for c in secondary_cols:
+            if c not in merged_primary.columns:
+                merged_primary[c] = None
+
+        matched_count = 0
+        unmatched_rows: List[Dict[str, Any]] = []
+
+        for s_idx in secondary_df.index:
+            s_row = secondary_df.iloc[s_idx]
+            k = make_key(s_row, fk_cols)
+            if k and k in primary_key_map:
+                p_idx = primary_key_map[k]
+                matched_count += 1
+                for c in secondary_cols:
+                    s_val = s_row.get(c)
+                    if s_val is not None and str(s_val).strip() and str(s_val).lower() not in ['nan', 'none', 'null', '']:
+                        p_val = merged_primary.at[p_idx, c]
+                        # If primary is empty or null, fill with secondary attribute
+                        if p_val is None or str(p_val).strip() == "" or str(p_val).lower() in ['nan', 'none', 'null', '']:
+                            merged_primary.at[p_idx, c] = s_val
+            else:
+                unmatched_rows.append(s_row.to_dict())
+
+        if unmatched_rows:
+            unmatched_df = pd.DataFrame(unmatched_rows)
+            merged = pd.concat([merged_primary, unmatched_df], ignore_index=True, sort=False)
+        else:
+            merged = merged_primary
+
+        self.stats["joined_matches"] = matched_count
+        self.stats["unmatched_secondary"] = len(unmatched_rows)
+        self.fix_log.append(
+            f"[MultiJoin] Enriched {matched_count} primary records via primary key match. "
+            f"Appended {len(unmatched_rows)} unmatched secondary records."
+        )
+
         return merged
 
     # ──────────────────────────────────────
@@ -864,8 +1014,8 @@ class HarmonizationAgent:
             if col not in df.columns:
                 continue
             s_clean = df[col].astype(str).str.strip().str.upper()
-            mapped_series = s_clean.map(lambda v: CURRENCY_MAP.get(v, v))
-            diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN")
+            mapped_series = s_clean.map(lambda v: _tf_currency(v) if v and v not in ["NAN", "NONE", "NULL", ""] else v)
+            diff_mask = (s_clean != mapped_series) & (s_clean != "") & (s_clean != "NAN") & (s_clean != "NONE") & (s_clean != "NULL")
             if diff_mask.any():
                 for idx in df.index[diff_mask]:
                     raw = s_clean.at[idx]
@@ -1326,10 +1476,12 @@ class HarmonizationAgent:
         preview_only: bool = False,
         rule_config: Optional[Dict[str, Any]] = None,
         dynamic_rules: Optional[List[Dict[str, Any]]] = None,
+        join_keys: Optional[List[Dict[str, str]]] = None,
     ) -> HarmonizationResult:
         """
         Mode 1: Multi-source harmonization pipeline.
         Supports N additional sources beyond primary + secondary.
+        Supports Key-Based Join when join_keys (primary_key & foreign_key) are provided.
         preview_only=True returns fix_log without mutating data.
         """
         self.fix_log = []
@@ -1366,8 +1518,14 @@ class HarmonizationAgent:
             f"{len(mapped_secondary.columns)} cols"
         )
 
-        # Step 3: Row-append merge
-        merged = self._merge_sources(mapped_primary, mapped_secondary)
+        # Step 3: Key-based or row-append merge
+        merged = self._merge_sources(
+            mapped_primary,
+            mapped_secondary,
+            join_keys=join_keys,
+            primary_source=primary_source,
+            secondary_source=secondary_source,
+        )
 
         # Merge additional sources
         if additional_sources:
@@ -1375,6 +1533,7 @@ class HarmonizationAgent:
                 extra_df = extra["df"]
                 extra_mappings = extra.get("mappings", [])
                 extra_source = extra.get("source_name", "EXTRA")
+                extra_join_keys = extra.get("join_keys", None)
                 total_input += len(extra_df)
                 self.stats[f"{extra_source.lower()}_rows"] = len(extra_df)
 
@@ -1384,7 +1543,13 @@ class HarmonizationAgent:
                     f"[Mapping] Additional ({extra_source}): {len(extra_df.columns)} cols → "
                     f"{len(mapped_extra.columns)} cols"
                 )
-                merged = self._merge_sources(merged, mapped_extra)
+                merged = self._merge_sources(
+                    merged,
+                    mapped_extra,
+                    join_keys=extra_join_keys,
+                    primary_source="PRIMARY",
+                    secondary_source=extra_source,
+                )
 
         self.stats["total_input"] = total_input
         self.fix_log.append(

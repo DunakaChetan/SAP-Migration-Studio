@@ -12,10 +12,35 @@ export const COUNTRY_MAP: Record<string, string> = {
 };
 
 export const CURR_MAP: Record<string, string> = {
-  'INDIAN RUPEE':'INR','RUPEE':'INR','RUPEES':'INR','RS':'INR',
-  'US DOLLAR':'USD','DOLLAR':'USD','EUROS':'EUR','EURO':'EUR',
-  'POUND':'GBP','STERLING':'GBP','YEN':'JPY','YUAN':'CNY','RMB':'CNY',
-  'DIRHAM':'AED','RIYAL':'SAR','FRANC':'CHF','AUS DOLLAR':'AUD','CANADIAN DOLLAR':'CAD',
+  'USD': 'USD', 'US DOLLAR': 'USD', 'US DOLLARS': 'USD', 'DOLLAR': 'USD', 'DOLLARS': 'USD',
+  'UNITED STATES DOLLAR': 'USD', 'UNITED STATES DOLLARS': 'USD', 'AMERICAN DOLLAR': 'USD', 'AMERICAN DOLLARS': 'USD',
+  'US$': 'USD', '$': 'USD', 'U.S. DOLLAR': 'USD', 'U.S. DOLLARS': 'USD',
+  'GBP': 'GBP', 'POUND': 'GBP', 'POUNDS': 'GBP', 'STERLING': 'GBP', 'POUND STERLING': 'GBP', 'POUNDS STERLING': 'GBP',
+  'BRITISH POUND': 'GBP', 'BRITISH POUNDS': 'GBP', 'GREAT BRITAIN POUND': 'GBP', 'GREAT BRITAIN POUNDS': 'GBP',
+  'UK POUND': 'GBP', 'UK POUNDS': 'GBP', '£': 'GBP', 'GB£': 'GBP',
+  'EUR': 'EUR', 'EURO': 'EUR', 'EUROS': 'EUR', '€': 'EUR',
+  'INR': 'INR', 'INDIAN RUPEE': 'INR', 'INDIAN RUPEES': 'INR', 'RUPEE': 'INR', 'RUPEES': 'INR',
+  'RS': 'INR', 'RS.': 'INR', '₹': 'INR',
+  'JPY': 'JPY', 'YEN': 'JPY', 'JAPANESE YEN': 'JPY', '¥': 'JPY',
+  'CNY': 'CNY', 'YUAN': 'CNY', 'CHINESE YUAN': 'CNY', 'RENMINBI': 'CNY', 'CHINESE RENMINBI': 'CNY', 'RMB': 'CNY',
+  'CAD': 'CAD', 'CANADIAN DOLLAR': 'CAD', 'CANADIAN DOLLARS': 'CAD', 'C$': 'CAD',
+  'AUD': 'AUD', 'AUS DOLLAR': 'AUD', 'AUS DOLLARS': 'AUD', 'AUSTRALIAN DOLLAR': 'AUD', 'AUSTRALIAN DOLLARS': 'AUD', 'A$': 'AUD',
+  'CHF': 'CHF', 'SWISS FRANC': 'CHF', 'SWISS FRANCS': 'CHF', 'FRANC': 'CHF', 'FRANCS': 'CHF',
+  'AED': 'AED', 'DIRHAM': 'AED', 'DIRHAMS': 'AED', 'UAE DIRHAM': 'AED', 'UAE DIRHAMS': 'AED',
+  'SAR': 'SAR', 'RIYAL': 'SAR', 'RIYALS': 'SAR', 'SAUDI RIYAL': 'SAR',
+  'QAR': 'QAR', 'QATARI RIYAL': 'QAR', 'SGD': 'SGD', 'SINGAPORE DOLLAR': 'SGD', 'SINGAPORE DOLLARS': 'SGD',
+  'HKD': 'HKD', 'HONG KONG DOLLAR': 'HKD', 'HKD$': 'HKD', 'NZD': 'NZD', 'NEW ZEALAND DOLLAR': 'NZD',
+  'MXN': 'MXN', 'MEXICAN PESO': 'MXN', 'MEXICAN PESOS': 'MXN', 'PESO': 'MXN', 'PESOS': 'MXN',
+  'BRL': 'BRL', 'BRAZILIAN REAL': 'BRL', 'REAL': 'BRL', 'REAIS': 'BRL',
+  'ZAR': 'ZAR', 'SOUTH AFRICAN RAND': 'ZAR', 'RAND': 'ZAR',
+  'SEK': 'SEK', 'SWEDISH KRONA': 'SEK', 'NOK': 'NOK', 'NORWEGIAN KRONE': 'NOK',
+  'DKK': 'DKK', 'DANISH KRONE': 'DKK', 'PLN': 'PLN', 'POLISH ZLOTY': 'PLN',
+  'TRY': 'TRY', 'TURKISH LIRA': 'TRY', 'RUB': 'RUB', 'RUSSIAN RUBLE': 'RUB', 'RUBLES': 'RUB',
+  'KRW': 'KRW', 'SOUTH KOREAN WON': 'KRW', 'WON': 'KRW', 'THB': 'THB', 'THAI BAHT': 'THB',
+  'MYR': 'MYR', 'MALAYSIAN RINGGIT': 'MYR', 'IDR': 'IDR', 'INDONESIAN RUPIAH': 'IDR',
+  'PHP': 'PHP', 'PHILIPPINE PESO': 'PHP', 'VND': 'VND', 'VIETNAMESE DONG': 'VND',
+  'EGP': 'EGP', 'EGYPTIAN POUND': 'EGP', 'ILS': 'ILS', 'ISRAELI SHEKEL': 'ILS',
+  'CLP': 'CLP', 'COP': 'COP', 'ARS': 'ARS', 'TWD': 'TWD',
 };
 
 export const ZTERM_MAP: Record<string, string> = {
@@ -50,7 +75,15 @@ export const TRANSFORMS: Record<string, TransformDef> = {
   },
   currency: {
     label: 'Currency→ISO',
-    fn: (v) => CURR_MAP[String(v).trim().toUpperCase()] || String(v).slice(0, 3).toUpperCase(),
+    fn: (v) => {
+      const s = String(v).trim().toUpperCase();
+      if (!s || s === 'NAN' || s === 'NULL' || s === 'NONE') return '';
+      if (CURR_MAP[s]) return CURR_MAP[s];
+      const clean = s.replace(/[^A-Z$€£¥₹₽₩฿₫₪]/g, '');
+      if (CURR_MAP[clean]) return CURR_MAP[clean];
+      if (clean.endsWith('S') && CURR_MAP[clean.slice(0, -1)]) return CURR_MAP[clean.slice(0, -1)];
+      return s.slice(0, 5);
+    },
   },
   payterm: {
     label: 'PayTerms→SAP',

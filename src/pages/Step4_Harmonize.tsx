@@ -6,11 +6,11 @@ import { dl, expCSV } from '@/lib/utils';
 import { jsPDF } from 'jspdf';
 import {
   PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button,
-  StatBox, StatsGrid, DataTable, PageHeader, EmptyState
+  StatBox, StatsGrid, DataTable, PageHeader, EmptyState, Select, Badge
 } from '@/components/shared';
 import {
   FlaskConical, Upload, FileSpreadsheet, MapPin, Download,
-  Play, Trash2, CheckCircle2, AlertCircle, FileText, ArrowLeft, ArrowRight, Save, Database, Plus, Sparkles, Eye, Zap, X, Check, Pencil, ChevronDown, ChevronUp
+  Play, Trash2, CheckCircle2, AlertCircle, FileText, ArrowLeft, ArrowRight, Save, Database, Plus, Sparkles, Eye, Zap, X, Check, Pencil, ChevronDown, ChevronUp, GitMerge, Key, Link2, Layers
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
@@ -265,7 +265,15 @@ const RULE_LIST: RuleDef[] = [
 ];
 
 /* ─── Harmonization Report Card ─── */
-function HarmonizationReportCard({ result, onExportPDF }: { result: HarmonizationResult; onExportPDF?: () => void }) {
+function HarmonizationReportCard({
+  result,
+  onExportPDF,
+  onExportCSV
+}: {
+  result: HarmonizationResult;
+  onExportPDF?: () => void;
+  onExportCSV?: () => void;
+}) {
   const [showLogDetails, setShowLogDetails] = useState(false);
 
   const fixLog = result.fix_log || [];
@@ -319,17 +327,28 @@ function HarmonizationReportCard({ result, onExportPDF }: { result: Harmonizatio
         title="Harmonization Changes & Audit Report"
         subtitle="Summary of standardized fields, rule fixes and source origins"
       >
-        {onExportPDF && (
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<Download className="w-3.5 h-3.5 text-purple-500" />}
-            onClick={onExportPDF}
-            className="ml-auto"
-          >
-            Export Vector PDF
-          </Button>
-        )}
+        <div className="flex items-center gap-2 ml-auto">
+          {onExportCSV && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />}
+              onClick={onExportCSV}
+            >
+              Export Report CSV
+            </Button>
+          )}
+          {onExportPDF && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Download className="w-3.5 h-3.5 text-purple-500" />}
+              onClick={onExportPDF}
+            >
+              Export Vector PDF
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardBody className="p-4 space-y-4">
         {/* Metric Cards Grid */}
@@ -650,9 +669,318 @@ export function Step4Harmonize() {
   const [primarySource, setPrimarySource] = useState(state.src || 'SAP_ECC');
   const [secondarySource, setSecondarySource] = useState('');
 
-  // Files for Multi-Source
-  const [secondaryFile, setSecondaryFile] = useState<DroppedFile | null>(null);
-  const [secondaryMappingFile, setSecondaryMappingFile] = useState<DroppedFile | null>(null);
+  // Primary Extracted Data info from Step 3 / DB
+  const primaryColumns = useMemo(() => {
+    if (state.headers?.length) return state.headers;
+    if (state.extracted?.length) return Object.keys(state.extracted[0]);
+    if (state.rawData?.length) return Object.keys(state.rawData[0]);
+    return [];
+  }, [state.headers, state.extracted, state.rawData]);
+
+  const primaryRowCount = state.extracted?.length || state.rawData?.length || state.uploadedData?.length || 0;
+
+  const primaryTableName = useMemo(() => {
+    if (state.uploadedFilesMeta?.length && state.uploadedFilesMeta[0]?.name) {
+      return state.uploadedFilesMeta[0].name;
+    }
+    return `Primary_Data_${state.src || 'SAP_ECC'}.csv`;
+  }, [state.uploadedFilesMeta, state.src]);
+
+  const primarySchema = useMemo(() => {
+    return {
+      filename: primaryTableName,
+      headers: primaryColumns,
+      size: (primaryRowCount * (primaryColumns.length || 1) * 16) || 2048,
+      isPrimary: true,
+      rows: primaryRowCount
+    };
+  }, [primaryTableName, primaryColumns, primaryRowCount]);
+
+  // Multi-Source Secondary Staged Files & Optional Mapping Files
+  const multiFileInputRef = useRef<HTMLInputElement>(null);
+  const [stagedSecondaryFiles, setStagedSecondaryFiles] = useState<File[]>([]);
+  const [secondaryFileSchemas, setSecondaryFileSchemas] = useState<{ filename: string; headers: string[]; size?: number }[]>([]);
+  const [secondaryMappingFiles, setSecondaryMappingFiles] = useState<Record<string, File | null>>({});
+
+  const displayedFiles = useMemo(() => {
+    const list: { name: string; size: number; isPrimary?: boolean; rows?: number; file?: File }[] = [];
+    if (primaryRowCount > 0 || primaryColumns.length > 0) {
+      list.push({
+        name: primaryTableName,
+        size: primarySchema.size,
+        isPrimary: true,
+        rows: primaryRowCount
+      });
+    }
+    stagedSecondaryFiles.forEach(f => {
+      if (f.name !== primaryTableName) {
+        list.push({
+          name: f.name,
+          size: f.size,
+          isPrimary: false,
+          file: f
+        });
+      }
+    });
+    return list;
+  }, [primaryTableName, primarySchema.size, primaryRowCount, primaryColumns.length, stagedSecondaryFiles]);
+
+  const displayedSchemas = useMemo(() => {
+    const list = [primarySchema];
+    secondaryFileSchemas.forEach(s => {
+      if (s.filename !== primaryTableName) {
+        list.push(s);
+      }
+    });
+    return list;
+  }, [primarySchema, secondaryFileSchemas, primaryTableName]);
+
+  const [joinConfig, setJoinConfig] = useState<{
+    base_file: string;
+    joins: {
+      join_file: string;
+      source_file?: string;
+      base_key?: string;
+      join_key?: string;
+      key_pairs?: { base_key: string; join_key: string }[];
+    }[];
+  }>({ base_file: '', joins: [] });
+
+  const displayedJoinConfig = useMemo(() => {
+    const effectiveBase = joinConfig.base_file && displayedSchemas.some(s => s.filename === joinConfig.base_file)
+      ? joinConfig.base_file
+      : primaryTableName;
+
+    const baseSchema = displayedSchemas.find(s => s.filename === effectiveBase) || primarySchema;
+    const otherSchemas = displayedSchemas.filter(s => s.filename !== effectiveBase);
+
+    const joins = otherSchemas.map(s => {
+      const existing = joinConfig.joins?.find(j => j.join_file === s.filename);
+      if (existing && existing.key_pairs?.length && existing.key_pairs.some(kp => kp.base_key && kp.join_key)) {
+        return existing;
+      }
+
+      const matchedPairs: { base_key: string; join_key: string }[] = [];
+      if (baseSchema) {
+        for (const jh of s.headers) {
+          for (const bh of baseSchema.headers) {
+            const jClean = jh.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const bClean = bh.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (
+              (jClean === bClean || (jClean.includes('id') && bClean.includes('id')) || (jClean.includes('number') && bClean.includes('number')) || (jClean.includes('code') && bClean.includes('code'))) &&
+              !matchedPairs.some(p => p.base_key === bh || p.join_key === jh)
+            ) {
+              matchedPairs.push({ base_key: bh, join_key: jh });
+              break;
+            }
+          }
+        }
+      }
+      const finalPairs = matchedPairs.length > 0
+        ? matchedPairs
+        : [{ base_key: baseSchema?.headers[0] || '', join_key: s.headers[0] || '' }];
+
+      return {
+        join_file: s.filename,
+        source_file: effectiveBase,
+        base_key: finalPairs[0].base_key,
+        join_key: finalPairs[0].join_key,
+        key_pairs: finalPairs
+      };
+    });
+
+    return { base_file: effectiveBase, joins };
+  }, [joinConfig, displayedSchemas, primaryTableName, primarySchema]);
+
+  const handleFilesAdded = async (newFileList: FileList | File[] | null) => {
+    if (!newFileList) return;
+    const newFiles = Array.from(newFileList);
+    if (newFiles.length === 0) return;
+
+    const existingNames = new Set(displayedFiles.map(f => f.name));
+    const trulyNewFiles = newFiles.filter(f => !existingNames.has(f.name));
+    if (trulyNewFiles.length === 0) {
+      if (multiFileInputRef.current) multiFileInputRef.current.value = '';
+      return;
+    }
+
+    const updatedStaged = [...stagedSecondaryFiles, ...trulyNewFiles];
+    setStagedSecondaryFiles(updatedStaged);
+
+    showLoad('Analyzing Secondary Files...', 'Extracting headers and detecting keys...', [
+      'Reading uploaded file structures...',
+      'Mapping relational candidate keys with Primary Data...',
+      'Preparing multi-table join model...'
+    ]);
+    [0, 1, 2].forEach(i => setTimeout(() => tick(i), 300 + i * 300));
+
+    try {
+      const formData = new FormData();
+      trulyNewFiles.forEach(f => formData.append('files', f));
+
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload-preview`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) throw new Error('Failed to preview file schemas');
+      const data = await res.json();
+      const newSchemas: { filename: string; headers: string[] }[] = data.files || [];
+
+      const combinedSchemas = [...secondaryFileSchemas.filter(s => !newSchemas.some(ns => ns.filename === s.filename)), ...newSchemas];
+      setSecondaryFileSchemas(combinedSchemas);
+
+      hideLoad();
+      toast(`Loaded ${trulyNewFiles.length} file(s) ready to join with ${primaryTableName}`, 'ok');
+    } catch (err: any) {
+      hideLoad();
+      toast(err.message || 'Error loading file schemas', 'err');
+    } finally {
+      if (multiFileInputRef.current) multiFileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveStagedFile = (fileName: string) => {
+    const updatedStaged = stagedSecondaryFiles.filter(f => f.name !== fileName);
+    const updatedSchemas = secondaryFileSchemas.filter(s => s.filename !== fileName);
+    setStagedSecondaryFiles(updatedStaged);
+    setSecondaryFileSchemas(updatedSchemas);
+
+    setSecondaryMappingFiles(prev => {
+      const next = { ...prev };
+      delete next[fileName];
+      return next;
+    });
+
+    const nextJoins = (joinConfig.joins || []).filter(j => j.join_file !== fileName);
+    setJoinConfig({ base_file: joinConfig.base_file || primaryTableName, joins: nextJoins });
+  };
+
+  const handleClearStagedFiles = () => {
+    setStagedSecondaryFiles([]);
+    setSecondaryFileSchemas([]);
+    setSecondaryMappingFiles({});
+    setJoinConfig({ base_file: primaryTableName, joins: [] });
+    if (multiFileInputRef.current) multiFileInputRef.current.value = '';
+    toast('Secondary join files reset', 'info');
+  };
+
+  const handleMappingFileAdded = (joinFileName: string, file: File | null) => {
+    setSecondaryMappingFiles(prev => ({
+      ...prev,
+      [joinFileName]: file
+    }));
+    if (file) {
+      toast(`Mapping file ${file.name} attached to ${joinFileName}`, 'ok');
+    }
+  };
+
+  const handleRemoveMappingFile = (joinFileName: string) => {
+    setSecondaryMappingFiles(prev => ({
+      ...prev,
+      [joinFileName]: null
+    }));
+    toast(`Removed mapping for ${joinFileName} (will use direct field values)`, 'info');
+  };
+
+  const addJoinKeyPair = (joinIdx: number) => {
+    setJoinConfig(prev => {
+      const curCfg = prev.base_file ? prev : displayedJoinConfig;
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const kps = j.key_pairs?.length ? [...j.key_pairs] : [{ base_key: j.base_key || '', join_key: j.join_key || '' }];
+        kps.push({ base_key: '', join_key: '' });
+        return {
+          ...j,
+          base_key: kps[0]?.base_key || '',
+          join_key: kps[0]?.join_key || '',
+          key_pairs: kps
+        };
+      });
+      const next = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: next });
+      return next;
+    });
+  };
+
+  const removeJoinKeyPair = (joinIdx: number, keyPairIdx: number) => {
+    setJoinConfig(prev => {
+      const curCfg = prev.base_file ? prev : displayedJoinConfig;
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const kps = (j.key_pairs || [{ base_key: j.base_key || '', join_key: j.join_key || '' }]).filter((_, k) => k !== keyPairIdx);
+        const finalKps = kps.length > 0 ? kps : [{ base_key: '', join_key: '' }];
+        return {
+          ...j,
+          base_key: finalKps[0]?.base_key || '',
+          join_key: finalKps[0]?.join_key || '',
+          key_pairs: finalKps
+        };
+      });
+      const next = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: next });
+      return next;
+    });
+  };
+
+  const updateJoinSourceFile = (joinIdx: number, newSourceFile: string) => {
+    setJoinConfig(prev => {
+      const curCfg = prev.base_file ? prev : displayedJoinConfig;
+      const srcSchema = displayedSchemas.find(s => s.filename === newSourceFile);
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const joinSchema = displayedSchemas.find(s => s.filename === j.join_file);
+        const matchedPairs: { base_key: string; join_key: string }[] = [];
+        if (srcSchema && joinSchema) {
+          for (const jh of joinSchema.headers) {
+            for (const sh of srcSchema.headers) {
+              const jClean = jh.toLowerCase().replace(/[^a-z0-9]/g, '');
+              const sClean = sh.toLowerCase().replace(/[^a-z0-9]/g, '');
+              if (
+                (jClean === sClean || (jClean.includes('id') && sClean.includes('id')) || (jClean.includes('code') && sClean.includes('code'))) &&
+                !matchedPairs.some(p => p.base_key === sh || p.join_key === jh)
+              ) {
+                matchedPairs.push({ base_key: sh, join_key: jh });
+                break;
+              }
+            }
+          }
+        }
+        const finalPairs = matchedPairs.length > 0 ? matchedPairs : [{ base_key: srcSchema?.headers[0] || '', join_key: joinSchema?.headers[0] || '' }];
+        return {
+          ...j,
+          source_file: newSourceFile,
+          base_key: finalPairs[0].base_key,
+          join_key: finalPairs[0].join_key,
+          key_pairs: finalPairs
+        };
+      });
+      const next = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: next });
+      return next;
+    });
+  };
+
+  const updateJoinKeyPair = (joinIdx: number, keyPairIdx: number, side: 'base_key' | 'join_key', val: string) => {
+    setJoinConfig(prev => {
+      const curCfg = prev.base_file ? prev : displayedJoinConfig;
+      const newJoins = (curCfg.joins || []).map((j, i) => {
+        if (i !== joinIdx) return j;
+        const kps = j.key_pairs?.length ? [...j.key_pairs] : [{ base_key: j.base_key || '', join_key: j.join_key || '' }];
+        if (kps[keyPairIdx]) {
+          kps[keyPairIdx] = { ...kps[keyPairIdx], [side]: val };
+        }
+        return {
+          ...j,
+          base_key: kps[0]?.base_key || '',
+          join_key: kps[0]?.join_key || '',
+          key_pairs: kps
+        };
+      });
+      const next = { ...curCfg, joins: newJoins };
+      dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: next });
+      return next;
+    });
+  };
 
   // Additional Sources (N-source)
   const [additionalSources, setAdditionalSources] = useState<AdditionalSource[]>([]);
@@ -890,7 +1218,12 @@ export function Step4Harmonize() {
 
   const canRun = mode === 'flow'
     ? true
-    : !!(secondarySource && secondaryFile && secondaryMappingFile);
+    : (stagedSecondaryFiles.length > 0
+      ? (!!displayedJoinConfig.base_file && displayedJoinConfig.joins.every(j => {
+          const kps = j.key_pairs?.length ? j.key_pairs : [{ base_key: j.base_key, join_key: j.join_key }];
+          return kps.length > 0 && kps.every(kp => kp.base_key && kp.join_key);
+        }))
+      : primaryRowCount > 0);
 
   async function runHarmonization(isPreview: boolean = true, silent: boolean = false) {
     if (!canRun) return;
@@ -899,8 +1232,9 @@ export function Step4Harmonize() {
     if (!silent) {
       const loadMsg = isPreview ? 'Generating Preview…' : 'Running Harmonization Agent…';
       showLoad(loadMsg, `Processing your data through rules${customPrompts.length > 0 ? ` + ${customPrompts.length} AI rules` : ''}`, [
+        'Merging multi-source relational tables…',
         'Reading files from Database or Uploads…',
-        'Applying field mappings…',
+        'Applying field mappings & clean target names…',
         'Applying Cleansing & Harmonization Rules…',
         'Checking fallback LLM constraints if needed…',
         'Generating audit report & results…',
@@ -933,10 +1267,34 @@ export function Step4Harmonize() {
             custom_prompts: customPrompts.length > 0 ? customPrompts : null,
           })
         });
-      } else {
-        // Multi mode
-        if (!state.projectId) {
-          // If multi mode with standalone uploads
+      } else if (mode === 'multi') {
+        const secFile = stagedSecondaryFiles.length > 0 ? stagedSecondaryFiles[0] : null;
+        const secMappingFile = secFile ? (secondaryMappingFiles[secFile.name] || null) : null;
+
+        if (state.projectId && secFile) {
+          const formData = new FormData();
+          formData.append('project_id', state.projectId);
+          formData.append('sap_object', sapObject);
+          formData.append('company_code', companyCode);
+          formData.append('sales_org', salesOrg);
+          formData.append('purch_org', purchOrg);
+          formData.append('plant', plant);
+          formData.append('dist_channel', distChannel);
+          formData.append('division', division);
+          formData.append('currency', currency);
+          formData.append('primary_source', state.src || primarySource);
+          formData.append('secondary_source', secondarySource || 'ORACLE_EBS');
+          formData.append('secondary_file', secFile);
+          if (secMappingFile) {
+            formData.append('secondary_mapping_file', secMappingFile);
+          }
+          formData.append('preview', isPreview ? 'true' : 'false');
+          formData.append('rule_config_json', JSON.stringify(ruleConfig));
+          if (customPrompts.length > 0) formData.append('custom_prompts_json', JSON.stringify(customPrompts));
+          formData.append('join_keys_json', JSON.stringify(displayedJoinConfig.joins));
+
+          res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/multi-flow`, { method: 'POST', body: formData });
+        } else if (secFile) {
           const formData = new FormData();
           formData.append('mode', 'multi');
           formData.append('sap_object', sapObject);
@@ -948,34 +1306,41 @@ export function Step4Harmonize() {
           formData.append('division', division);
           formData.append('currency', currency);
           formData.append('primary_source', primarySource);
-          formData.append('secondary_source', secondarySource);
-          formData.append('secondary_file', secondaryFile!.file);
-          if (secondaryMappingFile) formData.append('secondary_mapping_file', secondaryMappingFile.file);
+          formData.append('secondary_source', secondarySource || 'ORACLE_EBS');
+          formData.append('secondary_file', secFile);
+          if (secMappingFile) {
+            formData.append('secondary_mapping_file', secMappingFile);
+          }
           formData.append('preview', isPreview ? 'true' : 'false');
           formData.append('rule_config_json', JSON.stringify(ruleConfig));
           if (customPrompts.length > 0) formData.append('custom_prompts_json', JSON.stringify(customPrompts));
+          formData.append('join_keys_json', JSON.stringify(displayedJoinConfig.joins));
 
           res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize`, { method: 'POST', body: formData });
         } else {
-          const formData = new FormData();
-          formData.append('project_id', state.projectId || '');
-          formData.append('sap_object', sapObject);
-          formData.append('company_code', companyCode);
-          formData.append('sales_org', salesOrg);
-          formData.append('purch_org', purchOrg);
-          formData.append('plant', plant);
-          formData.append('dist_channel', distChannel);
-          formData.append('division', division);
-          formData.append('currency', currency);
-          formData.append('primary_source', state.src || primarySource);
-          formData.append('secondary_source', secondarySource);
-          formData.append('secondary_file', secondaryFile!.file);
-          formData.append('secondary_mapping_file', secondaryMappingFile!.file);
-          formData.append('preview', isPreview ? 'true' : 'false');
-          formData.append('rule_config_json', JSON.stringify(ruleConfig));
-          if (customPrompts.length > 0) formData.append('custom_prompts_json', JSON.stringify(customPrompts));
-
-          res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/multi-flow`, { method: 'POST', body: formData });
+          // Fallback to flow if no secondary file
+          if (!state.projectId) {
+            throw new Error("Please add secondary files to join or extract data in Step 3.");
+          }
+          res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/harmonize/flow`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              project_id: state.projectId,
+              sap_object: sapObject,
+              company_code: companyCode,
+              sales_org: salesOrg,
+              purch_org: purchOrg,
+              plant: plant,
+              dist_channel: distChannel,
+              division: division,
+              currency: currency,
+              primary_source: state.src || primarySource,
+              preview: isPreview,
+              rule_config: ruleConfig,
+              custom_prompts: customPrompts.length > 0 ? customPrompts : null,
+            })
+          });
         }
       }
 
@@ -1315,6 +1680,71 @@ export function Step4Harmonize() {
     }
   };
 
+  // Structured Harmonization Report CSV Generator
+  const exportHarmonizationCSV = () => {
+    if (!result || !result.fix_log || result.fix_log.length === 0) {
+      toast('No harmonization changes to export in CSV', 'err');
+      return;
+    }
+
+    try {
+      const parsedRows: Record<string, any>[] = [];
+
+      result.fix_log.forEach((line, index) => {
+        let category = 'General';
+        let rowNum = '';
+        let fieldName = '';
+        let origVal = '';
+        let harmonizedVal = '';
+        let details = line;
+
+        // Pattern 1: [Category] Row X (FIELD): 'A' → 'B'
+        const arrowMatch = line.match(/^\[([^\]]+)\]\s*(?:Row\s+(\d+)\s*(?:\(([^)]+)\))?:\s*)?'([^']*)'\s*→\s*'([^']*)'$/);
+        if (arrowMatch) {
+          category = arrowMatch[1] || 'Transform';
+          rowNum = arrowMatch[2] || '';
+          fieldName = arrowMatch[3] || '';
+          origVal = arrowMatch[4] || '';
+          harmonizedVal = arrowMatch[5] || '';
+          details = `${category} on ${fieldName || 'field'}: changed '${origVal}' to '${harmonizedVal}'`;
+        } else {
+          // Pattern 2: [Category] Row X (FIELD): message
+          const rowFieldMatch = line.match(/^\[([^\]]+)\]\s*Row\s+(\d+)\s*(?:\(([^)]+)\))?:\s*(.*)$/);
+          if (rowFieldMatch) {
+            category = rowFieldMatch[1] || 'Rule';
+            rowNum = rowFieldMatch[2] || '';
+            fieldName = rowFieldMatch[3] || '';
+            details = rowFieldMatch[4] || line;
+          } else {
+            // Pattern 3: [Category] message
+            const tagMatch = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+            if (tagMatch) {
+              category = tagMatch[1] || 'Info';
+              details = tagMatch[2] || line;
+            }
+          }
+        }
+
+        parsedRows.push({
+          'Index': index + 1,
+          'Category': category,
+          'Row_Number': rowNum || 'N/A',
+          'Field_Name': fieldName || 'N/A',
+          'Original_Value': origVal,
+          'Harmonized_Value': harmonizedVal,
+          'Details': details,
+        });
+      });
+
+      const csvContent = expCSV(parsedRows);
+      dl(csvContent, `Harmonization_Report_${state.obj || 'Data'}.csv`, 'text/csv');
+      toast('Harmonization Report CSV exported successfully!', 'ok');
+    } catch (err: any) {
+      console.error(err);
+      toast('Failed to export Harmonization CSV report', 'err');
+    }
+  };
+
   return (
     <PageLayout>
       <PageGrid>
@@ -1386,141 +1816,420 @@ export function Step4Harmonize() {
           {mode === 'multi' && (
             <Card>
               <CardHeader
-                title="Multi-Source Harmonization"
-                subtitle="Primary data from database + secondary/additional data uploaded"
+                title="Multi-Source Data Modeling & Relational Key Join"
+                subtitle="Stage multi-table files, configure primary & foreign key relationships, and harmonise"
               />
               <CardBody className="p-4 space-y-4">
-                {/* Primary data from DB indicator */}
-                <div className="px-3 py-2.5 rounded-xl border border-emerald-300 dark:border-emerald-600 bg-emerald-50/50 dark:bg-emerald-900/20">
+                {/* Hidden Multi-file input */}
+                <input
+                  ref={multiFileInputRef}
+                  type="file"
+                  multiple
+                  accept=".csv,.xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => handleFilesAdded(e.target.files)}
+                />
+
+                {/* Source System Selector */}
+                <div>
+                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5 block">
+                    Source System
+                  </label>
+                  <Select
+                    value={secondarySource || state.src || 'EXCEL_CSV'}
+                    onChange={(val) => { setSecondarySource(val); setPrimarySource(val); }}
+                    options={[
+                      { value: 'EXCEL_CSV', label: 'Excel/CSV' },
+                      { value: 'SAP_ECC', label: 'SAP ECC 6.0' },
+                      { value: 'ORACLE_EBS', label: 'Oracle EBS R12' },
+                      { value: 'DYNAMICS', label: 'MS Dynamics' },
+                      { value: 'SALESFORCE', label: 'Salesforce' },
+                      { value: 'LEGACY', label: 'Legacy DB' }
+                    ]}
+                  />
+                </div>
+
+                {/* Selected Files Header & Action */}
+                <div className="flex items-center justify-between pt-1">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center">
-                      <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                    <div>
-                      <div className="text-[11.5px] font-semibold text-emerald-700 dark:text-emerald-300">Primary Data: From Database ({state.src || 'SAP_ECC'})</div>
-                      <div className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">
-                        Using extracted data & mappings from Step 3 {state.extracted.length > 0 ? `(${state.extracted.length} rows)` : ''}
-                      </div>
-                    </div>
-                    {state.isDataSaved && <CheckCircle2 className="w-4 h-4 text-emerald-500 ml-auto" />}
+                    <span className="text-[12px] font-semibold text-[var(--text-primary)] uppercase tracking-wider font-mono">
+                      Selected Files ({displayedFiles.length})
+                    </span>
+                    <Badge variant={displayedFiles.length > 1 ? "teal" : "green"}>
+                      {displayedFiles.length > 1 ? 'Multi-Table Join' : '1 Base Table Loaded'}
+                    </Badge>
                   </div>
-                </div>
-
-                {/* Secondary Data Source Selector */}
-                <div className="px-3 py-2.5 rounded-xl border border-teal-300 dark:border-teal-600 bg-teal-50/40 dark:bg-teal-900/15">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11.5px] font-semibold text-teal-800 dark:text-teal-300">Secondary Data Source System</div>
-                      <div className="text-[10px] text-teal-600/80 dark:text-teal-400/80">Select system origin for secondary file</div>
-                    </div>
-                    <select
-                      value={secondarySource}
-                      onChange={(e) => setSecondarySource(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg text-[11.5px] font-bold bg-[var(--bg-primary)] border border-teal-400 dark:border-teal-500 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer shadow-sm"
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => multiFileInputRef.current?.click()}
+                      icon={<Plus className="w-3.5 h-3.5 text-emerald-500" />}
                     >
-                      <option value="">— Select Source —</option>
-                      {SOURCE_OPTIONS.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label} ({s.value})</option>
-                      ))}
-                    </select>
+                      Add Secondary File
+                    </Button>
+                    {stagedSecondaryFiles.length > 0 && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleClearStagedFiles}
+                        className="text-red-500 hover:text-red-600"
+                      >
+                        Reset Secondary
+                      </Button>
+                    )}
                   </div>
                 </div>
 
-                {/* Secondary file uploads — only visible when source selected */}
-                {secondarySource && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <DropZone
-                      id="drop-secondary"
-                      label="Secondary Data File"
-                      subtitle="Drag & drop CSV or Excel"
-                      icon={FileSpreadsheet}
-                      accept=".csv,.xlsx,.xls"
-                      file={secondaryFile}
-                      onDrop={handleFileDrop(setSecondaryFile)}
-                      onClear={() => setSecondaryFile(null)}
-                      accentColor="teal"
-                    />
+                {/* List of files (Primary Base Table + Uploaded Secondary Files) */}
+                <div className="grid grid-cols-1 gap-2.5">
+                  {displayedFiles.map((file, idx) => {
+                    const schema = displayedSchemas.find(s => s.filename === file.name);
+                    const mappingFile = secondaryMappingFiles[file.name];
 
-                    <DropZone
-                      id="drop-secondary-mapping"
-                      label="Secondary Mapping CSV"
-                      subtitle="Columns: src, sap, transform, confidence"
-                      icon={MapPin}
-                      accept=".csv"
-                      file={secondaryMappingFile}
-                      onDrop={handleFileDrop(setSecondaryMappingFile)}
-                      onClear={() => setSecondaryMappingFile(null)}
-                      accentColor="amber"
-                    />
+                    if (file.isPrimary) {
+                      return (
+                        <div
+                          key={file.name + idx}
+                          className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-950/15"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                              <Database className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
+                                  {file.name}
+                                </p>
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold tracking-wider">
+                                  PRIMARY / BASE
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                                {file.rows || primaryRowCount} records • {schema?.headers.length || primaryColumns.length} columns (Extracted & Mapped)
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10.5px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Step 3 Schema Linked
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={file.name + idx}
+                        className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/70 hover:border-teal-500/40 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-teal-500/10 flex items-center justify-center text-teal-600 dark:text-teal-400 shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[13px] font-medium text-[var(--text-primary)] truncate">
+                              {file.name}
+                            </p>
+                            <p className="text-[10.5px] text-[var(--text-tertiary)]">
+                              {(file.size / 1024).toFixed(1)} KB
+                              {schema && (
+                                <span className="ml-2 text-teal-600 dark:text-teal-400 font-mono">
+                                  • {schema.headers.length} columns
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          {/* Optional Mapping File Selector */}
+                          {mappingFile ? (
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] font-mono">
+                              <MapPin className="w-3.5 h-3.5 text-amber-500" />
+                              <span className="font-medium truncate max-w-[130px]">{mappingFile.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveMappingFile(file.name)}
+                                className="hover:text-red-500 transition-colors cursor-pointer ml-1 p-0.5 rounded"
+                                title="Remove attached mapping CSV"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <label
+                              className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-dashed border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/15 text-amber-700 dark:text-amber-300 transition-colors"
+                              title="Optionally attach a field mapping CSV for this table"
+                            >
+                              <Upload className="w-3 h-3 text-amber-500" />
+                              <span>+ Add Mapping CSV (Optional)</span>
+                              <input
+                                type="file"
+                                accept=".csv"
+                                className="hidden"
+                                onChange={(e) => handleMappingFileAdded(file.name, e.target.files?.[0] || null)}
+                              />
+                            </label>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveStagedFile(file.name)}
+                            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                            title="Remove file"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Secondary Dropzone when 0 secondary files staged */}
+                {stagedSecondaryFiles.length === 0 && (
+                  <div
+                    onClick={() => multiFileInputRef.current?.click()}
+                    className="p-6 border-2 border-dashed border-[var(--border)] hover:border-teal-400 rounded-xl bg-[var(--bg-tertiary)]/30 text-center cursor-pointer transition-all space-y-2"
+                  >
+                    <div className="w-9 h-9 mx-auto rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-500">
+                      <Upload className="w-4.5 h-4.5" />
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-[var(--text-primary)]">
+                        + Click or drag CSV / Excel files to join with {primaryTableName}
+                      </p>
+                      <p className="text-[11px] text-[var(--text-secondary)]">
+                        Supports secondary tables (e.g. Addresses.csv, Oracle_EBS.csv) with optional Mapping CSV support
+                      </p>
+                    </div>
                   </div>
                 )}
 
-                {/* Additional Sources */}
-                {additionalSources.map((extra, idx) => (
-                  <div key={idx} className="space-y-2">
-                    <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-purple-300 dark:border-purple-600 bg-purple-50/40 dark:bg-purple-900/15">
-                      <div className="flex items-center gap-3 flex-1">
-                        <div>
-                          <div className="text-[11.5px] font-semibold text-purple-800 dark:text-purple-300">Additional Source #{idx + 1}</div>
-                        </div>
-                        <select
-                          value={extra.source}
-                          onChange={(e) => updateAdditionalSource(idx, { source: e.target.value })}
-                          className="px-3 py-1.5 rounded-lg text-[11.5px] font-bold bg-[var(--bg-primary)] border border-purple-400 dark:border-purple-500 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-sm"
-                        >
-                          <option value="">— Select Source —</option>
-                          {SOURCE_OPTIONS.map((s) => (
-                            <option key={s.value} value={s.value}>{s.label} ({s.value})</option>
-                          ))}
-                        </select>
+                {/* Multi-file Relational Key Join Configuration */}
+                {displayedFiles.length >= 2 && (
+                  <div className="mt-4 pt-3 border-t border-[var(--border)] space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <GitMerge className="w-4 h-4 text-emerald-500" />
+                        <h4 className="text-[12.5px] font-semibold text-[var(--text-primary)]">
+                          Key Join Configuration (Data Modeling)
+                        </h4>
                       </div>
-                      <button onClick={() => removeAdditionalSource(idx)} className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-[var(--text-tertiary)] hover:text-red-500 transition-colors ml-2 cursor-pointer">
-                        <X className="w-4 h-4" />
-                      </button>
+                      <span className="text-[11px] text-[var(--text-tertiary)] font-mono">
+                        Joining secondary tables into Base Table
+                      </span>
                     </div>
-                    {extra.source && (
-                      <div className="grid grid-cols-2 gap-3 pl-3">
-                        <DropZone
-                          id={`drop-extra-${idx}`}
-                          label={`Source #${idx + 1} Data File`}
-                          subtitle="Drag & drop CSV or Excel"
-                          icon={FileSpreadsheet}
-                          accept=".csv,.xlsx,.xls"
-                          file={extra.file}
-                          onDrop={(f) => {
-                            const dropped: DroppedFile = { file: f, name: f.name, size: formatSize(f.size) };
-                            updateAdditionalSource(idx, { file: dropped });
-                          }}
-                          onClear={() => updateAdditionalSource(idx, { file: null })}
-                          accentColor="violet"
-                        />
-                        <DropZone
-                          id={`drop-extra-mapping-${idx}`}
-                          label={`Source #${idx + 1} Mapping CSV`}
-                          subtitle="Columns: src, sap, transform, confidence"
-                          icon={MapPin}
-                          accept=".csv"
-                          file={extra.mappingFile}
-                          onDrop={(f) => {
-                            const dropped: DroppedFile = { file: f, name: f.name, size: formatSize(f.size) };
-                            updateAdditionalSource(idx, { mappingFile: dropped });
-                          }}
-                          onClear={() => updateAdditionalSource(idx, { mappingFile: null })}
-                          accentColor="amber"
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
 
-                {/* Add Source Button */}
-                <button
-                  onClick={addAdditionalSource}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed border-[var(--border)] hover:border-purple-400 text-[11.5px] font-semibold text-[var(--text-tertiary)] hover:text-purple-600 transition-all cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Another Source
-                </button>
+                    {/* Base Table Selector */}
+                    <div className="p-3 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/40 space-y-1.5">
+                      <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] block">
+                        Primary / Base Table (Master Table)
+                      </label>
+                      <Select
+                        value={displayedJoinConfig.base_file}
+                        searchable
+                        onChange={(val) => {
+                          const newBaseJoins = displayedFiles.filter(f => f.name !== val).map(f => {
+                            const baseS = displayedSchemas.find(s => s.filename === val);
+                            const joinS = displayedSchemas.find(s => s.filename === f.name);
+                            const existing = displayedJoinConfig.joins.find(j => j.join_file === f.name);
+                            const kps = existing?.key_pairs?.length
+                              ? existing.key_pairs
+                              : [{
+                                base_key: existing?.base_key || baseS?.headers[0] || '',
+                                join_key: existing?.join_key || joinS?.headers[0] || ''
+                              }];
+
+                            return {
+                              join_file: f.name,
+                              source_file: val,
+                              base_key: kps[0].base_key,
+                              join_key: kps[0].join_key,
+                              key_pairs: kps
+                            };
+                          });
+                          const newCfg = {
+                            base_file: val,
+                            joins: newBaseJoins
+                          };
+                          setJoinConfig(newCfg);
+                          dispatch({ type: 'SET_FIELD', field: 'joinConfig', value: newCfg });
+                        }}
+                        options={displayedFiles.map(f => ({
+                          value: f.name,
+                          label: f.name === primaryTableName ? `${f.name} (Primary Data)` : f.name
+                        }))}
+                      />
+                    </div>
+
+                    {/* Joins for each secondary file */}
+                    {displayedJoinConfig.base_file && displayedJoinConfig.joins.map((join, idx) => {
+                      const activeSourceFile = join.source_file || displayedJoinConfig.base_file;
+                      const sourceSchema = displayedSchemas.find(s => s.filename === activeSourceFile)
+                        || displayedSchemas.find(s => s.filename === displayedJoinConfig.base_file);
+                      const joinSchema = displayedSchemas.find(s => s.filename === join.join_file);
+                      const keyPairs = join.key_pairs?.length
+                        ? join.key_pairs
+                        : [{ base_key: join.base_key || '', join_key: join.join_key || '' }];
+
+                      const otherAvailableFiles = displayedFiles.filter(f => f.name !== join.join_file);
+                      const isMapped = !!secondaryMappingFiles[join.join_file];
+
+                      return (
+                        <div
+                          key={join.join_file + idx}
+                          className="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)]/40 space-y-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Layers className="w-3.5 h-3.5 text-teal-500" />
+                              <span className="text-[12px] font-semibold text-[var(--text-primary)]">
+                                Join: {join.join_file}
+                              </span>
+                              {isMapped ? (
+                                <span className="text-[9.5px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                                  Mapped with {secondaryMappingFiles[join.join_file]?.name}
+                                </span>
+                              ) : (
+                                <span className="text-[9.5px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                                  Direct Key Join (No Mapping CSV)
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1.5 bg-[var(--bg-secondary)] px-2 py-0.5 rounded-lg border border-[var(--border)]">
+                                <span className="text-[10px] text-[var(--text-tertiary)] font-mono font-medium">Join With:</span>
+                                <div className="w-48">
+                                  <Select
+                                    value={activeSourceFile}
+                                    onChange={(v) => updateJoinSourceFile(idx, v)}
+                                    options={otherAvailableFiles.map(f => ({
+                                      value: f.name,
+                                      label: f.name === displayedJoinConfig.base_file ? `${f.name} (Base)` : f.name
+                                    }))}
+                                  />
+                                </div>
+                              </div>
+                              {keyPairs.length > 1 && (
+                                <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                  {keyPairs.length} KEY CONDITIONS
+                                </span>
+                              )}
+                              <span className="text-[10px] font-mono text-[var(--text-tertiary)]">LEFT JOIN</span>
+                            </div>
+                          </div>
+
+                          {/* List of join key pairs */}
+                          <div className="space-y-2.5">
+                            {keyPairs.map((kp, kIdx) => (
+                              <React.Fragment key={kIdx}>
+                                {kIdx > 0 && (
+                                  <div className="flex items-center justify-center -my-1">
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono text-[9px] font-bold tracking-wider">
+                                      AND (COMPOSITE KEY)
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto] items-end gap-2 bg-[var(--bg-secondary)]/50 p-2.5 rounded-lg border border-[var(--border)]/60 w-full max-w-full">
+                                  <div className="min-w-0">
+                                    <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
+                                      {activeSourceFile} Key {keyPairs.length > 1 ? `#${kIdx + 1}` : 'Key'}
+                                    </label>
+                                    <Select
+                                      value={kp.base_key}
+                                      searchable
+                                      onChange={(v) => updateJoinKeyPair(idx, kIdx, 'base_key', v)}
+                                      options={[
+                                        { value: '', label: `Select ${activeSourceFile} Key...` },
+                                        ...(sourceSchema?.headers.map(h => ({ value: h, label: h })) || [])
+                                      ]}
+                                    />
+                                  </div>
+
+                                  <div className="flex flex-col items-center justify-center pb-2 shrink-0">
+                                    <ArrowRight className="w-4 h-4 text-emerald-500" />
+                                  </div>
+
+                                  <div className="min-w-0">
+                                    <label className="text-[10.5px] text-[var(--text-secondary)] font-medium mb-1 block truncate">
+                                      {join.join_file} Key {keyPairs.length > 1 ? `#${kIdx + 1}` : 'Foreign Key'}
+                                    </label>
+                                    <Select
+                                      value={kp.join_key}
+                                      searchable
+                                      onChange={(v) => updateJoinKeyPair(idx, kIdx, 'join_key', v)}
+                                      options={[
+                                        { value: '', label: `Select ${join.join_file} Key...` },
+                                        ...(joinSchema?.headers.map(h => ({ value: h, label: h })) || [])
+                                      ]}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center justify-center pb-1 w-8 shrink-0">
+                                    {kIdx > 0 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeJoinKeyPair(idx, kIdx)}
+                                        className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                                        title="Remove this composite key condition"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </React.Fragment>
+                            ))}
+                          </div>
+
+                          {/* Add additional key condition button */}
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={() => addJoinKeyPair(idx)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 cursor-pointer transition-colors"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Add Composite Key Condition
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <Button
+                      variant="primary"
+                      className="w-full justify-center mt-2"
+                      onClick={() => runHarmonization(false)}
+                      disabled={
+                        !displayedJoinConfig.base_file ||
+                        displayedJoinConfig.joins.some(j => {
+                          const kps = j.key_pairs?.length ? j.key_pairs : [{ base_key: j.base_key, join_key: j.join_key }];
+                          return kps.length === 0 || kps.some(kp => !kp.base_key || !kp.join_key);
+                        })
+                      }
+                      icon={<GitMerge className="w-4 h-4" />}
+                    >
+                      Merge & Harmonize {displayedFiles.length} Tables
+                    </Button>
+                  </div>
+                )}
+
+                {/* Loaded state notification banner */}
+                {(result || (state.headers.length > 0 && (state.rawData?.length || state.extracted?.length))) && (
+                  <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[12px] font-medium">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>
+                        Loaded {result ? result.stats.total_output : (state.rawData?.length || state.extracted?.length || 0)} records ({result ? result.columns.length : state.headers.length} columns ready)
+                      </span>
+                    </div>
+                  </div>
+                )}
               </CardBody>
             </Card>
           )}
@@ -1528,6 +2237,15 @@ export function Step4Harmonize() {
           {/* Preview Card */}
           {previewData && (
             <PreviewCard fixLog={previewData.fixLog} stats={previewData.stats} ruleConfig={ruleConfig} onProceed={handleProceed} />
+          )}
+
+          {/* Harmonization Changes & Audit Report (Shown First) */}
+          {result && (
+            <HarmonizationReportCard
+              result={result}
+              onExportPDF={exportHarmonizationPDF}
+              onExportCSV={exportHarmonizationCSV}
+            />
           )}
 
           {/* Results Table — Multi-Table Display */}
@@ -1599,9 +2317,6 @@ export function Step4Harmonize() {
               </div>
             );
           })()}
-
-          {/* Harmonization Changes & Audit Report */}
-          {result && <HarmonizationReportCard result={result} onExportPDF={exportHarmonizationPDF} />}
 
           {!result && !previewData && (
             <Card>
