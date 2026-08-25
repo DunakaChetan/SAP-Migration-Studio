@@ -341,6 +341,15 @@ export function Step5Validate() {
       toast('No project selected to save rules', 'err');
       return;
     }
+    
+    showLoad('Saving AI Rules...', 'Processing dynamic rules via LLM', [
+      'Compiling AI rules into standard executable code...',
+      'Validating rule syntax...',
+      'Saving logic to project repository...',
+      'Finalizing configuration...'
+    ]);
+    [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 400 + i * 400));
+    
     try {
       // Compile new custom prompts + edited standard rule prompts into executable rules
       const allPrompts = [
@@ -392,8 +401,10 @@ export function Step5Validate() {
       setSavedDynamicRules(payloadRules);
       setCustomPrompts([]);
       dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: payloadRules });
+      hideLoad();
       toast('Dynamic rules compiled and saved cleanly!', 'ok');
     } catch (err: any) {
+      hideLoad();
       toast(err.message || 'Failed to save rules', 'err');
     }
   };

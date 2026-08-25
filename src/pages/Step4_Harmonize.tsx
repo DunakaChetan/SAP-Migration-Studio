@@ -711,25 +711,31 @@ export function Step4Harmonize() {
       toast('No project selected to save rules', 'err');
       return;
     }
-    if (customPrompts.length === 0) {
-      toast('No custom prompts to save', 'err');
-      return;
-    }
-    showLoad('Saving rules...', 'Compiling and saving dynamic harmonization rules to database');
+
+    showLoad('Saving AI Rules...', 'Processing dynamic rules via LLM', [
+      'Compiling AI rules into standard executable code...',
+      'Validating rule syntax...',
+      'Saving logic to project repository...',
+      'Finalizing configuration...'
+    ]);
+    [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 400 + i * 400));
+
     try {
       let compiledRules: any[] = [];
-      try {
-        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/generate-rules`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompts: customPrompts, target_object: state.obj || sapObject })
-        });
-        if (res.ok) {
-          const json = await res.json();
-          compiledRules = json.rules || [];
+      if (customPrompts.length > 0) {
+        try {
+          const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/generate-rules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompts: customPrompts, target_object: state.obj || sapObject })
+          });
+          if (res.ok) {
+            const json = await res.json();
+            compiledRules = json.rules || [];
+          }
+        } catch (compileErr) {
+          console.warn('Dynamic prompt compilation notice:', compileErr);
         }
-      } catch (compileErr) {
-        console.warn('Dynamic prompt compilation notice:', compileErr);
       }
 
       const payloadRules = customPrompts.map((p, idx) => {
