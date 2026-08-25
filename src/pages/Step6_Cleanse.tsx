@@ -12,7 +12,7 @@ import {
 import {
   ArrowLeft, ArrowRight, Sparkles, Download, Bot, Upload, Save,
   ChevronDown, ChevronUp, Check, X, Trash2, Plus, RefreshCw, ListFilter,
-  Search, FileText, Sliders, FileJson, ChevronLeft, ChevronRight, RotateCcw, Pencil,
+  Search, FileText, Sliders, FileJson, FileSpreadsheet, ChevronLeft, ChevronRight, RotateCcw, Pencil,
   Wrench, ShieldAlert, CheckCircle2, Copy
 } from 'lucide-react';
 import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
@@ -160,32 +160,47 @@ function exportAuditLogCSV(summary: CleanserSummary, projectName: string, target
   return lines.join('\n');
 }
 
-function exportExecutiveSummaryJSON(summary: CleanserSummary, projectName: string, targetObject: string): string {
-  const payload = {
-    metadata: {
-      studio: "SAP Migration Studio",
-      project_name: projectName,
-      target_object: targetObject,
-      generated_at: new Date().toISOString(),
-      overall_status: summary.overall_status || 'SUCCESS',
-    },
-    metrics: {
-      rows_loaded: summary.rows_loaded ?? 0,
-      rows_modified_count: summary.rows_modified_count ?? 0,
-      dynamic_fixes_count: summary.dynamic_fixes?.count ?? summary.dynamic_fixes?.items?.length ?? 0,
-      validation_fixes_count: summary.validation_fixes?.count ?? summary.validation_fixes?.items?.length ?? 0,
-      cleanser_fixes_count: summary.cleanser_fixes?.count ?? summary.cleanser_fixes?.items?.length ?? 0,
-    },
-    priority_overrides: summary.priority_overrides || {},
-    warnings: summary.warnings || [],
-    transformations: {
-      dynamic_ai_fixes: summary.dynamic_fixes?.items || [],
-      validation_fixes: summary.validation_fixes?.items || [],
-      cleanser_normalizations: summary.cleanser_fixes?.items || [],
-      manual_fixes: summary.manual_fixes?.items || [],
-    }
+function exportExecutiveSummaryCSV(summary: CleanserSummary, projectName: string, targetObject: string): string {
+  const timestamp = new Date().toISOString();
+  const lines: string[] = [
+    `# SAP Migration Studio — Executive Cleansing Summary Report`,
+    `# Project Name: "${projectName}"`,
+    `# Target Object: "${targetObject}"`,
+    `# Exported At: "${timestamp}"`,
+    `# Overall Status: "${summary.overall_status || 'SUCCESS'}"`,
+    `# Total Rows Loaded: ${summary.rows_loaded ?? 0}`,
+    `# Total Rows Modified: ${summary.rows_modified_count ?? 0}`,
+    `# Total Dynamic AI Fixes: ${summary.dynamic_fixes?.count ?? summary.dynamic_fixes?.items?.length ?? 0}`,
+    `# Total Validation Fixes: ${summary.validation_fixes?.count ?? summary.validation_fixes?.items?.length ?? 0}`,
+    `# Total Cleanser Normalizations: ${summary.cleanser_fixes?.count ?? summary.cleanser_fixes?.items?.length ?? 0}`,
+    `# Total Manual Fixes: ${summary.manual_fixes?.count ?? summary.manual_fixes?.items?.length ?? 0}`,
+    `# Total Warnings / Manual Review Items: ${summary.warnings?.length ?? 0}`,
+    `#`,
+    `Category,Phase,Rule Code,Row Number,Field Name,Original Value,Cleansed Value,Reason / Status`
+  ];
+
+  const appendItems = (category: string, phase: string, items?: FixItem[]) => {
+    (items || []).forEach((item) => {
+      const oldVal = String(item.old ?? '').replace(/"/g, '""');
+      const newVal = String(item.new ?? '').replace(/"/g, '""');
+      lines.push(`"${category}","${phase}","${item.rule_code || 'RULE'}",${item.row},"${item.field}","${oldVal}","${newVal}","APPLIED"`);
+    });
   };
-  return JSON.stringify(payload, null, 2);
+
+  appendItems('Automated Transformation', 'Dynamic AI Rule', summary.dynamic_fixes?.items);
+  appendItems('Automated Transformation', 'Validation Fix', summary.validation_fixes?.items);
+  appendItems('Automated Transformation', 'Cleanser Normalization', summary.cleanser_fixes?.items);
+  appendItems('Manual Remediation', 'Manual Fix', summary.manual_fixes?.items);
+
+  (summary.warnings || []).forEach((w: any) => {
+    const row = typeof w === 'object' && w ? (w.row || 'N/A') : 'N/A';
+    const field = typeof w === 'object' && w ? (w.field || 'GENERAL') : 'GENERAL';
+    const ruleCode = typeof w === 'object' && w ? (w.rule_code || 'WARNING') : 'WARNING';
+    const reason = String(typeof w === 'object' && w ? (w.reason || w.message || '') : w).replace(/"/g, '""');
+    lines.push(`"Manual Review Warning","Warning","${ruleCode}",${row},"${field}","","","${reason}"`);
+  });
+
+  return lines.join('\n');
 }
 
 /* ─── Main Step 6 Component ─── */
@@ -1583,10 +1598,10 @@ export function Step6Cleanse() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    icon={<FileJson className="w-3 h-3" />}
-                    onClick={() => dl(exportExecutiveSummaryJSON(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_summary.json', 'application/json')}
+                    icon={<FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />}
+                    onClick={() => dl(exportExecutiveSummaryCSV(summary, state.projectId || 'Default Project', state.obj || 'Customer Master'), 'cleansing_summary.csv', 'text/csv')}
                   >
-                    Export JSON
+                    Export CSV
                   </Button>
                   <button
                     onClick={() => setOpenSummaryAccordion(!openSummaryAccordion)}
