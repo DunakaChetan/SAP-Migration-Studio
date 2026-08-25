@@ -1808,20 +1808,41 @@ export function Step6Cleanse() {
                         </Button>
                       </div>
                     </div>
+
+                    {/* Master Data Safeguard Alert Banner */}
+                    {warningList.some(w => /email|smtp|kunnr|lifnr|name|tax|iban/i.test(w.field) || (w as any).is_master_data_safeguard) && (
+                      <div className="p-3 rounded-xl border border-amber-300 dark:border-amber-800/80 bg-amber-50 dark:bg-amber-950/30 flex items-start gap-2.5 text-[11.5px] text-amber-900 dark:text-amber-200 mb-3">
+                        <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="font-bold">Master Data Preservation Active:</span> Automated overwrites on core master data (e.g. Email addresses, Customer IDs) were safely prevented to avoid corrupting records. Original values are preserved intact and routed to Manual Review.
+                        </div>
+                      </div>
+                    )}
+
                     {warningList.length ? (
                       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-tertiary)] p-3 space-y-2 max-h-56 overflow-y-auto">
-                        {warningList.map((warning, i) => (
-                          <div key={i} className="p-2 rounded-lg bg-[var(--bg-primary)] border border-amber-200 dark:border-amber-900/50 flex flex-col gap-1 text-[11px] font-mono">
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-amber-700 dark:text-amber-400">{warning.rule_code}</span>
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300">Row #{warning.row}</span>
+                        {warningList.map((warning, i) => {
+                          const isMasterData = /email|smtp|kunnr|lifnr|name|tax|iban/i.test(warning.field) || (warning as any).is_master_data_safeguard;
+                          return (
+                            <div key={i} className="p-2 rounded-lg bg-[var(--bg-primary)] border border-amber-200 dark:border-amber-900/50 flex flex-col gap-1 text-[11px] font-mono">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-amber-700 dark:text-amber-400">{warning.rule_code}</span>
+                                  {isMasterData && (
+                                    <span className="text-[8.5px] font-bold px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                                      🛡️ Master Data
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300">Row #{warning.row}</span>
+                              </div>
+                              <div className="text-[10px] text-[var(--text-tertiary)]">
+                                Field: <strong className="text-[var(--text-primary)]">{warning.field}</strong>
+                              </div>
+                              <div className="text-[10px] text-amber-600 dark:text-amber-500 mt-0.5">{warning.reason || warning.message}</div>
                             </div>
-                            <div className="text-[10px] text-[var(--text-tertiary)]">
-                              Field: <strong className="text-[var(--text-primary)]">{warning.field}</strong>
-                            </div>
-                            <div className="text-[10px] text-amber-600 dark:text-amber-500 mt-0.5">{warning.reason || warning.message}</div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <InfoBox variant="success">All rules evaluated cleanly without manual review warnings.</InfoBox>
@@ -2420,6 +2441,14 @@ export function Step6Cleanse() {
                       {/* ── Dropdown Issues Content ── */}
                       {expanded && (
                         <div className="p-4 space-y-3 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800/60">
+                          {/email|smtp|kunnr|lifnr|name|tax|iban/i.test(field) && (
+                            <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 text-[11px] text-amber-900 dark:text-amber-200 flex items-center gap-2 mb-2">
+                              <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>
+                                <strong>Protected Master Data:</strong> Automated overwrites were blocked to prevent corrupting customer master data. Please verify each row or use <em>Apply to All</em> above for verified corrections.
+                              </span>
+                            </div>
+                          )}
                           {items.map((warning, i) => {
                             const key = `${warning.row}::${warning.field}::${warning.rule_code}`;
                             const val = manualFixValues[key] ?? "";

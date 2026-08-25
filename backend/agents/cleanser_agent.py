@@ -2014,13 +2014,18 @@ def execute_dynamic_fixers(
                 r_num = issue.get("row_number") or issue.get("row") or 1
                 f_name = issue.get("field_name") or issue.get("field") or field_name
                 val = issue.get("invalid_value")
-                reason = issue.get("reason") or f"Value '{val}' violates dynamic rule '{rule_code}' and requires manual review."
+                is_master_data_field = any(k in str(f_name).upper() for k in ["EMAIL", "SMTP", "KUNNR", "LIFNR", "NAME", "ID", "TAX", "IBAN", "STREET"])
+                if is_master_data_field:
+                    reason = f"Master data preservation safeguard: Automated overwrite prevented for '{f_name}'. Value '{val or ''}' preserved intact for manual verification."
+                else:
+                    reason = issue.get("reason") or f"Data preservation safeguard: Value '{val}' in '{f_name}' preserved intact for manual review."
                 summary.warnings.append({
                     "rule_code": rule_code,
                     "row": int(r_num),
                     "field": f_name,
                     "reason": reason,
                     "message": reason,
+                    "is_master_data_safeguard": True,
                 })
 
         executed_list.append({
