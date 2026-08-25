@@ -726,7 +726,7 @@ export function Step4Harmonize() {
   }, [primaryTableName, primarySchema.size, primaryRowCount, primaryColumns.length, stagedSecondaryFiles]);
 
   const displayedSchemas = useMemo(() => {
-    const list = [primarySchema];
+    const list: { filename: string; headers: string[]; size?: number; isPrimary?: boolean; rows?: number }[] = [primarySchema];
     secondaryFileSchemas.forEach(s => {
       if (s.filename !== primaryTableName) {
         list.push(s);
@@ -1243,7 +1243,7 @@ export function Step4Harmonize() {
     }
 
     try {
-      let res;
+      let res: any;
       if (mode === 'flow') {
         if (!state.projectId) {
           throw new Error("No Project ID found. Please extract and save data in Step 3 first.");
@@ -1682,61 +1682,124 @@ export function Step4Harmonize() {
 
   // Structured Harmonization Report CSV Generator
   const exportHarmonizationCSV = () => {
-    if (!result || !result.fix_log || result.fix_log.length === 0) {
+    const fixLog = result?.fix_log || previewData?.fixLog || [];
+    if (!fixLog || fixLog.length === 0) {
       toast('No harmonization changes to export in CSV', 'err');
       return;
     }
 
     try {
-      const parsedRows: Record<string, any>[] = [];
+      const timestamp = new Date().toISOString();
+      const stats = result?.stats || previewData?.stats || {};
+      const inputRowCount = stats.total_input || state.extracted?.length || state.rawData?.length || 0;
+      const outputRowCount = stats.total_output || (result?.final_table || []).length || inputRowCount;
 
-      result.fix_log.forEach((line, index) => {
-        let category = 'General';
+      const lines: string[] = [
+        `# SAP Migration Studio — Data Harmonization Audit & Transformation Report`,
+        `# Project Name: "${state.projectId || 'Default Project'}"`,
+        `# Target Object: "${state.obj || 'CUSTOMER'}"`,
+        `# Primary Source: "${state.src || primarySource || 'Default Source'}"`,
+        `# Exported At: "${timestamp}"`,
+        `# Input Records: ${inputRowCount}`,
+        `# Harmonized Output Records: ${outputRowCount}`,
+        `# Deduplicated Records Removed: ${stats.deduped || 0}`,
+        `# Empty Records Filtered: ${stats.empty_removed || 0}`,
+        `# Total Harmonization Columns: ${stats.columns || result?.columns?.length || 0}`,
+        `#`,
+        `Index,Category,Rule_Tag,Row_Number,PK_Identifier,Field_Name,Original_Value,Harmonized_Value,Status,Details`
+      ];
+
+      fixLog.forEach((line, index) => {
+        let category = 'Pipeline Step';
+        let ruleTag = '';
         let rowNum = '';
+        let pkInfo = '';
         let fieldName = '';
         let origVal = '';
         let harmonizedVal = '';
+        let status = 'INFO';
         let details = line;
 
-        // Pattern 1: [Category] Row X (FIELD): 'A' → 'B'
-        const arrowMatch = line.match(/^\[([^\]]+)\]\s*(?:Row\s+(\d+)\s*(?:\(([^)]+)\))?:\s*)?'([^']*)'\s*→\s*'([^']*)'$/);
-        if (arrowMatch) {
-          category = arrowMatch[1] || 'Transform';
-          rowNum = arrowMatch[2] || '';
-          fieldName = arrowMatch[3] || '';
-          origVal = arrowMatch[4] || '';
-          harmonizedVal = arrowMatch[5] || '';
-          details = `${category} on ${fieldName || 'field'}: changed '${origVal}' to '${harmonizedVal}'`;
+        // 1. Extract Leading Rule Tag inside first [...]
+        const tagMatch = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+        if (tagMatch) {
+          ruleTag = tagMatch[1];
+          details = tagMatch[2];
         } else {
-          // Pattern 2: [Category] Row X (FIELD): message
-          const rowFieldMatch = line.match(/^\[([^\]]+)\]\s*Row\s+(\d+)\s*(?:\(([^)]+)\))?:\s*(.*)$/);
-          if (rowFieldMatch) {
-            category = rowFieldMatch[1] || 'Rule';
-            rowNum = rowFieldMatch[2] || '';
-            fieldName = rowFieldMatch[3] || '';
-            details = rowFieldMatch[4] || line;
-          } else {
-            // Pattern 3: [Category] message
-            const tagMatch = line.match(/^\[([^\]]+)\]\s*(.*)$/);
-            if (tagMatch) {
-              category = tagMatch[1] || 'Info';
-              details = tagMatch[2] || line;
-            }
+          ruleTag = 'General';
+        }
+
+        // Categorize based on tag name
+        const cleanTag = ruleTag.replace('::Detail', '').trim();
+        if (/dedup|emptyfilter|headercleanup/i.test(cleanTag)) {
+          category = 'Dedup & Filtering';
+        } else if (/country|currency|payterms|mattype|iso/i.test(cleanTag)) {
+          category = 'Standard Code Conversion';
+        } else if (/date|phone/i.test(cleanTag)) {
+          category = 'Date & Phone Formatting';
+        } else if (/whitespace|trim|trunc|upper|pad/i.test(cleanTag)) {
+          category = 'Text & Field Adjustments';
+        } else if (/dynamicai/i.test(cleanTag)) {
+          category = 'Dynamic AI Transformation';
+        } else if (/init|mapping|merge|columnnaming/i.test(cleanTag)) {
+          category = 'Pipeline Initialization & Schema Mapping';
+        } else {
+          category = 'Transformation';
+        }
+
+        // 2. Extract Row Number
+        const rowMatch = details.match(/\bRow\s+(\d+)\b/i);
+        if (rowMatch) {
+          rowNum = rowMatch[1];
+        }
+
+        // 3. Extract Primary Key Info (e.g. [KUNNR=0000001001] or [PK=123])
+        const pkMatch = details.match(/\[([A-Za-z0-9_]+=[^\]]+)\]/);
+        if (pkMatch) {
+          pkInfo = pkMatch[1];
+        }
+
+        // 4. Extract Field Name in parentheses (e.g. (LAND1): or (STRAS): or ('STRAS'))
+        const fieldMatch = details.match(/\((?:['"]?)([A-Za-z0-9_.]+)(?:['"]?)\):/);
+        if (fieldMatch) {
+          fieldName = fieldMatch[1];
+        } else {
+          // Check for column references in quotes like in 'STRAS'
+          const colInQuotesMatch = details.match(/in\s+['"]([A-Za-z0-9_.]+)['"]/i);
+          if (colInQuotesMatch) {
+            fieldName = colInQuotesMatch[1];
           }
         }
 
-        parsedRows.push({
-          'Index': index + 1,
-          'Category': category,
-          'Row_Number': rowNum || 'N/A',
-          'Field_Name': fieldName || 'N/A',
-          'Original_Value': origVal,
-          'Harmonized_Value': harmonizedVal,
-          'Details': details,
-        });
+        // 5. Extract Transformation Values across Arrow (→ or ->)
+        if (details.includes('→') || details.includes('->')) {
+          const arrowSymbol = details.includes('→') ? '→' : '->';
+          const arrowParts = details.split(arrowSymbol);
+          const leftPart = arrowParts[0] || '';
+          const rightPart = arrowParts[1] || '';
+
+          // Extract old value after the last colon on the left side
+          const colonIdx = leftPart.lastIndexOf(':');
+          const rawOld = colonIdx !== -1 ? leftPart.substring(colonIdx + 1) : leftPart;
+          origVal = rawOld.trim().replace(/^['"]|['"]$/g, '');
+          harmonizedVal = rightPart.trim().replace(/^['"]|['"]$/g, '');
+          status = 'TRANSFORMED';
+        } else if (/removed|cleaned|filtered|trimmed|formatted|truncated/i.test(details)) {
+          status = 'APPLIED';
+        }
+
+        const safeDetail = details.replace(/"/g, '""');
+        const safeOld = origVal.replace(/"/g, '""');
+        const safeNew = harmonizedVal.replace(/"/g, '""');
+        const safeCategory = category.replace(/"/g, '""');
+        const safeTag = ruleTag.replace(/"/g, '""');
+        const safePk = pkInfo.replace(/"/g, '""');
+        const safeField = (fieldName || 'N/A').replace(/"/g, '""');
+
+        lines.push(`${index + 1},"${safeCategory}","${safeTag}",${rowNum || 'N/A'},"${safePk}","${safeField}","${safeOld}","${safeNew}","${status}","${safeDetail}"`);
       });
 
-      const csvContent = expCSV(parsedRows);
+      const csvContent = lines.join('\n');
       dl(csvContent, `Harmonization_Report_${state.obj || 'Data'}.csv`, 'text/csv');
       toast('Harmonization Report CSV exported successfully!', 'ok');
     } catch (err: any) {
