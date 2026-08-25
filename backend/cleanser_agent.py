@@ -159,7 +159,6 @@ CODE_FIELD_NAMES = {
     "VTWEG",
     "SPART",
     "WAERS",
-    "ZTERM",
     "TAXKD",
     "MBRSH",
     "MTART",
@@ -262,7 +261,13 @@ class CleaningSummary:
 def _stringify(value: Any) -> str:
     if pd.isna(value):
         return ""
-    return str(value)
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+    s = str(value).strip()
+    if re.fullmatch(r"^-?\d+\.0+$", s):
+        return s.split(".")[0]
+    return s
 
 
 def _clean_key(value: str) -> str:
@@ -324,7 +329,12 @@ def _default_for_field(field_name: str) -> str | None:
 def _normalize_identifier(value: Any, field_name: str, row_number: int) -> str | None:
     key = _field_key(field_name)
     length = IDENTIFIER_LENGTHS.get(key, FIELD_LENGTHS.get(key, 10))
-    digits = re.sub(r"\D", "", _stringify(value))
+    raw = _stringify(value).strip()
+    if not raw:
+        return None
+    if re.match(r"^-?\d+\.0+$", raw):
+        raw = raw.split(".")[0]
+    digits = re.sub(r"\D", "", raw)
     if not digits:
         return None
     if len(digits) > length:
@@ -535,7 +545,8 @@ def fix_field_length(
         return
     value = _get_value(df, idx, field_name)
     if len(value) > max_length:
-        _set_value(df, idx, field_name, value[:max_length], summary, "validation", rule_code)
+        truncated = value[:max_length].rstrip(".")
+        _set_value(df, idx, field_name, truncated, summary, "validation", rule_code)
 
 
 # =============================================================================

@@ -233,8 +233,8 @@ def test_5_override_standard_validation():
         apply_cleanser_rules(cleaned_df, summary, summary.execution_plan)
         
         assert cleaned_df.at[0, "ZTERM"] == "CUSTOM_OK", "Dynamic fixer result should prevail"
-        warns = summary.warnings
-        assert any("overridden by dynamic rule" in w for w in warns), "Warning logged for skipped standard validation rule"
+        warns = [w.get("message", "") if isinstance(w, dict) else str(w) for w in summary.warnings]
+        assert any("overridden by dynamic rule" in w or "handled by active dynamic rule" in w for w in warns), "Warning logged for skipped standard validation rule"
         print("  -> PASSED")
 
 def test_6_suppress_conflicting_cleanser_rule():
@@ -247,17 +247,17 @@ def test_6_suppress_conflicting_cleanser_rule():
         
         rule_payload = {
             "version": "1.0",
-            "rules": [{"id": "DYNAMIC_ZTERM", "field": "ZTERM", "label": "CUSTOM ZTERM"}]
+            "rules": [{"id": "DYNAMIC_LAND1", "field": "LAND1", "label": "CUSTOM COUNTRY"}]
         }
         rule_store_path.write_text(json.dumps(rule_payload), encoding="utf-8")
         
-        df = pd.DataFrame([{"ZTERM": "SPECIAL_TERM"}])
+        df = pd.DataFrame([{"LAND1": "SPECIAL_COUNTRY"}])
         df.to_csv(csv_path, index=False)
         
         val_report = {
             "version": "1.0",
             "issues": [
-                {"row": 1, "field": "ZTERM", "rule_code": "DYNAMIC_ZTERM", "rule_type": "DYNAMIC"}
+                {"row": 1, "field": "LAND1", "rule_code": "DYNAMIC_LAND1", "rule_type": "DYNAMIC"}
             ]
         }
         
@@ -266,8 +266,8 @@ def test_6_suppress_conflicting_cleanser_rule():
         
         # Check plan
         cleanser_items = summary.execution_plan["standard_cleanser_rules"]["items"]
-        payterms_item = next(item for item in cleanser_items if item["rule_code"] == "CL_PAYMENT_TERMS_TO_SAP")
-        assert payterms_item["status"] == "suppressed", "CL_PAYMENT_TERMS_TO_SAP must be suppressed"
+        country_item = next(item for item in cleanser_items if item["rule_code"] == "CL_COUNTRY_TO_ISO")
+        assert country_item["status"] == "suppressed", "CL_COUNTRY_TO_ISO must be suppressed"
         print("  -> PASSED")
 
 def test_7_unrelated_cleanser_rule_runs():

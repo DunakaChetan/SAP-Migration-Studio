@@ -267,7 +267,14 @@ class ValidationAgent:
                 continue
 
             raw = smart_row.get(std_field_name, None)
-            sv = str(raw).strip() if raw is not None else ""
+            if raw is None:
+                sv = ""
+            elif isinstance(raw, float) and raw.is_integer():
+                sv = str(int(raw))
+            else:
+                sv = str(raw).strip()
+                if re.fullmatch(r"^-?\d+\.0+$", sv):
+                    sv = sv.split(".")[0]
 
             if f["req"] and not sv:
                 errs.append({"f": actual_field_name, "m": "Required field empty", "sev": "ERROR", "rule": "REQUIRED_FIELDS"})

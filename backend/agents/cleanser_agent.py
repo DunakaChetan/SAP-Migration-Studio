@@ -165,7 +165,6 @@ CODE_FIELD_NAMES = {
     "VTWEG",
     "SPART",
     "WAERS",
-    "ZTERM",
     "TAXKD",
     "MBRSH",
     "MTART",
@@ -336,7 +335,6 @@ CODE_FIELD_NAMES = {
     "VTWEG",
     "SPART",
     "WAERS",
-    "ZTERM",
     "TAXKD",
     "MBRSH",
     "MTART",
@@ -647,7 +645,13 @@ def build_detailed_cleanser_summary(summary: CleaningSummary) -> dict[str, Any]:
 def _stringify(value: Any) -> str:
     if pd.isna(value):
         return ""
-    return str(value)
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+    s = str(value).strip()
+    if re.fullmatch(r"^-?\d+\.0+$", s):
+        return s.split(".")[0]
+    return s
 
 
 def _clean_key(value: str) -> str:
@@ -742,7 +746,12 @@ def _default_for_field(field_name: str) -> str | None:
 def _normalize_identifier(value: Any, field_name: str, row_number: int) -> str | None:
     key = _field_key(field_name)
     length = IDENTIFIER_LENGTHS.get(key, FIELD_LENGTHS.get(key, 10))
-    digits = re.sub(r"\D", "", _stringify(value))
+    raw = _stringify(value).strip()
+    if not raw:
+        return None
+    if re.match(r"^-?\d+\.0+$", raw):
+        raw = raw.split(".")[0]
+    digits = re.sub(r"\D", "", raw)
     if not digits:
         return None
     if len(digits) > length:
@@ -940,7 +949,9 @@ def fix_numeric_identifier_format(
     field_name = issue["field"]
     idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     value = _get_value(df, idx, field_name).strip()
-    if re.fullmatch(r"\d+", value):
+    normalized = _normalize_identifier(value, field_name, idx + 1)
+    if normalized is not None:
+        _set_value(df, idx, field_name, normalized, summary, "validation", rule_code)
         return
     _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "identifier must contain only digits")
 
@@ -982,9 +993,9 @@ def fix_email_address_format(
     field_name = issue["field"]
     idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
     value = _get_value(df, idx, field_name).strip()
-    if EMAIL_RE.match(value):
+    if EMAIL_RE.fullmatch(value):
         return
-    _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "email value does not match valid @ format")
+    _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, "email address format is invalid")
 
 
 def fix_date_yyyymmdd_format(
@@ -1015,7 +1026,8 @@ def fix_field_length(
         return
     value = _get_value(df, idx, field_name)
     if len(value) > max_length:
-        _set_value(df, idx, field_name, value[:max_length], summary, "validation", rule_code)
+        truncated = value[:max_length].rstrip(".")
+        _set_value(df, idx, field_name, truncated, summary, "validation", rule_code)
 
 
 # =============================================================================
