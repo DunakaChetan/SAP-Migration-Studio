@@ -69,6 +69,7 @@ export interface MigrationState {
   isCleansedSaved: boolean;
   cleansingSummary: any;
   transformSummary: any;
+  transformPipeline: any[];
   isTransformedSaved: boolean;
   uploadedFilesMeta: { name: string; size: number; headersCount?: number }[];
   fileSchemas: { filename: string; headers: string[] }[];
@@ -129,6 +130,7 @@ const defaultState: MigrationState = {
   isCleansedSaved: false,
   cleansingSummary: null,
   transformSummary: null,
+  transformPipeline: [],
   isTransformedSaved: false,
   uploadedFilesMeta: [],
   fileSchemas: [],

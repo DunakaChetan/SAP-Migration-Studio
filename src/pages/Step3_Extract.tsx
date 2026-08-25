@@ -34,6 +34,7 @@ export function Step3Extract() {
   const [showAllActions, setShowAllActions] = useState(false);
   const [inspectingField, setInspectingField] = useState<any | null>(null);
   const [inspectorFilter, setInspectorFilter] = useState<'all' | 'critical' | 'warning'>('all');
+  const [openPreviewAccordion, setOpenPreviewAccordion] = useState(false);
 
   // Table filter state
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
@@ -1706,7 +1707,48 @@ export function Step3Extract() {
                 const filteredRows = filterRowsByKey(state.extracted, keyFilterValue, allKeyColumns).slice(0, rowLimit);
 
                 return (
-                  <>
+                  <div className="space-y-4">
+                    {/* Data Preview Header & Collapse Toggle */}
+                    <div className="flex items-center justify-between p-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-xl bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400">
+                          <FileSpreadsheet className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-extrabold text-[var(--text-primary)] uppercase tracking-wider">
+                            Extracted Data Preview
+                          </h3>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">
+                            {visibleTables.length} of {allTables.length} target SAP tables displayed ({filteredRows.length} rows)
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 ml-auto">
+                        <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(state.extracted), 'extracted.csv', 'text/csv')}>
+                          Export All CSV
+                        </Button>
+                        <button
+                          onClick={() => setOpenPreviewAccordion(!openPreviewAccordion)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] text-[11px] font-bold text-[var(--text-secondary)] transition-colors cursor-pointer"
+                        >
+                          {openPreviewAccordion ? (
+                            <>
+                              <ChevronUp className="w-3.5 h-3.5 text-violet-500" />
+                              <span>Collapse Data Preview</span>
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="w-3.5 h-3.5 text-violet-500" />
+                              <span>Expand Data Preview ({visibleTables.length} tables)</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {openPreviewAccordion && (
+                      <div className="space-y-4">
                     <TableFilterToolbar
                       tables={allTables}
                       selectedTables={selectedTables}
@@ -1747,7 +1789,9 @@ export function Step3Extract() {
                         );
                       })
                     )}
-                  </>
+                  </div>
+                )}
+              </div>
                 );
               })()}
             </div>

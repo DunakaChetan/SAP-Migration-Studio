@@ -234,7 +234,7 @@ export function Step6Cleanse() {
   // Audit Log UI state (Audit Log collapsed by default)
   const [openSummaryAccordion, setOpenSummaryAccordion] = useState(true);
   const [openAuditAccordion, setOpenAuditAccordion] = useState(false);
-  const [openPreviewAccordion, setOpenPreviewAccordion] = useState(true);
+  const [openPreviewAccordion, setOpenPreviewAccordion] = useState(false);
   const [auditSearch, setAuditSearch] = useState('');
   const [auditPhaseFilter, setAuditPhaseFilter] = useState<string>('ALL');
   const [auditPage, setAuditPage] = useState(1);
@@ -2047,38 +2047,58 @@ export function Step6Cleanse() {
         )}
 
         {/* Cleansed Data Preview (Multi-Table Display) */}
-        <Card>
-          <CardHeader
-            title="Cleansed Data Preview"
-            subtitle={has ? `Displaying ${cleanedRows.length} cleansed master records` : 'Run cleansing to auto-fix data issues'}
-          >
-            <div className="flex items-center gap-2">
-              {has && (
-                <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(cleanedRows), 'cleaned.csv', 'text/csv')}>
-                  Export All CSV
-                </Button>
-              )}
-              <button
-                onClick={() => setOpenPreviewAccordion(!openPreviewAccordion)}
-                className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] cursor-pointer transition-colors"
-                title={openPreviewAccordion ? "Collapse Data Preview" : "Expand Data Preview"}
-              >
-                {openPreviewAccordion ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </button>
-            </div>
-          </CardHeader>
-          {openPreviewAccordion && (
-            <CardBody>
-              {has ? (() => {
-                const allTables: TableInfo[] = extractedTables.length > 0
-                  ? extractedTables
-                  : [{ table_name: 'Cleansed Records', columns: Object.keys(cleanedRows[0] || {}) }];
-                const visibleTables = allTables.filter((t: any) => selectedCleanseTables.has(t.table_name));
-                const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
-                const filteredRows = filterRowsByKey(cleanedRows, cleanseKeyFilter, allKeyColumns);
+        {/* Cleansed Data Preview (Multi-Table Display) */}
+        {has ? (() => {
+          const allTables: TableInfo[] = extractedTables.length > 0
+            ? extractedTables
+            : [{ table_name: 'Cleansed Records', columns: Object.keys(cleanedRows[0] || {}) }];
+          const visibleTables = allTables.filter((t: any) => selectedCleanseTables.has(t.table_name));
+          const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
+          const filteredRows = filterRowsByKey(cleanedRows, cleanseKeyFilter, allKeyColumns);
 
-                return (
-                  <div className="space-y-4">
+          return (
+            <div className="space-y-4">
+              {/* Data Preview Header & Collapse Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400">
+                    <FileSpreadsheet className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-extrabold text-[var(--text-primary)] uppercase tracking-wider">
+                      Cleansed Data Preview
+                    </h3>
+                    <p className="text-[10px] text-[var(--text-tertiary)]">
+                      {visibleTables.length} of {allTables.length} target SAP tables displayed ({filteredRows.length} rows)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 ml-auto">
+                  <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(cleanedRows), 'cleaned.csv', 'text/csv')}>
+                    Export All CSV
+                  </Button>
+                  <button
+                    onClick={() => setOpenPreviewAccordion(!openPreviewAccordion)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] text-[11px] font-bold text-[var(--text-secondary)] transition-colors cursor-pointer"
+                  >
+                    {openPreviewAccordion ? (
+                      <>
+                        <ChevronUp className="w-3.5 h-3.5 text-violet-500" />
+                        <span>Collapse Data Preview</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-3.5 h-3.5 text-violet-500" />
+                        <span>Expand Data Preview ({visibleTables.length} tables)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {openPreviewAccordion && (
+                <div className="space-y-4">
                     <TableFilterToolbar
                       tables={allTables}
                       selectedTables={selectedCleanseTables}
@@ -2114,23 +2134,17 @@ export function Step6Cleanse() {
                               </Button>
                             </div>
                             <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} keyCols={allKeyColumns} />
-                            {tableRows.length > 15 && (
-                              <div className="text-[10px] text-[var(--text-tertiary)] text-center py-1.5 border-t border-[var(--border)]">
-                                Showing 15 of {tableRows.length} rows · Export CSV for full table
-                              </div>
-                            )}
                           </div>
-                        );
-                      })
-                    )}
-                  </div>
-                );
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
               })() : (
-                <EmptyState icon={<Sparkles className="w-10 h-10 text-violet-500" />} message="Run cleansing to auto-fix data issues and view cleansed output" />
-              )}
-            </CardBody>
-          )}
-        </Card>
+              <EmptyState icon={<Sparkles className="w-10 h-10 text-violet-500" />} message="Run cleansing to auto-fix data issues and view cleansed output" />
+            )}
 
         {/* Status Notes */}
         <Card>

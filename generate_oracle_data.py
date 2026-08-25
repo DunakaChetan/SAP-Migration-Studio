@@ -9,7 +9,8 @@ header_row_1 = [
     'HZ_LOCATIONS', 'HZ_LOCATIONS', 'HZ_LOCATIONS', 'HZ_CUST_ACCOUNTS', 'AR_CUSTOMERS', 
     'AR_CUSTOMERS', 'HZ_CUST_SITE_USES_ALL', 'HZ_CUST_SITE_USES_ALL', 'HZ_CUST_SITE_USES_ALL', 
     'HZ_CUST_SITE_USES_ALL', 'HZ_CUST_SITE_USES_ALL', 'HZ_CUST_SITE_USES_ALL', 'HZ_PARTIES', 
-    'HZ_CONTACT_POINTS', 'HZ_CONTACT_POINTS', 'IBY_EXT_BANK_ACCOUNTS', 'HZ_CUST_SITE_USES_ALL', 'HZ_PARTIES'
+    'HZ_CONTACT_POINTS', 'HZ_CONTACT_POINTS', 'IBY_EXT_BANK_ACCOUNTS', 'HZ_CUST_SITE_USES_ALL', 'HZ_PARTIES',
+    'AR_CUSTOMERS', 'AR_CUSTOMERS'
 ]
 
 header_row_2 = [
@@ -17,7 +18,8 @@ header_row_2 = [
     'STATE', 'POSTAL_CODE', 'COUNTRY', 'CUSTOMER_NUMBER', 'RECON_ACCOUNT', 
     'PAYMENT_TERM', 'SALES_ORG', 'DISTRIBUTION_CHANNEL', 'DIVISION', 
     'PRICE_LIST', 'CUSTOMER_GROUP', 'INCOTERMS', 'GST_NUMBER', 
-    'EMAIL_ADDRESS', 'PHONE_NUMBER', 'BANK_ACCOUNT_NUM', 'SHIP_TO', 'CREATION_DATE'
+    'EMAIL_ADDRESS', 'PHONE_NUMBER', 'BANK_ACCOUNT_NUM', 'SHIP_TO', 'CREATION_DATE',
+    'CURRENCY_CODE', 'CREDIT_LIMIT'
 ]
 
 # Base data pools to simulate real Oracle patterns
@@ -147,11 +149,14 @@ def generate():
                 "2023-12-31",
                 ""
             ])
+            
+        currency = random.choice(["US Dollars", "Euro", "British Pound", "Pounds", "Indian Rupee", "INR"])
+        credit_limit = random.choice([5000, 10000, 25000, 50000, 100000])
 
         row = [
             party_name, p_num, party_type, address1, city, state, postal, country, cust_number,
             recon, pay_term, sales_org, dist_channel, division, price_list, cust_group, incoterms,
-            gst, email, phone, bank_acc, ship_to, creation_date
+            gst, email, phone, bank_acc, ship_to, creation_date, currency, credit_limit
         ]
         
         data.append(row)

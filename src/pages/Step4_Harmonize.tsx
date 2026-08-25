@@ -1006,6 +1006,7 @@ export function Step4Harmonize() {
   // Editable Rule Config (Inline box per rule)
   const [ruleConfig, setRuleConfig] = useState<Record<string, RuleItemConfig>>({ ...DEFAULT_RULE_CONFIG });
   const [expandedRuleKey, setExpandedRuleKey] = useState<string | null>(null);
+  const [openPreviewAccordion, setOpenPreviewAccordion] = useState(false);
 
   // Dynamic AI Rules
   const [customPrompts, setCustomPrompts] = useState<string[]>([]);
@@ -2312,19 +2313,60 @@ export function Step4Harmonize() {
 
             return (
               <div className="space-y-4">
-                <TableFilterToolbar
-                  tables={allTables}
-                  selectedTables={selectedOutputTables}
-                  onSelectedTablesChange={setSelectedOutputTables}
-                  keyFilterValue={outputKeyFilter}
-                  onKeyFilterChange={setOutputKeyFilter}
-                  keyColumns={allKeyColumns}
-                  accentColor="purple"
-                />
-                {visibleTables.length === 0 ? (
-                  <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
-                    No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                {/* Data Preview Header & Collapse Toggle */}
+                <div className="flex items-center justify-between p-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400">
+                      <FileSpreadsheet className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-extrabold text-[var(--text-primary)] uppercase tracking-wider">
+                        Harmonized Data Preview
+                      </h3>
+                      <p className="text-[10px] text-[var(--text-tertiary)]">
+                        {visibleTables.length} of {allTables.length} target SAP tables displayed ({filteredRows.length} rows)
+                      </p>
+                    </div>
                   </div>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(outputRows), 'harmonized.csv', 'text/csv')}>
+                      Export All CSV
+                    </Button>
+                    <button
+                      onClick={() => setOpenPreviewAccordion(!openPreviewAccordion)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] text-[11px] font-bold text-[var(--text-secondary)] transition-colors cursor-pointer"
+                    >
+                      {openPreviewAccordion ? (
+                        <>
+                          <ChevronUp className="w-3.5 h-3.5 text-violet-500" />
+                          <span>Collapse Data Preview</span>
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-3.5 h-3.5 text-violet-500" />
+                          <span>Expand Data Preview ({visibleTables.length} tables)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {openPreviewAccordion && (
+                  <div className="space-y-4">
+                    <TableFilterToolbar
+                      tables={allTables}
+                      selectedTables={selectedOutputTables}
+                      onSelectedTablesChange={setSelectedOutputTables}
+                      keyFilterValue={outputKeyFilter}
+                      onKeyFilterChange={setOutputKeyFilter}
+                      keyColumns={allKeyColumns}
+                      accentColor="purple"
+                    />
+                    {visibleTables.length === 0 ? (
+                      <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
+                        No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                      </div>
                 ) : (
                   visibleTables.map((t: any) => {
                     const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
@@ -2365,6 +2407,8 @@ export function Step4Harmonize() {
                       </Card>
                     );
                   })
+                    )}
+                  </div>
                 )}
               </div>
             );
