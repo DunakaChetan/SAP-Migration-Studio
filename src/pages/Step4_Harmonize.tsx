@@ -2367,46 +2367,46 @@ export function Step4Harmonize() {
                       <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
                         No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
                       </div>
-                ) : (
-                  visibleTables.map((t: any) => {
-                    const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
-                    const currentPage = tablePages[t.table_name] || 1;
-                    const paginatedRows = tableRows.slice((currentPage - 1) * 15, currentPage * 15);
+                    ) : (
+                      visibleTables.map((t: any) => {
+                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                        const currentPage = tablePages[t.table_name] || 1;
+                        const paginatedRows = tableRows.slice((currentPage - 1) * 15, currentPage * 15);
 
-                    return (
-                      <Card key={t.table_name}>
-                        <CardHeader
-                          title={`Harmonized: ${t.table_name}`}
-                          subtitle={`${tableRows.length} rows × ${tableCols.length} columns${outputKeyFilter ? ' (filtered)' : ''}`}
-                        >
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            icon={<Download className="w-3 h-3" />}
-                            onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_harmonized.csv`, 'text/csv')}
-                            className="ml-auto"
-                          >
-                            Export {t.table_name}
-                          </Button>
-                        </CardHeader>
-                        <CardBody className="p-0 overflow-hidden">
-                          <DataTable
-                            rows={paginatedRows}
-                            cols={tableCols}
-                            keyCols={allKeyColumns}
-                          />
-                          <TablePaginationFooter
-                            currentPage={currentPage}
-                            totalRows={tableRows.length}
-                            pageSize={15}
-                            onPageChange={(newPage) => setTablePages(prev => ({ ...prev, [t.table_name]: newPage }))}
-                            isFiltered={!!outputKeyFilter}
-                            accentColor="purple"
-                          />
-                        </CardBody>
-                      </Card>
-                    );
-                  })
+                        return (
+                          <Card key={t.table_name}>
+                            <CardHeader
+                              title={`Harmonized: ${t.table_name}`}
+                              subtitle={`${tableRows.length} rows × ${tableCols.length} columns${outputKeyFilter ? ' (filtered)' : ''}`}
+                            >
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<Download className="w-3 h-3" />}
+                                onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_harmonized.csv`, 'text/csv')}
+                                className="ml-auto"
+                              >
+                                Export {t.table_name}
+                              </Button>
+                            </CardHeader>
+                            <CardBody className="p-0 overflow-hidden">
+                              <DataTable
+                                rows={paginatedRows}
+                                cols={tableCols}
+                                keyCols={allKeyColumns}
+                              />
+                              <TablePaginationFooter
+                                currentPage={currentPage}
+                                totalRows={tableRows.length}
+                                pageSize={15}
+                                onPageChange={(newPage) => setTablePages(prev => ({ ...prev, [t.table_name]: newPage }))}
+                                isFiltered={!!outputKeyFilter}
+                                accentColor="purple"
+                              />
+                            </CardBody>
+                          </Card>
+                        );
+                      })
                     )}
                   </div>
                 )}
