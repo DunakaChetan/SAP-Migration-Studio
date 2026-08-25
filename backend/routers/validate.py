@@ -126,7 +126,9 @@ Output MUST be a JSON object with key "rules" containing a list of rule objects:
       "field": "Exact Table Column Header Name or GENERAL",
       "python_code": "Single line Python condition returning True on rule violation",
       "error_message": "Human readable error message describing the violation",
-      "severity": "ERROR"
+      "severity": "ERROR",
+      "is_ambiguous": false,
+      "clarification": "Optional warning text if prompt is vague, negative-only, or missing target format"
     }}
   ]
 }}"""
@@ -146,6 +148,8 @@ Output MUST be a JSON object with key "rules" containing a list of rule objects:
             prompt_str = req.prompts[min(idx - 1, len(req.prompts) - 1)]
             raw_code = r.get("python_code") or "False"
             sanitized_code = sanitize_python_code(raw_code, prompt_str)
+            is_ambiguous = bool(r.get("is_ambiguous", False))
+            clarification = r.get("clarification") or ""
             
             cleaned_rules.append({
                 "id": r.get("id") or f"DYNAMIC_RULE_{idx}",
@@ -155,7 +159,9 @@ Output MUST be a JSON object with key "rules" containing a list of rule objects:
                 "field": r.get("field") or "GENERAL",
                 "python_code": sanitized_code,
                 "error_message": r.get("error_message") or r.get("label") or "Custom rule violation",
-                "severity": (r.get("severity") or "ERROR").upper(),
+                "severity": "WARN" if is_ambiguous else ((r.get("severity") or "ERROR").upper()),
+                "is_ambiguous": is_ambiguous,
+                "clarification": clarification,
                 "enabled": True
             })
         return {"rules": cleaned_rules}

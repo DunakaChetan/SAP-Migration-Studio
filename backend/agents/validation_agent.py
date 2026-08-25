@@ -71,7 +71,6 @@ RULES = [
     {"id": "NUMERIC_ID", "label": "Numeric IDs", "description": "KUNNR/LIFNR digits"},
     {"id": "EMAIL_FORMAT", "label": "Email Format", "description": "Valid @ format"},
     {"id": "DATE_FORMAT", "label": "Date Format", "description": "YYYYMMDD 8 digits"},
-    {"id": "PAYMENT_TERMS", "label": "Payment Terms", "description": "SAP NT30/NT45 format"},
 ]
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -79,7 +78,6 @@ COUNTRY_RE = re.compile(r"^[A-Z]{2,3}$")
 CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 NUMERIC_ID_RE = re.compile(r"^\d{1,10}$")
 DATE_RE = re.compile(r"^\d{8}$")
-PAYMENT_TERM_RE = re.compile(r"^[A-Z]{2}\d{2}$")
 
 
 class SmartRow:
@@ -295,9 +293,6 @@ class ValidationAgent:
             if f["t"] == "DATS" and not DATE_RE.match(sv):
                 warns.append({"f": actual_field_name, "m": "Must be YYYYMMDD", "sev": "WARN", "rule": "DATE_FORMAT"})
 
-            if std_field_name == "ZTERM" and not PAYMENT_TERM_RE.match(sv):
-                warns.append({"f": actual_field_name, "m": "Must match SAP terms format e.g. NT30", "sev": "WARN", "rule": "PAYMENT_TERMS"})
-
         st = "ERROR" if errs else ("WARN" if warns else "PASS")
         return {"errs": errs, "warns": warns, "st": st}
     def _primary_key_field(self, obj: str) -> str:
@@ -343,8 +338,6 @@ class ValidationAgent:
                     overridden_rule_ids.add("EMAIL_FORMAT")
                 elif f_name in ("KUNNR", "LIFNR", "CUSTOMER", "VENDOR") and f_label.startswith("numeric"):
                     overridden_rule_ids.add("NUMERIC_ID")
-                elif f_name in ("ZTERM", "PAYMENT_TERMS", "PAYTERMS") or f_label.startswith("payment"):
-                    overridden_rule_ids.add("PAYMENT_TERMS")
 
         present_field_keys = set()
         for row in rows:

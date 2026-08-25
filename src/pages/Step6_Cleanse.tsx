@@ -12,7 +12,8 @@ import {
 import {
   ArrowLeft, ArrowRight, Sparkles, Download, Bot, Upload, Save,
   ChevronDown, ChevronUp, Check, X, Trash2, Plus, RefreshCw, ListFilter,
-  Search, FileText, Sliders, FileJson, ChevronLeft, ChevronRight, RotateCcw, Pencil
+  Search, FileText, Sliders, FileJson, ChevronLeft, ChevronRight, RotateCcw, Pencil,
+  Wrench, ShieldAlert, CheckCircle2, Copy
 } from 'lucide-react';
 import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
 import type { TableInfo } from '@/components/shared/TableFilterToolbar';
@@ -230,6 +231,10 @@ export function Step6Cleanse() {
   // Batch Manual Fix Modal state
   const [showFixModal, setShowFixModal] = useState(false);
   const [manualFixValues, setManualFixValues] = useState<Record<string, string>>({});
+  const [modalSearch, setModalSearch] = useState('');
+  const [modalFilter, setModalFilter] = useState<'all' | 'unresolved' | 'fixed'>('all');
+  const [modalExpandedFields, setModalExpandedFields] = useState<Record<string, boolean>>({});
+  const [groupBulkInputs, setGroupBulkInputs] = useState<Record<string, string>>({});
 
   // Table filter state for cleansed output
   const extractedTables = state.extractedTables || [];
@@ -484,10 +489,16 @@ export function Step6Cleanse() {
   const warningList: WarningItem[] = useMemo(() => {
     return rawWarnings.map((w: any) => {
       if (typeof w === 'string') {
-        return { rule_code: 'UNKNOWN', row: 0, field: '', reason: '', message: w };
+        return { rule_code: 'MANUAL_REVIEW', row: 1, field: 'GENERAL', reason: w, message: w };
       }
-      return w as WarningItem;
-    }).filter((w: WarningItem) => w.row > 0);
+      return {
+        rule_code: w.rule_code || 'MANUAL_REVIEW',
+        row: typeof w.row === 'number' && w.row > 0 ? w.row : 1,
+        field: w.field || 'GENERAL',
+        reason: w.reason || w.message || 'Requires manual verification',
+        message: w.message || w.reason || 'Requires manual verification',
+      } as WarningItem;
+    });
   }, [rawWarnings]);
 
   const downloadWarnings = () => {
@@ -1557,7 +1568,7 @@ export function Step6Cleanse() {
             <Card>
               <CardHeader
                 title="Executive Cleansing Summary Report"
-                subtitle={`Project: ${state.projectId || 'Default Project'} · Target: ${state.obj || 'Customer Master'} · Status: ${summary.overall_status || 'SUCCESS'}`}
+                subtitle="Autonomous remediation audit trail across standard and dynamic rules"
                 icon={<Sparkles className="w-4 h-4 text-violet-600 dark:text-violet-400" />}
               >
                 <div className="flex items-center gap-2">
@@ -2112,243 +2123,471 @@ export function Step6Cleanse() {
         </Card>
       </div>
 
-      {/* Batch Manual Fix Modal */}
-      {showFixModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowFixModal(false); }}>
-          <div className="w-full max-w-3xl max-h-[90vh] bg-[var(--bg-primary)] rounded-2xl shadow-2xl border border-[var(--border)] flex flex-col overflow-hidden"
-            style={{ boxShadow: '0 25px 60px rgba(0,0,0,0.35), 0 0 0 1px rgba(251,191,36,0.12)' }}>
+      {/* ── UPGRADED MANUAL REMEDIATION STUDIO MODAL (FIELD GROUPED) ── */}
+      {showFixModal && (() => {
+        const fixedCount = Object.values(manualFixValues).filter(v => v.trim() !== '').length;
+        const progressPercent = warningList.length > 0 ? Math.round((fixedCount / warningList.length) * 100) : 0;
 
-            {/* ── Modal Header ── */}
-            <div className="relative px-6 pt-6 pb-5 border-b border-[var(--border)] shrink-0"
-              style={{ background: 'linear-gradient(135deg, rgba(251,191,36,0.18) 0%, rgba(245,158,11,0.12) 50%, rgba(120,53,15,0.06) 100%)', backgroundColor: 'var(--bg-secondary)' }}>
-              {/* Decorative glow – pointer-events-none so it never clips content */}
-              <div className="absolute inset-0 pointer-events-none rounded-t-2xl overflow-hidden">
-                <div className="absolute top-0 right-0 w-56 h-full opacity-[0.05]"
-                  style={{ background: 'radial-gradient(ellipse at top right, #f59e0b 0%, transparent 70%)' }} />
-              </div>
+        const filteredList = warningList.filter(warning => {
+          const key = `${warning.row}::${warning.field}::${warning.rule_code}`;
+          const isFixed = Boolean(manualFixValues[key] && manualFixValues[key].trim() !== '');
 
-              {/* Title row */}
-              <div className="relative flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3.5">
-                  {/* Icon badge */}
-                  <div className="w-11 h-11 shrink-0 rounded-xl flex items-center justify-center"
-                    style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)', boxShadow: '0 4px 14px rgba(245,158,11,0.4)' }}>
-                    <span className="text-[18px] leading-none">⚠️</span>
+          if (modalFilter === 'unresolved' && isFixed) return false;
+          if (modalFilter === 'fixed' && !isFixed) return false;
+
+          if (modalSearch.trim()) {
+            const q = modalSearch.toLowerCase().trim();
+            const rowIndex = warning.row - 1;
+            const currentVal = (cleanedRows[rowIndex] && cleanedRows[rowIndex][warning.field]) ? String(cleanedRows[rowIndex][warning.field]).toLowerCase() : '';
+            const pkVal = (cleanedRows[rowIndex] && (cleanedRows[rowIndex].KUNNR || cleanedRows[rowIndex].LIFNR || cleanedRows[rowIndex].MATNR || cleanedRows[rowIndex].CUSTOMER_ID)) ? String(cleanedRows[rowIndex].KUNNR || cleanedRows[rowIndex].LIFNR || cleanedRows[rowIndex].MATNR || cleanedRows[rowIndex].CUSTOMER_ID).toLowerCase() : '';
+            const fixedVal = (manualFixValues[key] || '').toLowerCase();
+
+            const fieldMatch = (warning.field || '').toLowerCase().includes(q);
+            const ruleMatch = (warning.rule_code || '').toLowerCase().includes(q);
+            const reasonMatch = (warning.reason || warning.message || '').toLowerCase().includes(q);
+            const rowMatch = String(warning.row).includes(q);
+            const valMatch = currentVal.includes(q) || fixedVal.includes(q);
+            const pkMatch = pkVal.includes(q);
+
+            if (!fieldMatch && !ruleMatch && !reasonMatch && !rowMatch && !valMatch && !pkMatch) return false;
+          }
+          return true;
+        });
+
+        const unresolvedCount = warningList.length - fixedCount;
+
+        // Group filtered items by field name
+        const groupedByField: Record<string, typeof warningList> = {};
+        filteredList.forEach(w => {
+          const f = w.field || 'OTHER';
+          if (!groupedByField[f]) groupedByField[f] = [];
+          groupedByField[f].push(w);
+        });
+        const fieldKeys = Object.keys(groupedByField).sort();
+
+        const toggleFieldGroup = (fieldName: string) => {
+          setModalExpandedFields(prev => ({
+            ...prev,
+            [fieldName]: prev[fieldName] === undefined ? false : !prev[fieldName]
+          }));
+        };
+
+        const isFieldExpanded = (fieldName: string) => {
+          // Default to expanded (true) if undefined
+          return modalExpandedFields[fieldName] !== false;
+        };
+
+        const expandAllFields = (expand: boolean) => {
+          const updated: Record<string, boolean> = {};
+          fieldKeys.forEach(f => { updated[f] = expand; });
+          setModalExpandedFields(updated);
+        };
+
+        const applyToAllSameField = (targetField: string, valToApply: string) => {
+          if (!valToApply.trim()) return;
+          const copy = { ...manualFixValues };
+          warningList.forEach(w => {
+            if (w.field === targetField) {
+              const k = `${w.row}::${w.field}::${w.rule_code}`;
+              copy[k] = valToApply;
+            }
+          });
+          setManualFixValues(copy);
+          toast(`Applied "${valToApply}" across all ${targetField} warning records`, 'ok');
+        };
+
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 animate-in fade-in duration-200"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowFixModal(false); }}>
+            <div className="w-full max-w-5xl max-h-[88vh] bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden"
+              style={{ boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }}>
+
+              {/* ── Modal Header ── */}
+              <div className="px-6 py-4.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 shrink-0">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                      <Wrench className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-[16px] text-slate-900 dark:text-white leading-snug">Manual Remediation Studio</h3>
+                        <span className="px-2 py-0.5 rounded-full text-[9.5px] font-mono font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/50">
+                          {state.obj || 'MASTER DATA'}
+                        </span>
+                      </div>
+                      <p className="text-[12px] text-slate-600 dark:text-slate-400 mt-0.5">
+                        Grouped by target field — expand fields to review and correct flagged anomalies
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-bold text-[15px] text-[var(--text-primary)] leading-snug">Fix Warning Records</h3>
-                    <p className="text-[11.5px] text-[var(--text-tertiary)] mt-0.5 leading-snug">Provide corrected values for each flagged field below</p>
-                  </div>
-                </div>
 
-                {/* Badges + close */}
-                <div className="flex items-center gap-2 shrink-0 pt-0.5">
-                  <span className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 whitespace-nowrap">
-                    {warningList.length} {warningList.length === 1 ? 'warning' : 'warnings'}
-                  </span>
-                  <span className="px-2.5 py-1 rounded-lg text-[10.5px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50 whitespace-nowrap">
-                    {Object.values(manualFixValues).filter(v => v.trim() !== '').length} fixed
-                  </span>
-                  <button
-                    onClick={() => setShowFixModal(false)}
-                    className="ml-1 w-8 h-8 flex items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-all cursor-pointer border border-transparent hover:border-[var(--border)]"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Progress bar */}
-              {warningList.length > 0 && (
-                <div className="relative mt-4">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] text-[var(--text-tertiary)] font-medium">Completion progress</span>
-                    <span className="text-[10px] font-bold text-[var(--text-secondary)]">
-                      {Math.round((Object.values(manualFixValues).filter(v => v.trim() !== '').length / warningList.length) * 100)}%
+                  {/* Header Metrics & Close */}
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <span className="px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 font-mono">
+                      {warningList.length} Total
                     </span>
+                    <span className="px-3 py-1 rounded-lg text-[11px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 font-mono">
+                      {fixedCount} Fixed ({progressPercent}%)
+                    </span>
+                    <button
+                      onClick={() => setShowFixModal(false)}
+                      className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer ml-1"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
                   </div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-tertiary)' }}>
+                </div>
+
+                {/* Header Progress Bar */}
+                {warningList.length > 0 && (
+                  <div className="mt-3 w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${(Object.values(manualFixValues).filter(v => v.trim() !== '').length / warningList.length) * 100}%`,
-                        background: 'linear-gradient(90deg, #10b981, #059669)'
-                      }}
+                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300"
+                      style={{ width: `${progressPercent}%` }}
                     />
                   </div>
-                </div>
-              )}
-            </div>
-
-            {/* ── Warning Cards List ── */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-3" style={{ background: 'var(--bg-secondary)' }}>
-              {warningList.map((warning, i) => {
-                const key = `${warning.row}::${warning.field}::${warning.rule_code}`;
-                const val = manualFixValues[key] ?? "";
-                const rowIndex = warning.row - 1;
-                const currentVal = (cleanedRows[rowIndex] && cleanedRows[rowIndex][warning.field]) ?? '';
-                const isFixed = val.trim() !== '';
-
-                return (
-                  <div
-                    key={i}
-                    className="rounded-xl border overflow-hidden transition-all duration-200"
-                    style={{
-                      borderColor: isFixed ? 'rgba(16,185,129,0.4)' : 'var(--border)',
-                      background: 'var(--bg-primary)',
-                      boxShadow: isFixed ? '0 0 0 1px rgba(16,185,129,0.15), 0 2px 8px rgba(0,0,0,0.06)' : '0 2px 8px rgba(0,0,0,0.04)'
-                    }}
-                  >
-                    {/* Card Top Bar */}
-                    <div className="flex items-center justify-between px-4 py-2.5 border-b"
-                      style={{
-                        borderColor: isFixed ? 'rgba(16,185,129,0.2)' : 'var(--border)',
-                        background: isFixed
-                          ? 'linear-gradient(90deg, rgba(16,185,129,0.06), rgba(5,150,105,0.03))'
-                          : 'linear-gradient(90deg, rgba(251,191,36,0.06), rgba(245,158,11,0.02))'
-                      }}>
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black shrink-0"
-                          style={{
-                            background: isFixed ? '#10b981' : '#f59e0b',
-                            color: 'white',
-                            boxShadow: isFixed ? '0 2px 6px rgba(16,185,129,0.4)' : '0 2px 6px rgba(245,158,11,0.4)'
-                          }}>
-                          {isFixed ? '✓' : i + 1}
-                        </div>
-                        <code className="text-[11px] font-bold tracking-wide"
-                          style={{ color: isFixed ? '#10b981' : '#f59e0b' }}>
-                          {warning.rule_code}
-                        </code>
-                        <span className="hidden sm:inline text-[var(--text-tertiary)] text-[10px]">·</span>
-                        <span className="hidden sm:inline text-[10px] font-mono text-[var(--text-tertiary)]">
-                          Field: <strong className="text-[var(--text-secondary)]">{warning.field}</strong>
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {isFixed && (
-                          <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
-                            Fixed ✓
-                          </span>
-                        )}
-                        <span className="text-[10px] px-2 py-0.5 rounded-lg border text-[var(--text-secondary)] font-semibold"
-                          style={{ borderColor: 'var(--border)', background: 'var(--bg-tertiary)' }}>
-                          Row #{warning.row}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Card Body */}
-                    <div className="flex flex-col sm:flex-row">
-                      {/* Left: Info Panel */}
-                      <div className="flex-1 p-4 space-y-3 border-b sm:border-b-0 sm:border-r" style={{ borderColor: 'var(--border)' }}>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
-                            <div className="text-[9px] uppercase tracking-widest font-bold text-[var(--text-tertiary)] mb-1">Field</div>
-                            <div className="text-[11.5px] font-mono font-bold text-[var(--text-primary)] truncate">{warning.field || '—'}</div>
-                          </div>
-                          <div className="rounded-lg p-2.5" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
-                            <div className="text-[9px] uppercase tracking-widest font-bold text-[var(--text-tertiary)] mb-1">Current Value</div>
-                            <div className={`text-[11.5px] font-mono font-semibold truncate ${!currentVal ? 'italic opacity-40' : 'text-[var(--text-primary)]'}`}>
-                              {currentVal || '(empty)'}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg text-[11px] leading-snug"
-                          style={{
-                            background: 'rgba(251,191,36,0.08)',
-                            border: '1px solid rgba(251,191,36,0.2)',
-                            color: 'var(--color-warning, #f59e0b)'
-                          }}>
-                          <span className="shrink-0 text-[13px] mt-0.5">⚠</span>
-                          <span className="text-[var(--text-secondary)]">{warning.reason || warning.message || 'No description provided.'}</span>
-                        </div>
-                      </div>
-
-                      {/* Right: Input Panel */}
-                      <div className="w-full sm:w-[42%] p-4 flex flex-col justify-center gap-2" style={{ background: 'var(--bg-primary)' }}>
-                        <label className="text-[11px] font-bold text-[var(--text-secondary)] uppercase tracking-wider">
-                          Correct Value
-                        </label>
-                        <input
-                          type="text"
-                          value={val}
-                          onChange={(e) => setManualFixValues(prev => ({ ...prev, [key]: e.target.value }))}
-                          className="w-full h-11 px-4 text-[13px] font-medium rounded-xl outline-none transition-all duration-200 placeholder:text-[var(--text-tertiary)]"
-                          style={{
-                            background: 'var(--bg-tertiary)',
-                            border: `1.5px solid ${isFixed ? '#10b981' : 'var(--border)'}`,
-                            color: 'var(--text-primary)',
-                            boxShadow: isFixed ? '0 0 0 3px rgba(16,185,129,0.12)' : 'none'
-                          }}
-                          onFocus={(e) => {
-                            e.currentTarget.style.border = `1.5px solid ${isFixed ? '#10b981' : '#8b5cf6'}`;
-                            e.currentTarget.style.boxShadow = isFixed ? '0 0 0 3px rgba(16,185,129,0.15)' : '0 0 0 3px rgba(139,92,246,0.15)';
-                          }}
-                          onBlur={(e) => {
-                            e.currentTarget.style.border = `1.5px solid ${isFixed ? '#10b981' : 'var(--border)'}`;
-                            e.currentTarget.style.boxShadow = isFixed ? '0 0 0 3px rgba(16,185,129,0.12)' : 'none';
-                          }}
-                          placeholder="Enter the correct value…"
-                        />
-                        {isFixed && (
-                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                            <Check className="w-3 h-3" /> Value ready to save
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              {warningList.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-14 gap-3 text-center">
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-emerald-100 dark:bg-emerald-900/30">
-                    <Check className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
-                  </div>
-                  <div className="text-[13px] font-semibold text-[var(--text-primary)]">No warnings to fix</div>
-                  <div className="text-[11.5px] text-[var(--text-tertiary)]">All records are clean — no manual intervention required.</div>
-                </div>
-              )}
-            </div>
-
-            {/* ── Modal Footer ── */}
-            <div className="px-6 py-4 border-t border-[var(--border)] flex items-center justify-between gap-3"
-              style={{ background: 'var(--bg-secondary)' }}>
-              <div className="text-[11px] text-[var(--text-tertiary)]">
-                {Object.values(manualFixValues).filter(v => v.trim() !== '').length > 0 ? (
-                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                    {Object.values(manualFixValues).filter(v => v.trim() !== '').length} of {warningList.length} values entered
-                  </span>
-                ) : (
-                  <span>Enter values in the fields above to enable save</span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowFixModal(false)}
-                  className="px-4 py-2 rounded-xl text-[12px] font-semibold border transition-all cursor-pointer hover:bg-[var(--bg-tertiary)]"
-                  style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={applyManualFixes}
-                  disabled={warningList.length === 0 || Object.values(manualFixValues).every(v => v.trim() === "")}
-                  className="px-5 py-2 rounded-xl text-[12px] font-bold text-white flex items-center gap-2 transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{
-                    background: 'linear-gradient(135deg, #10b981, #059669)',
-                    boxShadow: '0 4px 14px rgba(16,185,129,0.35)'
-                  }}
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Save {Object.values(manualFixValues).filter(v => v.trim() !== '').length > 0 ? `${Object.values(manualFixValues).filter(v => v.trim() !== '').length} Fix${Object.values(manualFixValues).filter(v => v.trim() !== '').length > 1 ? 'es' : ''}` : 'Fixes'}
-                </button>
+
+              {/* ── Search & Filter Toolbar ── */}
+              <div className="px-6 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/80 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2 flex-1 min-w-[260px] max-w-md">
+                  <div className="relative w-full">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={modalSearch}
+                      onChange={(e) => setModalSearch(e.target.value)}
+                      placeholder="Search field, rule, row #, value, PK, or reason..."
+                      className="w-full pl-8.5 pr-8 py-1.5 rounded-lg text-[11.5px] bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                    {modalSearch && (
+                      <button
+                        onClick={() => setModalSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Filter Pills */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setModalFilter('all')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                        modalFilter === 'all'
+                          ? 'bg-amber-500 text-white shadow-sm font-bold'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      All ({warningList.length})
+                    </button>
+                    <button
+                      onClick={() => setModalFilter('unresolved')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                        modalFilter === 'unresolved'
+                          ? 'bg-amber-500 text-white shadow-sm font-bold'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Unresolved ({unresolvedCount})
+                    </button>
+                    <button
+                      onClick={() => setModalFilter('fixed')}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                        modalFilter === 'fixed'
+                          ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Fixed ({fixedCount})
+                    </button>
+                  </div>
+
+                  {/* Expand / Collapse All Toggles */}
+                  {fieldKeys.length > 1 && (
+                    <div className="flex items-center gap-1 border-l border-slate-300 dark:border-slate-700 pl-2">
+                      <button
+                        onClick={() => expandAllFields(true)}
+                        className="text-[10.5px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white px-1.5 py-0.5 rounded cursor-pointer"
+                        title="Expand all field groups"
+                      >
+                        Expand All
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-700 text-[10px]">·</span>
+                      <button
+                        onClick={() => expandAllFields(false)}
+                        className="text-[10.5px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white px-1.5 py-0.5 rounded cursor-pointer"
+                        title="Collapse all field groups"
+                      >
+                        Collapse All
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {/* ── Field Grouped Remediation Accordion ── */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50 dark:bg-slate-950">
+                {fieldKeys.map(field => {
+                  const items = groupedByField[field] || [];
+                  const expanded = isFieldExpanded(field);
+
+                  const groupFixedCount = items.filter(w => {
+                    const k = `${w.row}::${w.field}::${w.rule_code}`;
+                    return Boolean(manualFixValues[k] && manualFixValues[k].trim() !== '');
+                  }).length;
+                  const isAllGroupFixed = groupFixedCount === items.length && items.length > 0;
+                  const bulkInputVal = groupBulkInputs[field] ?? '';
+
+                  return (
+                    <div
+                      key={field}
+                      className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden transition-all"
+                    >
+                      {/* ── Field Group Header Bar (Clickable) ── */}
+                      <div
+                        onClick={() => toggleFieldGroup(field)}
+                        className="px-5 py-3.5 bg-slate-100/70 dark:bg-slate-950/70 border-b border-slate-200 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-950 transition-colors select-none"
+                      >
+                        {/* Left: Arrow + Field Name + Count Badges */}
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-transform"
+                          >
+                            {expanded ? (
+                              <ChevronDown className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[13px] font-bold px-2.5 py-0.5 rounded-lg bg-violet-100 dark:bg-violet-950/80 text-violet-800 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 shadow-xs">
+                              {field}
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                              {items.length} {items.length === 1 ? 'issue' : 'issues'}
+                            </span>
+                          </div>
+
+                          <div className="hidden sm:flex items-center gap-1.5 ml-2">
+                            {isAllGroupFixed ? (
+                              <span className="flex items-center gap-1 text-[10.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800 font-mono">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> All {items.length} Fixed
+                              </span>
+                            ) : groupFixedCount > 0 ? (
+                              <span className="text-[10.5px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2.5 py-0.5 rounded-md border border-amber-200 dark:border-amber-800 font-mono">
+                                {groupFixedCount} of {items.length} fixed
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* Right: Quick Bulk Fill Toolbar */}
+                        <div
+                          className="flex items-center gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={bulkInputVal}
+                              onChange={(e) => setGroupBulkInputs(prev => ({ ...prev, [field]: e.target.value }))}
+                              placeholder={`Set all ${field} to...`}
+                              className="px-2.5 py-1 text-[11px] font-mono rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-violet-500 w-44 sm:w-56"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyToAllSameField(field, bulkInputVal);
+                              }}
+                              disabled={!bulkInputVal.trim()}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 hover:bg-violet-100 dark:hover:bg-violet-900/60 border border-violet-200 dark:border-violet-800 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                              title={`Apply "${bulkInputVal}" to all ${items.length} records of ${field}`}
+                            >
+                              <Copy className="w-3 h-3" /> Apply to All ({items.length})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ── Dropdown Issues Content ── */}
+                      {expanded && (
+                        <div className="p-4 space-y-3 bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800/60">
+                          {items.map((warning, i) => {
+                            const key = `${warning.row}::${warning.field}::${warning.rule_code}`;
+                            const val = manualFixValues[key] ?? "";
+                            const rowIndex = warning.row - 1;
+                            const currentVal = (cleanedRows[rowIndex] && cleanedRows[rowIndex][warning.field]) ?? '';
+                            const isFixed = val.trim() !== '';
+
+                            // Primary key preview
+                            const pkVal = cleanedRows[rowIndex]
+                              ? (cleanedRows[rowIndex].KUNNR || cleanedRows[rowIndex].LIFNR || cleanedRows[rowIndex].MATNR || cleanedRows[rowIndex].CUSTOMER_ID || '')
+                              : '';
+
+                            return (
+                              <div
+                                key={key}
+                                className={`p-3.5 rounded-xl border transition-all duration-200 ${
+                                  isFixed
+                                    ? 'bg-emerald-50/20 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-900/60 shadow-xs'
+                                    : 'bg-slate-50/60 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-700'
+                                }`}
+                              >
+                                {/* Item Top Info */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-200/60 dark:border-slate-800/60 mb-2.5">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="px-2 py-0.5 rounded-md font-mono text-[10.5px] font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                      Row #{warning.row}
+                                    </span>
+                                    {pkVal && (
+                                      <span className="px-2 py-0.5 rounded-md font-mono text-[10.5px] font-medium bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                        PK: {pkVal}
+                                      </span>
+                                    )}
+                                    <span className="text-[10.5px] font-mono font-semibold text-slate-500 dark:text-slate-400">
+                                      · {warning.rule_code}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    {isFixed ? (
+                                      <span className="flex items-center gap-1 text-[10.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> Corrected
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800">
+                                        Requires Input
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Content Grid: Invalid Value vs Input */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-start">
+                                  {/* Left: Current Value & Reason */}
+                                  <div className="space-y-1.5">
+                                    <div className="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-400 font-mono">
+                                      <span>Current Invalid Value:</span>
+                                      <span className="font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/50 px-2 py-0.5 rounded border border-red-200 dark:border-red-900/60 line-through">
+                                        {currentVal ? String(currentVal) : '(empty / null)'}
+                                      </span>
+                                    </div>
+                                    <div className="p-2 rounded-lg bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-1.5">
+                                      <ShieldAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                                      <span>{warning.reason || warning.message || 'Validation constraint violated.'}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Right: Remediation Input */}
+                                  <div className="space-y-1">
+                                    <div className="flex items-center justify-between">
+                                      <label className="text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                        Corrected {warning.field} Value
+                                      </label>
+                                    </div>
+                                    <div className="relative">
+                                      <input
+                                        type="text"
+                                        value={val}
+                                        onChange={(e) => setManualFixValues(prev => ({ ...prev, [key]: e.target.value }))}
+                                        placeholder={`Enter clean ${warning.field} value...`}
+                                        className={`w-full px-3 py-1.5 text-[12px] font-mono rounded-lg outline-none transition-all ${
+                                          isFixed
+                                            ? 'bg-emerald-50/30 dark:bg-emerald-950/20 border border-emerald-500 text-slate-900 dark:text-white focus:ring-1 focus:ring-emerald-500'
+                                            : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-1 focus:ring-amber-500 focus:border-amber-500'
+                                        }`}
+                                      />
+                                      {val && (
+                                        <button
+                                          onClick={() => setManualFixValues(prev => ({ ...prev, [key]: '' }))}
+                                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5"
+                                          title="Clear input"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {filteredList.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                      <Check className="w-6 h-6" />
+                    </div>
+                    <div className="font-bold text-[14px] text-slate-900 dark:text-white">
+                      {modalSearch || modalFilter !== 'all' ? 'No matching warning items found' : 'All warnings resolved!'}
+                    </div>
+                    <p className="text-[11.5px] text-slate-500 dark:text-slate-400 max-w-sm">
+                      {modalSearch ? 'Try adjusting your search query or switching filter tabs.' : 'No outstanding manual review items for this dataset.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Modal Footer ── */}
+              <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-[12px] text-slate-600 dark:text-slate-400 font-medium">
+                    {fixedCount > 0 ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                        {fixedCount} of {warningList.length} values ready to apply
+                      </span>
+                    ) : (
+                      <span>Enter corrected values above to proceed</span>
+                    )}
+                  </span>
+                  {fixedCount > 0 && (
+                    <button
+                      onClick={() => setManualFixValues({})}
+                      className="text-[10.5px] font-semibold text-slate-400 hover:text-red-500 underline cursor-pointer"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowFixModal(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={<Save className="w-3.5 h-3.5" />}
+                    onClick={applyManualFixes}
+                    disabled={warningList.length === 0 || fixedCount === 0}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md shadow-emerald-600/20"
+                  >
+                    Apply {fixedCount > 0 ? `${fixedCount} Fix${fixedCount > 1 ? 'es' : ''}` : 'Fixes'} & Update Dataset
+                  </Button>
+                </div>
+              </div>
+
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </PageLayout>
   );
 }

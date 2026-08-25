@@ -100,54 +100,6 @@ CURR_MAP: dict[str, str] = {
     "SGD": "SGD",
 }
 
-PAYMENT_TERM_MAP: dict[str, str] = {
-    "NT30": "NT30",
-    "NET30": "NT30",
-    "NET 30": "NT30",
-    "30 DAYS": "NT30",
-    "30DAYS": "NT30",
-    "NT45": "NT45",
-    "NET45": "NT45",
-    "NET 45": "NT45",
-    "45 DAYS": "NT45",
-    "NT60": "NT60",
-    "NET60": "NT60",
-    "NET 60": "NT60",
-    "60 DAYS": "NT60",
-    "NT15": "NT15",
-    "NET15": "NT15",
-    "NT07": "NT07",
-    "NET7": "NT07",
-    "IMMEDIATE": "NT00",
-    "CASH": "NT00",
-    "COD": "NT00",
-    "DUE ON RECEIPT": "NT00",
-    "2/10 NET30": "2001",
-}
-
-MATERIAL_TYPE_MAP: dict[str, str] = {
-    "ROH": "ROH",
-    "RAW MATERIAL": "ROH",
-    "RAW": "ROH",
-    "RM": "ROH",
-    "HALB": "HALB",
-    "SEMI-FINISHED": "HALB",
-    "SEMI FINISHED": "HALB",
-    "WIP": "HALB",
-    "FERT": "FERT",
-    "FINISHED GOODS": "FERT",
-    "FINISHED": "FERT",
-    "FG": "FERT",
-    "HAWA": "HAWA",
-    "TRADING GOODS": "HAWA",
-    "TRADING": "HAWA",
-    "DIEN": "DIEN",
-    "SERVICE": "DIEN",
-    "HIBE": "HIBE",
-    "OPERATING SUPPLIES": "HIBE",
-    "CONSUMABLE": "HIBE",
-}
-
 FIELD_LENGTHS: dict[str, int] = {
     "KUNNR": 10,
     "LIFNR": 10,
@@ -195,8 +147,6 @@ FIELD_DEFAULTS: dict[str, str] = {}
 
 COUNTRY_FIELD_NAMES = {"LAND1", "COUNTRY", "COUNTRY_CODE", "BANKS"}
 CURRENCY_FIELD_NAMES = {"WAERS", "CURRENCY", "CURRENCY_CODE", "CURR"}
-PAYMENT_TERM_FIELD_NAMES = {"ZTERM", "PAYMENT_TERMS", "PAY_TERMS"}
-MATERIAL_TYPE_FIELD_NAMES = {"MTART", "MATERIAL_TYPE", "MAT_TYPE"}
 CODE_FIELD_NAMES = {
     "KTOKD",
     "KTOKK",
@@ -402,42 +352,6 @@ def _normalize_currency(value: Any) -> str | None:
     return None
 
 
-def _normalize_payment_term(value: Any) -> str | None:
-    raw = _stringify(value).strip().upper()
-    if not raw:
-        return None
-    key = _clean_key(raw)
-    if key in PAYMENT_TERM_MAP:
-        return PAYMENT_TERM_MAP[key]
-    
-    # 1. Already valid SAP term format e.g. NT30, NT45, NT60, NT90
-    if re.fullmatch(r"NT\d{2}", raw):
-        return raw
-
-    # 2. NETXX or NXX e.g. NET30, NET 30, N30, NET90, N90
-    m_net = re.fullmatch(r"(?:NET|N)\s*(\d{1,2})", raw)
-    if m_net:
-        days = m_net.group(1).zfill(2)
-        return f"NT{days}"
-
-    # 3. Pure digits e.g. "90", "0090", "30", "45", "60"
-    digits = re.sub(r"\D", "", raw)
-    if digits:
-        try:
-            val_int = int(digits)
-            if 0 <= val_int <= 99:
-                return f"NT{str(val_int).zfill(2)}"
-        except ValueError:
-            pass
-
-    return None
-
-
-def _normalize_material_type(value: Any) -> str:
-    key = _clean_key(value)
-    return MATERIAL_TYPE_MAP.get(key, key[:4] if key else "ROH")
-
-
 def _normalize_date(value: Any) -> str | None:
     raw = _stringify(value).strip()
     if re.fullmatch(r"\d{8}", raw):
@@ -624,21 +538,6 @@ def fix_field_length(
         _set_value(df, idx, field_name, value[:max_length], summary, "validation", rule_code)
 
 
-def fix_payment_terms_format(
-    df: pd.DataFrame,
-    issue: dict[str, Any],
-    summary: CleaningSummary,
-    rule_code: str,
-) -> None:
-    field_name = issue["field"]
-    idx = _row_index(issue["row"])
-    value = _normalize_payment_term(_get_value(df, idx, field_name))
-    if value is None:
-        _warn_skipped(summary, rule_code, issue["row"], field_name, "payment term value is unsupported")
-        return
-    _set_value(df, idx, field_name, value, summary, "validation", rule_code)
-
-
 # =============================================================================
 # Cleanser Rule Functions
 # =============================================================================
@@ -674,26 +573,6 @@ def apply_currency_to_iso(df: pd.DataFrame, summary: CleaningSummary, rule_code:
                 _set_value(df, idx, field_name, normalized, summary, "cleanser", rule_code)
 
 
-def apply_payment_terms_to_sap(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
-    for field_name in _iter_existing_fields(df, PAYMENT_TERM_FIELD_NAMES):
-        for idx in df.index:
-            value = _get_value(df, idx, field_name)
-            if not _is_empty(value):
-                normalized = _normalize_payment_term(value)
-                if normalized is None:
-                    _warn_skipped(summary, rule_code, idx + 1, field_name, "payment term value is unsupported")
-                    continue
-                _set_value(df, idx, field_name, normalized, summary, "cleanser", rule_code)
-
-
-def apply_material_type_to_sap(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
-    for field_name in _iter_existing_fields(df, MATERIAL_TYPE_FIELD_NAMES):
-        for idx in df.index:
-            value = _get_value(df, idx, field_name)
-            if not _is_empty(value):
-                _set_value(df, idx, field_name, _normalize_material_type(value), summary, "cleanser", rule_code)
-
-
 def apply_pad_numeric_identifier(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
     for field_name in _iter_existing_fields(df, set(IDENTIFIER_LENGTHS)):
         for idx in df.index:
@@ -724,17 +603,6 @@ def apply_clean_tax_number(df: pd.DataFrame, summary: CleaningSummary, rule_code
                 _set_value(df, idx, field_name, cleaned, summary, "cleanser", rule_code)
 
 
-def apply_truncate_overlength(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
-    for field_name in df.columns:
-        max_length = FIELD_LENGTHS.get(_field_key(field_name))
-        if max_length is None:
-            continue
-        for idx in df.index:
-            value = _get_value(df, idx, field_name)
-            if len(value) > max_length:
-                _set_value(df, idx, field_name, value[:max_length], summary, "cleanser", rule_code)
-
-
 def apply_fill_empty_fields(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
     for idx in df.index:
         for field_name in df.columns:
@@ -758,19 +626,15 @@ VALIDATION_FIXERS: dict[str, ValidationFixer] = {
     "VAL_EMAIL_ADDRESS_FORMAT": fix_email_address_format,
     "VAL_DATE_YYYYMMDD_FORMAT": fix_date_yyyymmdd_format,
     "VAL_FIELD_LENGTH": fix_field_length,
-    "VAL_PAYMENT_TERMS_FORMAT": fix_payment_terms_format,
 }
 
 CLEANSER_RULES: list[tuple[str, CleanserRule]] = [
     ("CL_TRIM_WHITESPACE", apply_trim_whitespace),
     ("CL_COUNTRY_TO_ISO", apply_country_to_iso),
     ("CL_CURRENCY_TO_ISO", apply_currency_to_iso),
-    ("CL_PAYMENT_TERMS_TO_SAP", apply_payment_terms_to_sap),
-    ("CL_MATERIAL_TYPE_TO_SAP", apply_material_type_to_sap),
     ("CL_PAD_NUMERIC_IDENTIFIER", apply_pad_numeric_identifier),
     ("CL_UPPERCASE_CODE_FIELDS", apply_uppercase_code_fields),
     ("CL_CLEAN_TAX_NUMBER", apply_clean_tax_number),
-    ("CL_TRUNCATE_OVERLENGTH", apply_truncate_overlength),
     ("CL_FILL_EMPTY_FIELDS", apply_fill_empty_fields),
 ]
 

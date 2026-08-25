@@ -106,28 +106,6 @@ CURR_MAP: dict[str, str] = {
     "SGD": "SGD",
 }
 
-PAYMENT_TERM_MAP: dict[str, str] = {
-    "NT30": "NT30",
-    "NET30": "NT30",
-    "NET 30": "NT30",
-    "NT45": "NT45",
-}
-
-MATERIAL_TYPE_MAP: dict[str, str] = {
-    "ROH": "ROH",
-    "RAW MATERIAL": "ROH",
-    "RAW": "ROH",
-    "HALB": "HALB",
-    "SEMI-FINISHED": "HALB",
-    "SEMI FINISHED": "HALB",
-    "FERT": "FERT",
-    "FINISHED GOODS": "FERT",
-    "FINISHED": "FERT",
-    "HAWA": "HAWA",
-    "TRADING GOODS": "HAWA",
-    "TRADING": "HAWA",
-}
-
 FIELD_LENGTHS: dict[str, int] = {
     "KUNNR": 10,
     "LIFNR": 10,
@@ -175,8 +153,6 @@ FIELD_DEFAULTS: dict[str, str] = {}
 
 COUNTRY_FIELD_NAMES = {"LAND1", "COUNTRY", "COUNTRY_CODE", "BANKS"}
 CURRENCY_FIELD_NAMES = {"WAERS", "CURRENCY", "CURRENCY_CODE", "CURR"}
-PAYMENT_TERM_FIELD_NAMES = {"ZTERM", "PAYMENT_TERMS", "PAY_TERMS"}
-MATERIAL_TYPE_FIELD_NAMES = {"MTART", "MATERIAL_TYPE", "MAT_TYPE"}
 CODE_FIELD_NAMES = {
     "KTOKD",
     "KTOKK",
@@ -301,28 +277,6 @@ CURR_MAP: dict[str, str] = {
     "SGD": "SGD",
 }
 
-PAYMENT_TERM_MAP: dict[str, str] = {
-    "NT30": "NT30",
-    "NET30": "NT30",
-    "NET 30": "NT30",
-    "NT45": "NT45",
-}
-
-MATERIAL_TYPE_MAP: dict[str, str] = {
-    "ROH": "ROH",
-    "RAW MATERIAL": "ROH",
-    "RAW": "ROH",
-    "HALB": "HALB",
-    "SEMI-FINISHED": "HALB",
-    "SEMI FINISHED": "HALB",
-    "FERT": "FERT",
-    "FINISHED GOODS": "FERT",
-    "FINISHED": "FERT",
-    "HAWA": "HAWA",
-    "TRADING GOODS": "HAWA",
-    "TRADING": "HAWA",
-}
-
 FIELD_LENGTHS: dict[str, int] = {
     "KUNNR": 10,
     "LIFNR": 10,
@@ -370,8 +324,6 @@ FIELD_DEFAULTS: dict[str, str] = {}
 
 COUNTRY_FIELD_NAMES = {"LAND1", "COUNTRY", "COUNTRY_CODE", "BANKS"}
 CURRENCY_FIELD_NAMES = {"WAERS", "CURRENCY", "CURRENCY_CODE", "CURR"}
-PAYMENT_TERM_FIELD_NAMES = {"ZTERM", "PAYMENT_TERMS", "PAY_TERMS"}
-MATERIAL_TYPE_FIELD_NAMES = {"MTART", "MATERIAL_TYPE", "MAT_TYPE"}
 CODE_FIELD_NAMES = {
     "KTOKD",
     "KTOKK",
@@ -818,46 +770,6 @@ def _normalize_currency(value: Any) -> str | None:
     return None
 
 
-def _normalize_payment_term(value: Any) -> str | None:
-    raw = _stringify(value).strip().upper()
-    if not raw:
-        return None
-    key = _clean_key(raw)
-    if key in PAYMENT_TERM_MAP:
-        return PAYMENT_TERM_MAP[key]
-    
-    # 1. Already valid SAP term format e.g. NT30, NT45, NT60, NT90
-    if re.fullmatch(r"NT\d{2}", raw):
-        return raw
-
-    # 2. NETXX or NXX e.g. NET30, NET 30, N30, NET90, N90
-    m_net = re.fullmatch(r"(?:NET|N)\s*(\d{1,2})", raw)
-    if m_net:
-        days = m_net.group(1).zfill(2)
-        return f"NT{days}"
-
-    # 3. Pure digits e.g. "90", "0090", "30", "45", "60"
-    digits = re.sub(r"\D", "", raw)
-    if digits:
-        try:
-            val_int = int(digits)
-            if 0 <= val_int <= 99:
-                return f"NT{str(val_int).zfill(2)}"
-        except ValueError:
-            pass
-
-    return None
-
-
-def _normalize_material_type(value: Any) -> str | None:
-    key = _clean_key(value)
-    if key in MATERIAL_TYPE_MAP:
-        return MATERIAL_TYPE_MAP[key]
-    if key in {"ROH", "FERT", "HALB", "HAWA"}:
-        return key
-    return None
-
-
 def _normalize_date(value: Any) -> str | None:
     raw = _stringify(value).strip()
     if re.fullmatch(r"\d{8}", raw):
@@ -1106,22 +1018,6 @@ def fix_field_length(
         _set_value(df, idx, field_name, value[:max_length], summary, "validation", rule_code)
 
 
-def fix_payment_terms_format(
-    df: pd.DataFrame,
-    issue: dict[str, Any],
-    summary: CleaningSummary,
-    rule_code: str,
-) -> None:
-    field_name = issue["field"]
-    idx = issue.get("resolved_row_index") if issue.get("resolved_row_index") is not None else _row_index(issue.get("row", 1))
-    value = _get_value(df, idx, field_name).strip()
-    normalized = _normalize_payment_term(value)
-    if normalized is not None:
-        _set_value(df, idx, field_name, normalized, summary, "validation", rule_code)
-    else:
-        _warn_skipped(summary, rule_code, issue.get("row", idx + 1), field_name, f"payment term value '{value}' cannot be auto-formatted to SAP key")
-
-
 # =============================================================================
 # Cleanser Rule Functions
 # =============================================================================
@@ -1157,30 +1053,6 @@ def apply_currency_to_iso(df: pd.DataFrame, summary: CleaningSummary, rule_code:
                 _set_value(df, idx, field_name, normalized, summary, "cleanser", rule_code)
 
 
-def apply_payment_terms_to_sap(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
-    for field_name in _iter_existing_fields(df, PAYMENT_TERM_FIELD_NAMES):
-        for idx in df.index:
-            value = _get_value(df, idx, field_name)
-            if not _is_empty(value):
-                normalized = _normalize_payment_term(value)
-                if normalized is None:
-                    _warn_skipped(summary, rule_code, idx + 1, field_name, "payment term value is unsupported")
-                    continue
-                _set_value(df, idx, field_name, normalized, summary, "cleanser", rule_code)
-
-
-def apply_material_type_to_sap(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
-    for field_name in _iter_existing_fields(df, MATERIAL_TYPE_FIELD_NAMES):
-        for idx in df.index:
-            value = _get_value(df, idx, field_name)
-            if not _is_empty(value):
-                normalized = _normalize_material_type(value)
-                if normalized is None:
-                    _warn_skipped(summary, rule_code, idx + 1, field_name, "material type value is unsupported")
-                    continue
-                _set_value(df, idx, field_name, normalized, summary, "cleanser", rule_code)
-
-
 def apply_pad_numeric_identifier(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
     for field_name in _iter_existing_fields(df, set(IDENTIFIER_LENGTHS)):
         for idx in df.index:
@@ -1211,17 +1083,6 @@ def apply_clean_tax_number(df: pd.DataFrame, summary: CleaningSummary, rule_code
                 _set_value(df, idx, field_name, cleaned, summary, "cleanser", rule_code)
 
 
-def apply_truncate_overlength(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
-    for field_name in df.columns:
-        max_length = FIELD_LENGTHS.get(_field_key(field_name))
-        if max_length is None:
-            continue
-        for idx in df.index:
-            value = _get_value(df, idx, field_name)
-            if len(value) > max_length:
-                _set_value(df, idx, field_name, value[:max_length], summary, "cleanser", rule_code)
-
-
 def apply_fill_empty_fields(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
     for idx in df.index:
         for field_name in df.columns:
@@ -1245,7 +1106,6 @@ VALIDATION_FIXERS: dict[str, ValidationFixer] = {
     "VAL_EMAIL_ADDRESS_FORMAT": fix_email_address_format,
     "VAL_DATE_YYYYMMDD_FORMAT": fix_date_yyyymmdd_format,
     "VAL_FIELD_LENGTH": fix_field_length,
-    "VAL_PAYMENT_TERMS_FORMAT": fix_payment_terms_format,
 }
 
 # Production Validation rule codes are the source of truth. The VAL_* keys are
@@ -1259,19 +1119,15 @@ VALIDATION_FIXERS.update({
     "EMAIL_FORMAT": fix_email_address_format,
     "DATE_FORMAT": fix_date_yyyymmdd_format,
     "FIELD_LENGTH": fix_field_length,
-    "PAYMENT_TERMS": fix_payment_terms_format,
 })
 
 CLEANSER_RULES: list[tuple[str, CleanserRule]] = [
     ("CL_TRIM_WHITESPACE", apply_trim_whitespace),
     ("CL_COUNTRY_TO_ISO", apply_country_to_iso),
     ("CL_CURRENCY_TO_ISO", apply_currency_to_iso),
-    ("CL_PAYMENT_TERMS_TO_SAP", apply_payment_terms_to_sap),
-    ("CL_MATERIAL_TYPE_TO_SAP", apply_material_type_to_sap),
     ("CL_PAD_NUMERIC_IDENTIFIER", apply_pad_numeric_identifier),
     ("CL_UPPERCASE_CODE_FIELDS", apply_uppercase_code_fields),
     ("CL_CLEAN_TAX_NUMBER", apply_clean_tax_number),
-    ("CL_TRUNCATE_OVERLENGTH", apply_truncate_overlength),
     ("CL_FILL_EMPTY_FIELDS", apply_fill_empty_fields),
 ]
 
@@ -1283,12 +1139,9 @@ CLEANSER_RULES: list[tuple[str, CleanserRule]] = [
 SEMANTIC_CLEANSER_RULE_FIELDS: dict[str, set[str]] = {
     "CL_COUNTRY_TO_ISO": COUNTRY_FIELD_NAMES,
     "CL_CURRENCY_TO_ISO": CURRENCY_FIELD_NAMES,
-    "CL_PAYMENT_TERMS_TO_SAP": PAYMENT_TERM_FIELD_NAMES,
-    "CL_MATERIAL_TYPE_TO_SAP": MATERIAL_TYPE_FIELD_NAMES,
     "CL_PAD_NUMERIC_IDENTIFIER": set(IDENTIFIER_LENGTHS),
     "CL_UPPERCASE_CODE_FIELDS": CODE_FIELD_NAMES,
     "CL_CLEAN_TAX_NUMBER": {"STCD1", "STCD2", "TAX_NUMBER", "PAN", "GST"},
-    "CL_TRUNCATE_OVERLENGTH": set(FIELD_LENGTHS),
 }
 
 
@@ -1664,18 +1517,41 @@ def _extract_dynamic_fixer_code(raw_response: str) -> str:
         raise ValueError("LLM returned an empty response.")
 
     code = ""
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            code = parsed.get("code") or parsed.get("python_code") or parsed.get("fixer_code") or ""
-    except json.JSONDecodeError:
-        fenced = re.search(r"```(?:python)?\s*(.*?)```", raw, re.DOTALL | re.IGNORECASE)
-        code = (fenced.group(1) if fenced else raw).strip()
+
+    # 1. Strip outer markdown code fences if wrapped in ```json or ```
+    fenced_match = re.search(r"```(?:json|python)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
+    unfenced_raw = fenced_match.group(1).strip() if fenced_match else raw
+
+    # 2. Try standard JSON parsing on unfenced_raw and raw
+    for candidate in [unfenced_raw, raw]:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                extracted = parsed.get("code") or parsed.get("python_code") or parsed.get("fixer_code")
+                if extracted and isinstance(extracted, str):
+                    code = extracted.strip()
+                    break
+        except Exception:
+            pass
+
+    # 3. If json.loads failed (e.g. unescaped newlines in JSON string), regex extract "code" field value
+    if not code:
+        code_field_match = re.search(r'["\'](?:code|python_code|fixer_code)["\']\s*:\s*["\']([\s\S]*?)["\']\s*\}?$', unfenced_raw)
+        if code_field_match:
+            code = code_field_match.group(1).strip()
+
+    # 4. If still no code or if code still contains JSON artifacts, directly extract the `def fix_dynamic_rule` block
+    if not code or "def fix_dynamic_rule" not in code:
+        func_match = re.search(r"(def fix_dynamic_rule\s*\(df,\s*issue_rows\):[\s\S]*)", raw)
+        if func_match:
+            code = func_match.group(1).strip()
+            # If there's a trailing quote or brace from JSON wrapper, strip it
+            code = re.sub(r'[\s\'"}\]]+$', '', code).strip()
 
     if not code:
         code = raw
 
-    # Sanitize harmless inline imports (e.g. `import pandas as pd`, `import numpy as np`, `import math`, `import re`)
+    # 5. Sanitize harmless inline imports (e.g. `import pandas as pd`, `import numpy as np`, `import math`, `import re`)
     # since pd, np are already provided in the safe execution globals
     cleaned_lines = []
     for line in code.splitlines():
@@ -1777,20 +1653,19 @@ Return ONLY a JSON object with a string field named "code".
 The code must define exactly:
 def fix_dynamic_rule(df, issue_rows):
 
-CRITICAL DATAFRAME INSTRUCTIONS:
-1. CELL-LEVEL FIXES:
-   - For field-level cleaning (padding, formatting, trimming, casing, value conversion), modify `df` at target column/rows.
+ENTERPRISE DATA PRESERVATION & SAFETY MANDATES:
+1. NEVER CORRUPT OR BLANK OUT MASTER DATA:
+   - Never wipe out, truncate, clear, or blank valid cell data (such as emails, names, addresses, IDs) unless the user rule explicitly specified deleting that data.
+   - If an issue is a domain check or unfixable constraint (e.g., 'All emails must belong to @yash.com', but current values are @example.com), DO NOT invent, hallucinate, or arbitrarily rewrite the email or truncate it. Leave the original data intact so it can be routed to human Manual Review.
+2. SAFE CELL-LEVEL FIXES:
+   - For safe formatting (padding numbers, trimming whitespace, uppercase org codes, standard date conversions, explicit value mapping), modify `df` at target column/rows.
    - You can use 0-indexed `row_index` from `issue_rows` (e.g. `row_idx = int(issue.get('row_index', 0))`) or apply vectorized column operations on `df`.
-2. ROW DELETIONS / EMPTY ROW FILTERING:
-   - If the rule requires deleting, dropping, or filtering records (e.g., 'if all fields are empty delete record', 'drop empty rows', 'remove rows where X'):
-     Note: In this dataset, empty values can be empty strings (''), whitespace, None, or 'nan'.
-     To drop rows where all columns are empty:
-     df = df[~df.astype(str).apply(lambda row: all(str(val).strip() in ('', 'nan', 'None', 'NULL') for val in row), axis=1)].reset_index(drop=True)
-     Or use `df.dropna(how='all')` or boolean indexing for specific conditions.
-3. CONTRACT:
-   Must return the modified DataFrame `df`.
-   You may use `pd` and `np`. Do NOT write 'import pandas' or 'import numpy' inside the function as they are already globally available.
-   Do not import forbidden modules, access files, call shell commands, or access network/database."""
+3. ROW DELETIONS:
+   - ONLY drop rows if the dynamic rule explicitly demanded dropping or deleting records (e.g. 'delete rows where all fields are empty').
+4. CONTRACT:
+   - Must return the modified DataFrame `df`.
+   - You may use `pd` and `np`. Do NOT write 'import pandas' or 'import numpy' inside the function as they are already globally available.
+   - Do not import forbidden modules, access files, call shell commands, or access network/database."""
     user_prompt = json.dumps(payload, indent=2, sort_keys=True)
     return system_prompt, user_prompt
 
@@ -2131,6 +2006,22 @@ def execute_dynamic_fixers(
             print(f"✨ [DYNAMIC FIXER EXECUTION] Cell fixes applied: {group_fixes}")
             if group_fixes > 0:
                 df = after_df.copy(deep=True)
+
+        # If 0 fixes were applied to failing rows, or if the rule requires manual review, auto-route to warnings
+        if group_fixes == 0 and issue_rows:
+            print(f"⚠️ [DYNAMIC FIXER EXECUTION] 0 automated fixes applied for {rule_code}; routing {len(issue_rows)} items to Manual Review")
+            for issue in issue_rows:
+                r_num = issue.get("row_number") or issue.get("row") or 1
+                f_name = issue.get("field_name") or issue.get("field") or field_name
+                val = issue.get("invalid_value")
+                reason = issue.get("reason") or f"Value '{val}' violates dynamic rule '{rule_code}' and requires manual review."
+                summary.warnings.append({
+                    "rule_code": rule_code,
+                    "row": int(r_num),
+                    "field": f_name,
+                    "reason": reason,
+                    "message": reason,
+                })
 
         executed_list.append({
             "group_id": group_id,

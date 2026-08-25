@@ -91,10 +91,6 @@ export function Step5Validate() {
               setSavedDynamicRules(data.rules);
               dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: data.rules });
               setSelectedDynamicRules(Object.fromEntries(data.rules.map((r: any) => [r.id, true])));
-              const loadedPrompts = data.rules.map((r: any) => r.prompt).filter(Boolean);
-              if (loadedPrompts.length > 0) {
-                setCustomPrompts(loadedPrompts);
-              }
             }
           }
         } catch (e) {
@@ -301,12 +297,14 @@ export function Step5Validate() {
     setStandardEditingId(null);
   };
 
-  const deleteDynamicRule = (rid: string) => {
-    setSavedDynamicRules((d) => d.filter((r) => r.id !== rid));
+  const deleteDynamicRule = async (rid: string) => {
+    const updated = savedDynamicRules.filter((r) => r.id !== rid);
+    setSavedDynamicRules(updated);
+    dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: updated });
     setSelectedDynamicRules((d) => {
-      const updated = { ...d };
-      delete updated[rid];
-      return updated;
+      const copy = { ...d };
+      delete copy[rid];
+      return copy;
     });
 
     // If this was an override rule, re-enable the original standard rule
@@ -314,10 +312,23 @@ export function Step5Validate() {
     if (overriddenStandardId) {
       setSelectedRules((s) => ({ ...s, [overriddenStandardId]: true }));
       setStandardRuleOverrides((o) => {
-        const updated = { ...o };
-        delete updated[overriddenStandardId];
-        return updated;
+        const copy = { ...o };
+        delete copy[overriddenStandardId];
+        return copy;
       });
+    }
+
+    // Auto-sync deletion to Supabase
+    if (state.projectId && state.obj) {
+      try {
+        await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: updated, source: 'validate' })
+        });
+      } catch (e) {
+        console.error("Failed to auto-sync rule deletion to DB", e);
+      }
     }
   };
 
@@ -331,7 +342,7 @@ export function Step5Validate() {
       return;
     }
     try {
-      // Compile custom prompts + edited standard rule prompts into executable rules
+      // Compile new custom prompts + edited standard rule prompts into executable rules
       const allPrompts = [
         ...customPrompts,
         ...Object.values(editedStandardRulePrompts)
@@ -349,18 +360,26 @@ export function Step5Validate() {
         compiled = json.rules || [];
       }
 
-      const payloadRules = [
-        ...savedDynamicRules,
-        ...compiled
-      ];
+      // Deduplicate: merge newly compiled rules into existing saved rules without duplicating
+      const existingMap = new Map<string, any>();
+      savedDynamicRules.forEach(r => {
+        const key = (r.prompt || r.label || r.id || '').trim().toLowerCase();
+        existingMap.set(key, r);
+      });
+
+      compiled.forEach(r => {
+        const key = (r.prompt || r.label || r.id || '').trim().toLowerCase();
+        existingMap.set(key, r);
+      });
+
+      const payloadRules = Array.from(existingMap.values());
 
       const res2 = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules })
+        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules, source: 'validate' })
       });
       const resJson = await res2.json().catch(() => (null));
-      console.debug('save rules response:', resJson, 'status', res2.status);
       if (!res2.ok) {
         let msg = 'Failed to save rules';
         try {
@@ -368,11 +387,12 @@ export function Step5Validate() {
         } catch (e) { }
         throw new Error(msg);
       }
-      // update local saved rules state and migration store
-      setSavedDynamicRules(payloadRules || []);
-      dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: payloadRules || [] });
-      const info = resJson ? (resJson.inserted || resJson.message || resJson) : 'Rules saved to project';
-      toast(typeof info === 'string' ? info : 'Rules saved to project', 'ok');
+
+      // Update local saved rules state, clear draft prompts, and update store
+      setSavedDynamicRules(payloadRules);
+      setCustomPrompts([]);
+      dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: payloadRules });
+      toast('Dynamic rules compiled and saved cleanly!', 'ok');
     } catch (err: any) {
       toast(err.message || 'Failed to save rules', 'err');
     }
@@ -960,8 +980,18 @@ export function Step5Validate() {
                           className="w-4 h-4 mt-0.5 cursor-pointer accent-violet-600"
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="text-violet-600 dark:text-violet-400 font-bold text-[10.5px]">{r.label}</div>
+                          <div className="text-violet-600 dark:text-violet-400 font-bold text-[10.5px] flex items-center gap-1.5">
+                            <span>{r.label}</span>
+                            {r.is_ambiguous && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[8px] font-bold tracking-wider uppercase">
+                                ⚠️ Underspecified
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[var(--text-secondary)] text-[10px] mt-0.5">{r.description}</div>
+                          {r.clarification && (
+                            <div className="text-amber-600 dark:text-amber-400 text-[9px] mt-0.5 italic">{r.clarification}</div>
+                          )}
                         </div>
                         <button
                           onClick={() => deleteDynamicRule(r.id)}
