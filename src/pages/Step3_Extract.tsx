@@ -12,7 +12,7 @@ import {
   ArrowLeft, ArrowRight, Zap, Download, ClipboardList,
   UploadCloud, AlertTriangle, Activity, CheckCircle, Save,
   BarChart2, ShieldAlert, Search, FileSpreadsheet, Layers, ChevronDown, ChevronUp,
-  RefreshCw, CheckCircle2, Eye, Filter, X, FileText, AlertCircle, Key
+  RefreshCw, CheckCircle2, Eye, Filter, X, FileText, AlertCircle, Key, Database, Columns3
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -143,7 +143,7 @@ export function Step3Extract() {
 
     dispatch({ type: 'SET_FIELD', field: 'aiReport', value: null });
 
-    if (state.src === 'LIVE_SAP') {
+    if (state.src === 'LIVE_SAP' || state.src === 'SAP_ECC') {
       showLoad('Extracting from SAP…', 'Connecting to live system and generating AI Quality Report', [
         'Connecting source…', 'Running $select query…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
       ]);
@@ -159,6 +159,7 @@ export function Step3Extract() {
             client: state.connClient,
             username: state.connUser,
             password: state.connPass,
+            system_type: state.src || 'SAP_ECC',
             target_object: objName,
             mappings: state.mapping,
           })
@@ -166,7 +167,14 @@ export function Step3Extract() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.detail || 'SAP extraction failed');
+          const errMsg = typeof errData.detail === 'string'
+            ? errData.detail
+            : (Array.isArray(errData.detail)
+                ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
+                : (typeof errData.detail === 'object' && errData.detail !== null
+                    ? JSON.stringify(errData.detail)
+                    : (errData.message || 'SAP extraction failed')));
+          throw new Error(errMsg);
         }
 
         const data = await res.json();
@@ -187,11 +195,36 @@ export function Step3Extract() {
         toast(err.message, 'err');
       }
     } else {
-      const sourceData = (state.rawData && state.rawData.length > 0)
-        ? state.rawData
-        : ((state.uploadedData && state.uploadedData.length > 0)
-            ? state.uploadedData
+      let sourceData = (state.uploadedData && state.uploadedData.length > 0)
+        ? state.uploadedData
+        : ((state.rawData && state.rawData.length > 0)
+            ? state.rawData
             : (state.extracted && state.extracted.length > 0 ? state.extracted : []));
+
+      if (state.src === 'ORACLE_EBS' && sourceData.length <= 10) {
+        try {
+          const oracleRes = await fetch('/Oracle.xlsx');
+          if (oracleRes.ok) {
+            const blob = await oracleRes.blob();
+            const file = new File([blob], 'Oracle.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const formData = new FormData();
+            formData.append('file', file);
+            const upRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, {
+              method: 'POST',
+              body: formData
+            });
+            if (upRes.ok) {
+              const upData = await upRes.json();
+              if (upData.data && upData.data.length > 0) {
+                sourceData = upData.data;
+                dispatch({ type: 'SET_FIELD', field: 'uploadedData', value: upData.data });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not auto-fetch full Oracle dataset, proceeding with existing data', e);
+        }
+      }
 
       if (sourceData.length === 0) {
         toast('No source dataset found. Please upload your files in Step 1 (Source Data) first.', 'err');
@@ -217,7 +250,14 @@ export function Step3Extract() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.detail || 'Extraction failed');
+          const errMsg = typeof errData.detail === 'string'
+            ? errData.detail
+            : (Array.isArray(errData.detail)
+                ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
+                : (typeof errData.detail === 'object' && errData.detail !== null
+                    ? JSON.stringify(errData.detail)
+                    : (errData.message || 'Extraction failed')));
+          throw new Error(errMsg);
         }
 
         const data = await res.json();
@@ -290,7 +330,10 @@ export function Step3Extract() {
 
     // 3. Check if field was configured as primary key in Step 1 joinConfig
     if (state.joinConfig?.base_file) {
-      const baseKeys = (state.joinConfig.joins || []).map(j => (j.base_key || '').toLowerCase());
+      const baseKeys = (state.joinConfig.joins || []).flatMap(j => {
+        const kps = j.key_pairs?.length ? j.key_pairs : (j.base_key ? [{ base_key: j.base_key, join_key: j.join_key }] : []);
+        return kps.map((kp: any) => (kp.base_key || '').toLowerCase());
+      });
       if (baseKeys.some(bk => bk === fLower || bk === shortName)) {
         return true;
       }
@@ -310,38 +353,70 @@ export function Step3Extract() {
     }
     if (!row) return { keyField: 'Row', keyValue: `#${idx + 1}`, label: `Row #${idx + 1}` };
 
-    // 1. Check mapped source key from active database schema
+    // 1. Check mapped source key(s) from active database schema & join config
     const targetObjSchema = OBJS[state.obj];
     const schemaKeyFields = (targetObjSchema?.fields || [])
       .filter(f => f.key)
       .map(f => f.n.toLowerCase());
 
-    const keyMapping = state.mapping.find(m => {
+    const keyMappings = state.mapping.filter(m => {
       const sapLower = (m.sap || '').toLowerCase();
       const sapShort = sapLower.split('.').pop() || sapLower;
       return schemaKeyFields.includes(sapLower) || schemaKeyFields.includes(sapShort);
     });
 
+    const joinBaseKeys = (state.joinConfig?.joins || []).flatMap(j => {
+      const kps = j.key_pairs?.length ? j.key_pairs : (j.base_key ? [{ base_key: j.base_key, join_key: j.join_key }] : []);
+      return kps.map((kp: any) => kp.base_key).filter(Boolean);
+    });
+
     const candidateKeys = [
-      keyMapping?.src,
-      ...(state.joinConfig?.joins || []).map(j => j.base_key),
+      ...keyMappings.map(m => m.src),
+      ...joinBaseKeys,
       ...schemaKeyFields
     ].filter(Boolean);
+
+    // Collect all matched key values from row
+    const foundKeyPairs: { field: string; value: string }[] = [];
+    const usedCands = new Set<string>();
 
     for (const cand of candidateKeys) {
       if (!cand) continue;
       const candLower = cand.toLowerCase();
       const candShort = candLower.split('.').pop() || candLower;
+      if (usedCands.has(candShort)) continue;
+
       for (const k of Object.keys(row)) {
         const kLower = k.toLowerCase();
         const kShort = kLower.split('.').pop() || kLower;
         if (kLower === candLower || kShort === candShort || kLower.endsWith(`.${candShort}`)) {
           const v = String(row[k] ?? '').trim();
           if (v && !['nan', 'none', 'null', '<null / empty>', 'undefined'].includes(v.toLowerCase())) {
-            return { keyField: k, keyValue: v, label: `${k}: ${v}` };
+            foundKeyPairs.push({ field: k, value: v });
+            usedCands.add(candShort);
+            break;
           }
         }
       }
+    }
+
+    if (foundKeyPairs.length > 0) {
+      if (foundKeyPairs.length === 1) {
+        return {
+          keyField: foundKeyPairs[0].field,
+          keyValue: foundKeyPairs[0].value,
+          label: `${foundKeyPairs[0].field}: ${foundKeyPairs[0].value}`
+        };
+      }
+      // Composite key representation
+      const compositeFields = foundKeyPairs.map(kp => kp.field).join(' + ');
+      const compositeValues = foundKeyPairs.map(kp => kp.value).join(' · ');
+      const compositeLabel = foundKeyPairs.map(kp => `${kp.field}: ${kp.value}`).join(' | ');
+      return {
+        keyField: compositeFields,
+        keyValue: compositeValues,
+        label: compositeLabel
+      };
     }
 
     // 2. Fallback to first non-empty column in row
@@ -845,11 +920,28 @@ export function Step3Extract() {
           </PageHeader>
 
           {has && (
-            <StatsGrid>
-              <StatBox value={state.extracted.length} label="Records Extracted" subtitle="Source rows" color="var(--color-primary-500)" />
-              <StatBox value={state.headers.length || Object.keys(state.extracted[0] || {}).length} label="Source Columns" color="var(--color-teal)" />
-              <StatBox value={state.mapping.length} label="Fields Mapped" color="var(--color-success)" />
-              <StatBox value={state.mapping.filter((m) => m.tr && m.tr !== 'none').length} label="Transforms" color="var(--color-warning)" />
+            <StatsGrid cols={3}>
+              <StatBox 
+                value={state.extracted.length} 
+                label="Records Extracted" 
+                subtitle="Source rows" 
+                color="var(--color-primary-500)" 
+                icon={<Database className="w-5 h-5 text-blue-500" />}
+              />
+              <StatBox 
+                value={state.headers.length || Object.keys(state.extracted[0] || {}).length} 
+                label="Source Columns" 
+                subtitle="Schema dimensions"
+                color="var(--color-teal)" 
+                icon={<Columns3 className="w-5 h-5 text-teal-500" />}
+              />
+              <StatBox 
+                value={state.mapping.length} 
+                label="Fields Mapped" 
+                subtitle="Target field mappings"
+                color="var(--color-success)" 
+                icon={<CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+              />
             </StatsGrid>
           )}
 

@@ -26,9 +26,9 @@ class ExtractAgent:
         
         base_url = base_url.rstrip('/')
         if target_object in ['CUSTOMER', 'VENDOR', 'Customer', 'Vendor']:
-            api_path = f"/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_BusinessPartner?$select={select_query}&$top=1000"
+            api_path = f"/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_BusinessPartner?$select={select_query}"
         elif target_object in ['MATERIAL', 'Material']:
-            api_path = f"/sap/opu/odata/sap/API_PRODUCT_SRV/A_Product?$select={select_query}&$top=1000"
+            api_path = f"/sap/opu/odata/sap/API_PRODUCT_SRV/A_Product?$select={select_query}"
         else:
             raise ValueError(f"Unsupported target object: {target_object}")
 
@@ -53,7 +53,20 @@ class ExtractAgent:
             raise Exception(f"Failed to fetch data from SAP: {res.status_code} {res.text[:200]}")
 
         data = res.json()
-        results = data.get("d", {}).get("results", [])
+        results = []
+        if isinstance(data, dict):
+            if "d" in data:
+                d_val = data["d"]
+                if isinstance(d_val, dict) and "results" in d_val:
+                    results = d_val["results"]
+                elif isinstance(d_val, list):
+                    results = d_val
+            elif "value" in data:
+                results = data["value"]
+            elif "results" in data:
+                results = data["results"]
+        elif isinstance(data, list):
+            results = data
 
         # 3. Apply Transformations
         harmonized_results = []
@@ -258,32 +271,44 @@ class ExtractAgent:
             # Collect detailed failing records / sample values for this field
             failing_records = []
 
-            # Dynamically resolve primary key column from active mappings and database schema
-            primary_key_col = None
+            # Dynamically resolve primary key columns from active mappings and database schema
+            primary_key_cols = []
             for m in mappings:
                 sap_val = str(m.get("sap", "")).upper().split(".")[-1]
                 if sap_val in ["KUNNR", "LIFNR", "MATNR", "PARTNER"] or m.get("key") or m.get("is_key"):
-                    primary_key_col = m.get("src")
-                    break
+                    src_col = m.get("src")
+                    if src_col and src_col not in primary_key_cols:
+                        primary_key_cols.append(src_col)
             
             def get_row_identifier(row_dict, row_idx):
-                # 1. First prioritize dynamically mapped schema primary key column
-                if primary_key_col:
-                    pk_str = str(primary_key_col)
+                found_pairs = []
+                for pk_col in primary_key_cols:
+                    pk_str = str(pk_col)
                     pk_short = pk_str.split(".")[-1]
+                    matched = False
                     for k in [pk_str, pk_short]:
                         if k in row_dict:
                             val_str = str(row_dict[k]).strip()
                             if val_str and val_str.lower() not in ['nan', 'none', 'null', '<null / empty>']:
-                                return str(k), val_str
-                    # Case-insensitive lookup
-                    for k, v in row_dict.items():
-                        if str(k).lower() == pk_str.lower() or str(k).lower() == pk_short.lower() or str(k).lower().endswith("." + pk_short.lower()):
-                            val_str = str(v).strip()
-                            if val_str and val_str.lower() not in ['nan', 'none', 'null', '<null / empty>']:
-                                return str(k), val_str
+                                found_pairs.append((str(k), val_str))
+                                matched = True
+                                break
+                    if not matched:
+                        for k, v in row_dict.items():
+                            if str(k).lower() == pk_str.lower() or str(k).lower() == pk_short.lower() or str(k).lower().endswith("." + pk_short.lower()):
+                                val_str = str(v).strip()
+                                if val_str and val_str.lower() not in ['nan', 'none', 'null', '<null / empty>']:
+                                    found_pairs.append((str(k), val_str))
+                                    break
 
-                # 2. Fallback to first non-empty column in row
+                if found_pairs:
+                    if len(found_pairs) == 1:
+                        return found_pairs[0][0], found_pairs[0][1]
+                    comp_fields = " + ".join([p[0] for p in found_pairs])
+                    comp_vals = " · ".join([p[1] for p in found_pairs])
+                    return comp_fields, comp_vals
+
+                # Fallback to first non-empty column in row
                 for k, v in row_dict.items():
                     val_str = str(v).strip()
                     if val_str and val_str.lower() not in ['nan', 'none', 'null', '<null / empty>'] and len(val_str) <= 25:

@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { jsPDF } from 'jspdf';
 import { useMigration } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
@@ -90,6 +91,10 @@ export function Step5Validate() {
               setSavedDynamicRules(data.rules);
               dispatch({ type: 'SET_FIELD', field: 'dynamicRules', value: data.rules });
               setSelectedDynamicRules(Object.fromEntries(data.rules.map((r: any) => [r.id, true])));
+              const loadedPrompts = data.rules.map((r: any) => r.prompt).filter(Boolean);
+              if (loadedPrompts.length > 0) {
+                setCustomPrompts(loadedPrompts);
+              }
             }
           }
         } catch (e) {
@@ -492,6 +497,119 @@ export function Step5Validate() {
     return rows.join('\n');
   }
 
+  const exportToPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      // Palette
+      const primaryColor = [14, 116, 144]; // Deep Teal
+      const darkText = [30, 41, 59];
+      const lightBg = [248, 250, 252];
+
+      // Header Banner
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(0, 0, pageWidth, 28, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(255, 255, 255);
+      doc.text('SAP Migration Studio — Validation Report', 14, 14);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text(`Generated: ${new Date().toLocaleDateString()} | Target Object: ${state.obj} | Rules Executed: ${report.length}`, 14, 22);
+
+      let yPos = 36;
+
+      // Executive Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text(`Data Quality Validation: ${state.obj}`, 14, yPos);
+      yPos += 8;
+
+      // Scorecard Box
+      doc.setFillColor(lightBg[0], lightBg[1], lightBg[2]);
+      doc.roundedRect(14, yPos, pageWidth - 28, 22, 3, 3, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      const totalErrors = report.reduce((sum, r) => sum + r.failCount, 0);
+      const totalChecks = report.reduce((sum, r) => sum + r.totalChecked, 0);
+      const passRate = totalChecks ? (((totalChecks - totalErrors) / totalChecks) * 100).toFixed(1) : 0;
+      
+      doc.text(`Overall Validation Pass Rate: ${passRate}%`, 20, yPos + 9);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Total Rules: ${report.length}  |  Total Checks: ${totalChecks}  |  Total Failures: ${totalErrors}`, 20, yPos + 16);
+
+      yPos += 32;
+
+      // Section 1: Rule Summary
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+      doc.text('1. Rule Execution Summary', 14, yPos);
+      yPos += 8;
+
+      report.forEach(r => {
+        if (yPos > 270) { doc.addPage(); yPos = 20; }
+        
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(darkText[0], darkText[1], darkText[2]);
+        doc.text(`${r.label} ${r.is_dynamic ? '(AI Rule)' : ''}`, 14, yPos);
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(r.failCount > 0 ? 220 : 22, r.failCount > 0 ? 38 : 163, r.failCount > 0 ? 38 : 74);
+        doc.text(`Failures: ${r.failCount} / ${r.totalChecked}`, 140, yPos);
+        yPos += 5;
+        
+        doc.setFontSize(8.5);
+        doc.setTextColor(100, 116, 139);
+        const splitDesc = doc.splitTextToSize(r.description, pageWidth - 28);
+        doc.text(splitDesc, 14, yPos);
+        yPos += (splitDesc.length * 4) + 4;
+
+        if (r.failCount > 0) {
+            yPos += 2;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8);
+            doc.text('Sample Failures:', 14, yPos);
+            yPos += 4;
+            
+            doc.setFont('helvetica', 'normal');
+            r.failures.slice(0, 3).forEach(f => {
+                if (yPos > 280) { doc.addPage(); yPos = 20; }
+                const failText = `• Row ${f.idx}: Field [${f.field}] = "${f.value}" - ${f.message}`;
+                const splitFail = doc.splitTextToSize(failText, pageWidth - 32);
+                doc.text(splitFail, 18, yPos);
+                yPos += (splitFail.length * 4) + 1;
+            });
+            if (r.failures.length > 3) {
+                doc.setTextColor(14, 116, 144);
+                doc.text(`... and ${r.failures.length - 3} more.`, 18, yPos);
+                yPos += 4;
+            }
+            yPos += 4;
+        } else {
+            yPos += 2;
+        }
+      });
+
+      doc.save(`Data_Validation_Report_${state.obj}.pdf`);
+      toast('Validation PDF Report exported successfully!', 'ok');
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      toast('Failed to generate PDF report', 'err');
+    }
+  };
+
   return (
     <PageLayout>
       <PageGrid>
@@ -579,7 +697,8 @@ export function Step5Validate() {
             <Card className="mb-4">
               <CardHeader title="Validation Report — Active Rules" subtitle="Executed Dynamic AI Rules & Standard SAP Rules" icon={<ListChecks className="w-4 h-4" />}>
                 <div className="flex items-center gap-2">
-                  <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>Export Report</Button>
+                  <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3 text-indigo-500" />} onClick={exportToPDF}>Export PDF</Button>
+                  <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expErrors(), 'errors.csv', 'text/csv')}>Export CSV</Button>
                   {selectedRulesReceived && (
                     <div className="text-[12px] text-[var(--text-tertiary)] px-2 py-1 rounded bg-[var(--bg-tertiary)]/60">Received: {selectedRulesReceived.join(', ')}</div>
                   )}
