@@ -79,8 +79,15 @@ async def cleanser_flow(req: FlowRequest):
     res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
     validation_payload = res_val.data[0]["payload"] if res_val.data else []
 
-    # 4. Fetch Dynamic Rules from Supabase (all sources: validate, cleanse, etc.)
-    res_rules = client.table("dynamic_rules").select("payload, source").eq("project_id", req.project_id).eq("object_id", object_id).execute()
+    # 4. Fetch Dynamic Rules from Supabase for Cleanse ONLY (source == 'cleanse')
+    res_rules = (
+        client.table("dynamic_rules")
+        .select("payload, source")
+        .eq("project_id", req.project_id)
+        .eq("object_id", object_id)
+        .eq("source", "cleanse")
+        .execute()
+    )
     all_dynamic_rules = []
     if res_rules.data:
         for row in res_rules.data:

@@ -1,6 +1,7 @@
 -- ==========================================
 -- Drop existing tables to allow clean re-runs
 -- ==========================================
+DROP TABLE IF EXISTS tech_docs CASCADE;
 DROP TABLE IF EXISTS dynamic_rules CASCADE;
 DROP TABLE IF EXISTS transformed_data CASCADE;
 DROP TABLE IF EXISTS cleansed_data CASCADE;
@@ -229,4 +230,34 @@ CREATE TABLE IF NOT EXISTS transformed_data (
 
 ALTER TABLE transformed_data ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Access for transformed_data" ON transformed_data
+    FOR ALL USING (true) WITH CHECK (true);
+
+-- ==========================================
+-- STEP 10: Tech Docs / Consolidated Reports Storage
+-- ==========================================
+
+DROP TABLE IF EXISTS tech_docs CASCADE;
+
+CREATE TABLE IF NOT EXISTS tech_docs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    object_id UUID NOT NULL REFERENCES sap_objects(id) ON DELETE CASCADE,
+    source_id UUID NOT NULL REFERENCES source_systems(id) ON DELETE CASCADE,
+    source TEXT NOT NULL DEFAULT 'ORACLE_EBS',
+    target_object TEXT NOT NULL DEFAULT 'CUSTOMER',
+    project_name TEXT,
+    object_name TEXT,
+    source_name TEXT,
+    report_title TEXT NOT NULL DEFAULT 'Consolidated Master Report',
+    pipeline_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    step_reports JSONB NOT NULL DEFAULT '{}'::jsonb,
+    waterfall_stats JSONB NOT NULL DEFAULT '{}'::jsonb,
+    comparison_stats JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, object_id, source_id)
+);
+
+ALTER TABLE tech_docs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access for tech_docs" ON tech_docs
     FOR ALL USING (true) WITH CHECK (true);

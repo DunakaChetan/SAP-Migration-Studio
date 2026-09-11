@@ -6,10 +6,17 @@ import path from 'path'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    port: 5173,
     watch: {
       ignored: ['**/backend/**']
     },
-    // Proxy removed since we're using VITE_BACKEND_URL
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
   },
   resolve: {
     alias: {

@@ -18,8 +18,8 @@ import { Auth } from '@/pages/Auth';
 import { InsertMapping } from '@/pages/InsertMapping';
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem('access_token');
-  if (!token) return <Navigate to="/auth" replace />;
+  // const token = localStorage.getItem('access_token');
+  // if (!token) return <Navigate to="/auth" replace />;
 
   return (
     <div className="h-full flex overflow-hidden" style={{ background: 'var(--bg)' }}>
@@ -55,6 +55,7 @@ function AppContent() {
             <Route path="/cleanse" element={<Step6Cleanse />} />
             <Route path="/transform" element={<Step7Transform />} />
             <Route path="/export" element={<Step8DMCExport />} />
+            <Route path="/docs/:id" element={<Step9TechDocs />} />
             <Route path="/docs" element={<Step9TechDocs />} />
             <Route path="/insert" element={<InsertMapping />} />
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -1183,6 +1183,10 @@ export function Step4Harmonize() {
 
       hideLoad();
       dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: currentTables });
+      if (result?.final_table && Array.isArray(result.final_table)) {
+        dispatch({ type: 'SET_FIELD', field: 'harmonized', value: result.final_table });
+      }
+      dispatch({ type: 'SET_FIELD', field: 'harmonizationResult', value: result });
       dispatch({ type: 'SET_FIELD', field: 'isHarmonizedSaved', value: true });
       toast('Harmonized data saved to database successfully!', 'ok');
     } catch (err: any) {
@@ -1370,6 +1374,10 @@ export function Step4Harmonize() {
           } else {
             setPreviewData(null);
             setResult(data);
+            if (data.final_table && Array.isArray(data.final_table)) {
+              dispatch({ type: 'SET_FIELD', field: 'harmonized', value: data.final_table });
+            }
+            dispatch({ type: 'SET_FIELD', field: 'harmonizationResult', value: data });
             if (data.tables && data.tables.length > 0 && (!state.extractedTables || state.extractedTables.length === 0)) {
               dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables });
             }

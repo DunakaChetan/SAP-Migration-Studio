@@ -85,21 +85,21 @@ export function Step3Extract() {
           raw_data: state.extracted
         })
       })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data) {
-          dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
-          dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
-          dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
-          if (data.tables && (!state.extractedTables || state.extractedTables.length === 0)) {
-            dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables });
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data) {
+            dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
+            dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
+            dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
+            if (data.tables && (!state.extractedTables || state.extractedTables.length === 0)) {
+              dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables });
+            }
+            if (data.aiAnalysis?.report && !state.aiReport) {
+              dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis.report });
+            }
           }
-          if (data.aiAnalysis?.report && !state.aiReport) {
-            dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis.report });
-          }
-        }
-      })
-      .catch(err => console.error('Failed to auto-hydrate EDA stats:', err));
+        })
+        .catch(err => console.error('Failed to auto-hydrate EDA stats:', err));
     }
   }, [state.extracted, state.edaStats, state.mapping, state.obj, dispatch, state.extractedTables, state.aiReport]);
 
@@ -168,10 +168,10 @@ export function Step3Extract() {
           const errMsg = typeof errData.detail === 'string'
             ? errData.detail
             : (Array.isArray(errData.detail)
-                ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
-                : (typeof errData.detail === 'object' && errData.detail !== null
-                    ? JSON.stringify(errData.detail)
-                    : (errData.message || 'SAP extraction failed')));
+              ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
+              : (typeof errData.detail === 'object' && errData.detail !== null
+                ? JSON.stringify(errData.detail)
+                : (errData.message || 'SAP extraction failed')));
           throw new Error(errMsg);
         }
 
@@ -196,8 +196,8 @@ export function Step3Extract() {
       let sourceData = (state.uploadedData && state.uploadedData.length > 0)
         ? state.uploadedData
         : ((state.rawData && state.rawData.length > 0)
-            ? state.rawData
-            : (state.extracted && state.extracted.length > 0 ? state.extracted : []));
+          ? state.rawData
+          : (state.extracted && state.extracted.length > 0 ? state.extracted : []));
 
       if (state.src === 'ORACLE_EBS' && sourceData.length <= 10) {
         try {
@@ -251,10 +251,10 @@ export function Step3Extract() {
           const errMsg = typeof errData.detail === 'string'
             ? errData.detail
             : (Array.isArray(errData.detail)
-                ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
-                : (typeof errData.detail === 'object' && errData.detail !== null
-                    ? JSON.stringify(errData.detail)
-                    : (errData.message || 'Extraction failed')));
+              ? errData.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join('; ')
+              : (typeof errData.detail === 'object' && errData.detail !== null
+                ? JSON.stringify(errData.detail)
+                : (errData.message || 'Extraction failed')));
           throw new Error(errMsg);
         }
 
@@ -460,7 +460,7 @@ export function Step3Extract() {
     const extractVal = (row: any) => {
       if (!row) return '';
       if (row[col] !== undefined && row[col] !== null) return String(row[col]);
-      
+
       const colShort = col.split('.').pop() || col;
       if (row[colShort] !== undefined && row[colShort] !== null) return String(row[colShort]);
 
@@ -540,7 +540,7 @@ export function Step3Extract() {
             remediation: 'Auto-corrected via TRIM transform in Harmonize step'
           });
         }
-        
+
         // Length > 40 overflow
         if (valStr.length > 40) {
           records.push({
@@ -919,787 +919,787 @@ export function Step3Extract() {
 
           {has && (
             <StatsGrid cols={3}>
-              <StatBox 
-                value={state.extracted.length} 
-                label="Records Extracted" 
-                subtitle="Source rows" 
-                color="var(--color-primary-500)" 
+              <StatBox
+                value={state.extracted.length}
+                label="Records Extracted"
+                subtitle="Source rows"
+                color="var(--color-primary-500)"
                 icon={<Database className="w-5 h-5 text-blue-500" />}
               />
-              <StatBox 
-                value={state.headers.length || Object.keys(state.extracted[0] || {}).length} 
-                label="Source Columns" 
+              <StatBox
+                value={state.headers.length || Object.keys(state.extracted[0] || {}).length}
+                label="Source Columns"
                 subtitle="Schema dimensions"
-                color="var(--color-teal)" 
+                color="var(--color-teal)"
                 icon={<Columns3 className="w-5 h-5 text-teal-500" />}
               />
-              <StatBox 
-                value={state.mapping.length} 
-                label="Fields Mapped" 
+              <StatBox
+                value={state.mapping.length}
+                label="Fields Mapped"
                 subtitle="Target field mappings"
-                color="var(--color-success)" 
+                color="var(--color-success)"
                 icon={<CheckCircle2 className="w-5 h-5 text-emerald-500" />}
               />
             </StatsGrid>
           )}
 
-      {/* ───────────────────────────────────────────────────── */}
-      {/*     DATA QUALITY INTELLIGENCE REPORT (FULL WIDTH)    */}
-      {/* ───────────────────────────────────────────────────── */}
-      {(state.aiReport || edaStats.length > 0) && (
-        <div ref={reportRef} className="mt-8 mb-12 space-y-6">
+          {/* ───────────────────────────────────────────────────── */}
+          {/*     DATA QUALITY INTELLIGENCE REPORT (FULL WIDTH)    */}
+          {/* ───────────────────────────────────────────────────── */}
+          {(state.aiReport || edaStats.length > 0) && (
+            <div ref={reportRef} className="mt-8 mb-12 space-y-6">
 
-          {/* ── Main Executive Container ── */}
-          <div className="bg-[var(--bg-tertiary)]/40 border border-[var(--border)] rounded-2xl p-6 shadow-xl backdrop-blur-sm space-y-6">
+              {/* ── Main Executive Container ── */}
+              <div className="bg-[var(--bg-tertiary)]/40 border border-[var(--border)] rounded-2xl p-6 shadow-xl backdrop-blur-sm space-y-6">
 
-            {/* ── Top Bar Header ── */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[var(--border)]">
-              <div className="flex items-center gap-3.5">
-                <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 shadow-sm shrink-0">
-                  <Activity className="w-6 h-6" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <h2 className="text-xl font-extrabold tracking-tight text-[var(--text-primary)]">
-                      Data Quality Intelligence Report
-                    </h2>
-                    <span className="text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm">
-                      Grade {reportMetrics.grade} · {reportMetrics.score}/100 Score
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)] mt-1 font-medium">
-                    <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5 text-indigo-500" /> Target Object: <strong className="text-[var(--text-primary)]">{state.obj}</strong></span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1"><FileSpreadsheet className="w-3.5 h-3.5 text-teal-500" /> <strong className="text-[var(--text-primary)]">{state.extracted.length || state.rawData.length}</strong> Records Analyzed</span>
-                    <span>•</span>
-                    <span>{reportMetrics.totalFields || edaStats.length} Mapped Fields</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" size="sm" icon={<Download className="w-3.5 h-3.5 text-indigo-500" />} onClick={exportToPDF}>
-                  Export Vector PDF
-                </Button>
-                <Button variant="secondary" size="sm" icon={<Download className="w-3.5 h-3.5 text-teal-500" />} onClick={exportDetailedCSV}>
-                  Export CSV
-                </Button>
-              </div>
-            </div>
-
-            {/* ── Executive Scorecard Cards ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-indigo-500 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Readiness Score</div>
-                  <div className="text-2xl font-black text-indigo-500 font-mono leading-none">{reportMetrics.score}<span className="text-xs font-normal text-[var(--text-tertiary)]"> / 100</span></div>
-                  <div className="text-[10px] text-[var(--text-secondary)] mt-1.5 font-semibold">Grade {reportMetrics.grade} Rating</div>
-                </div>
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 font-black text-base font-mono flex items-center justify-center border border-indigo-500/20">
-                  {reportMetrics.grade}
-                </div>
-              </div>
-
-              <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-emerald-500 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Healthy Fields</div>
-                  <div className="text-2xl font-black text-emerald-500 font-mono leading-none">{reportMetrics.healthy}</div>
-                  <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5">&lt;10% null rate</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-              </div>
-
-              <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-amber-500 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Warning Fields</div>
-                  <div className="text-2xl font-black text-amber-500 font-mono leading-none">{reportMetrics.warning}</div>
-                  <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5">10% – 50% null rate</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
-              </div>
-
-              <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-red-500 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Critical Fields</div>
-                  <div className="text-2xl font-black text-red-500 font-mono leading-none">{reportMetrics.critical}</div>
-                  <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5">&gt;50% null rate</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-red-500/10 text-red-500 border border-red-500/20">
-                  <ShieldAlert className="w-5 h-5" />
-                </div>
-              </div>
-            </div>
-
-            {/* ── Main Visual Analytics & Summary ── */}
-            <div className="flex flex-col lg:flex-row gap-5 items-start">
-
-              {/* LEFT MAIN: Data Table & Scatter Plot */}
-              <div className="flex-1 space-y-4 min-w-0">
-
-                {/* Visual Analytics Container */}
-                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-5 shadow-sm space-y-4">
-
-                  {/* Tab Header Bar */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
-                    <div className="flex items-center gap-2">
-                      <BarChart2 className="w-4 h-4 text-indigo-500" />
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                        Field-Level Analytics & Data Intelligence
-                      </span>
+                {/* ── Top Bar Header ── */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[var(--border)]">
+                  <div className="flex items-center gap-3.5">
+                    <div className="p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 shadow-sm shrink-0">
+                      <Activity className="w-6 h-6" />
                     </div>
-
-                    <div className="flex bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg p-1 gap-1 text-[11px]">
-                      <button
-                        onClick={() => setActiveTab('table')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'table' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                      >
-                        Data Table
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('barcol')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'barcol' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                      >
-                        Field Quality
-                      </button>
-                      <button
-                        onClick={() => setActiveTab('radar')}
-                        className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'radar' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-                      >
-                        Quality Radar
-                      </button>
+                    <div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h2 className="text-xl font-extrabold tracking-tight text-[var(--text-primary)]">
+                          Data Quality Intelligence Report
+                        </h2>
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm">
+                          Grade {reportMetrics.grade} · {reportMetrics.score}/100 Score
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)] mt-1 font-medium">
+                        <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5 text-indigo-500" /> Target Object: <strong className="text-[var(--text-primary)]">{state.obj}</strong></span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1"><FileSpreadsheet className="w-3.5 h-3.5 text-teal-500" /> <strong className="text-[var(--text-primary)]">{state.extracted.length || state.rawData.length}</strong> Records Analyzed</span>
+                        <span>•</span>
+                        <span>{reportMetrics.totalFields || edaStats.length} Mapped Fields</span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Primary Data Table */}
-                  {activeTab === 'table' && (
-                    <div className="space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="relative flex-1 max-w-xs">
-                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[var(--text-tertiary)]" />
-                          <input
-                            type="text"
-                            placeholder="Filter field name..."
-                            value={edaSearch}
-                            onChange={(e) => setEdaSearch(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 rounded-lg text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                          />
-                        </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="secondary" size="sm" icon={<Download className="w-3.5 h-3.5 text-indigo-500" />} onClick={exportToPDF}>
+                      Export Vector PDF
+                    </Button>
+                    <Button variant="secondary" size="sm" icon={<Download className="w-3.5 h-3.5 text-teal-500" />} onClick={exportDetailedCSV}>
+                      Export CSV
+                    </Button>
+                  </div>
+                </div>
+
+                {/* ── Executive Scorecard Cards ── */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-indigo-500 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Readiness Score</div>
+                      <div className="text-2xl font-black text-indigo-500 font-mono leading-none">{reportMetrics.score}<span className="text-xs font-normal text-[var(--text-tertiary)]"> / 100</span></div>
+                      <div className="text-[10px] text-[var(--text-secondary)] mt-1.5 font-semibold">Grade {reportMetrics.grade} Rating</div>
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 font-black text-base font-mono flex items-center justify-center border border-indigo-500/20">
+                      {reportMetrics.grade}
+                    </div>
+                  </div>
+
+                  <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-emerald-500 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Healthy Fields</div>
+                      <div className="text-2xl font-black text-emerald-500 font-mono leading-none">{reportMetrics.healthy}</div>
+                      <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5">&lt;10% null rate</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-amber-500 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Warning Fields</div>
+                      <div className="text-2xl font-black text-amber-500 font-mono leading-none">{reportMetrics.warning}</div>
+                      <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5">10% – 50% null rate</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm border-l-4 border-l-red-500 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] mb-1">Critical Fields</div>
+                      <div className="text-2xl font-black text-red-500 font-mono leading-none">{reportMetrics.critical}</div>
+                      <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5">&gt;50% null rate</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-red-500/10 text-red-500 border border-red-500/20">
+                      <ShieldAlert className="w-5 h-5" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Main Visual Analytics & Summary ── */}
+                <div className="flex flex-col lg:flex-row gap-5 items-start">
+
+                  {/* LEFT MAIN: Data Table & Scatter Plot */}
+                  <div className="flex-1 space-y-4 min-w-0">
+
+                    {/* Visual Analytics Container */}
+                    <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-5 shadow-sm space-y-4">
+
+                      {/* Tab Header Bar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border)]">
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] uppercase font-mono tracking-wider text-[var(--text-tertiary)]">Sort by:</span>
-                          <select
-                            value={edaSort}
-                            onChange={(e: any) => setEdaSort(e.target.value)}
-                            className="text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-md px-2 py-1 text-[var(--text-primary)] outline-none"
-                          >
-                            <option value="default">Default Order</option>
-                            <option value="null_desc">Highest Nulls (Missing)</option>
-                            <option value="anomalies_desc">Highest Anomalies</option>
-                            <option value="name">Alphabetical (A-Z)</option>
-                          </select>
-                          <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono ml-2">
-                            Showing {displayEdaStats.length} of {edaStats.length} fields
+                          <BarChart2 className="w-4 h-4 text-indigo-500" />
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
+                            Field-Level Analytics & Data Intelligence
                           </span>
                         </div>
+
+                        <div className="flex bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg p-1 gap-1 text-[11px]">
+                          <button
+                            onClick={() => setActiveTab('table')}
+                            className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'table' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                          >
+                            Data Table
+                          </button>
+                          <button
+                            onClick={() => setActiveTab('barcol')}
+                            className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'barcol' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                          >
+                            Field Quality
+                          </button>
+                          <button
+                            onClick={() => setActiveTab('radar')}
+                            className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${activeTab === 'radar' ? 'bg-indigo-600 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                          >
+                            Quality Radar
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="overflow-x-auto rounded-lg border border-[var(--border)] max-h-[420px] overflow-y-auto">
-                        <table className="w-full text-left text-[11.5px]">
-                          <thead className="bg-[var(--bg-tertiary)] sticky top-0 border-b border-[var(--border)] text-[var(--text-tertiary)] font-mono uppercase text-[9.5px]">
-                            <tr>
-                              <th className="py-2.5 px-3">Field</th>
-                              <th className="py-2.5 px-3 w-16">Mandatory</th>
-                              <th className="py-2.5 px-3 min-w-[130px]">Populated vs Null</th>
-                              <th className="py-2.5 px-3">Uniques</th>
-                              <th className="py-2.5 px-3 min-w-[160px]">Format Anomalies (Count & Details)</th>
-                              <th className="py-2.5 px-3">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[var(--border)] font-mono">
-                            {displayEdaStats.map((row: any, i: number) => {
-                              const st = row.status || 'HEALTHY';
-                              const bc = st === 'HEALTHY' ? { bg: '#10b98115', txt: '#10b981', brd: '#10b98130' }
-                                : st === 'WARNING' ? { bg: '#f59e0b15', txt: '#f59e0b', brd: '#f59e0b30' }
-                                  : { bg: '#ef444415', txt: '#ef4444', brd: '#ef444430' };
+                      {/* Primary Data Table */}
+                      {activeTab === 'table' && (
+                        <div className="space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="relative flex-1 max-w-xs">
+                              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[var(--text-tertiary)]" />
+                              <input
+                                type="text"
+                                placeholder="Filter field name..."
+                                value={edaSearch}
+                                onChange={(e) => setEdaSearch(e.target.value)}
+                                className="w-full pl-8 pr-3 py-1.5 rounded-lg text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] uppercase font-mono tracking-wider text-[var(--text-tertiary)]">Sort by:</span>
+                              <select
+                                value={edaSort}
+                                onChange={(e: any) => setEdaSort(e.target.value)}
+                                className="text-[11px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-md px-2 py-1 text-[var(--text-primary)] outline-none"
+                              >
+                                <option value="default">Default Order</option>
+                                <option value="null_desc">Highest Nulls (Missing)</option>
+                                <option value="anomalies_desc">Highest Anomalies</option>
+                                <option value="name">Alphabetical (A-Z)</option>
+                              </select>
+                              <span className="text-[10.5px] text-[var(--text-tertiary)] font-mono ml-2">
+                                Showing {displayEdaStats.length} of {edaStats.length} fields
+                              </span>
+                            </div>
+                          </div>
 
-                              const total = state.extracted.length || state.rawData.length || 1;
-                              const popPct = Math.round(((row.populated_count || 0) / total) * 100);
-                              const nullPct = Math.round(((row.null_count || 0) / total) * 100);
-
-                              return (
-                                <tr key={i} className="hover:bg-[var(--bg-tertiary)]/50 transition-colors">
-                                  <td className="py-2 px-3 font-semibold text-[var(--text-primary)] whitespace-nowrap">
-                                    <div className="flex items-center gap-1.5">
-                                      {isKeyField(row.field) && (
-                                        <span className="flex items-center gap-0.5 text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0" title="Key Field / Primary Identifier">
-                                          <Key className="w-2.5 h-2.5" /> KEY
-                                        </span>
-                                      )}
-                                      <span>{row.field}</span>
-                                      {row.is_mandatory && (
-                                        <span className="text-[8.5px] px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 font-bold">REQ</span>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="py-2 px-3">
-                                    {row.is_mandatory ? (
-                                      <span className="text-[10px] text-indigo-500 font-bold">Yes</span>
-                                    ) : (
-                                      <span className="text-[10px] text-[var(--text-tertiary)]">No</span>
-                                    )}
-                                  </td>
-                                  <td className="py-2 px-3">
-                                    <div className="flex flex-col gap-1 w-full max-w-[130px]">
-                                      <div className="flex justify-between text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider">
-                                        <span>{row.populated_count} Pop ({popPct}%)</span>
-                                        <span>{row.null_count} Null</span>
-                                      </div>
-                                      <div className="w-full h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden flex">
-                                        <div className="h-full bg-emerald-500" style={{ width: `${popPct}%` }} />
-                                        <div className="h-full bg-red-500" style={{ width: `${nullPct}%` }} />
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className="py-2 px-3 text-[var(--text-secondary)]">
-                                    <span className="font-semibold">{row.unique_count}</span>
-                                    {row.is_constant && <span className="ml-1 text-[8.5px] text-purple-500 font-bold">(Const)</span>}
-                                  </td>
-                                  <td className="py-2 px-3">
-                                    <div className="flex items-center gap-1.5 flex-wrap max-w-[220px]">
-                                      {row.format_anomaly_count > 0 ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => setInspectingField(row)}
-                                          className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 font-bold px-2 py-0.5 rounded text-[9.5px] border border-amber-500/30 cursor-pointer transition-all hover:scale-105 flex items-center gap-1"
-                                          title="Click to inspect failing records"
-                                        >
-                                          <Eye className="w-2.5 h-2.5" />
-                                          {row.format_anomaly_count} rows
-                                        </button>
-                                      ) : (
-                                        <span className="text-emerald-500 font-semibold text-[9.5px]">0 (Clean)</span>
-                                      )}
-                                      {row.anomalies && row.anomalies.map((a: string, ai: number) => (
-                                        <span 
-                                          key={ai} 
-                                          onClick={() => (row.format_anomaly_count > 0 || (row.is_mandatory && row.null_count > 0)) && setInspectingField(row)}
-                                          className={`bg-[var(--bg-tertiary)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded text-[8.5px] border border-[var(--border)] ${(row.format_anomaly_count > 0 || (row.is_mandatory && row.null_count > 0)) ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
-                                        >
-                                          {a}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </td>
-                                  <td className="py-2 px-3">
-                                    <div className="flex items-center gap-2">
-                                      <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 20, fontWeight: 700, background: bc.bg, color: bc.txt, border: `1px solid ${bc.brd}` }}>
-                                        {st}
-                                      </span>
-                                      {(row.format_anomaly_count > 0 || (row.is_mandatory && row.null_count > 0) || row.status === 'CRITICAL') && (
-                                        <button
-                                          type="button"
-                                          onClick={() => setInspectingField(row)}
-                                          className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all font-semibold cursor-pointer shrink-0"
-                                        >
-                                          Inspect
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
+                          <div className="overflow-x-auto rounded-lg border border-[var(--border)] max-h-[420px] overflow-y-auto">
+                            <table className="w-full text-left text-[11.5px]">
+                              <thead className="bg-[var(--bg-tertiary)] sticky top-0 border-b border-[var(--border)] text-[var(--text-tertiary)] font-mono uppercase text-[9.5px]">
+                                <tr>
+                                  <th className="py-2.5 px-3">Field</th>
+                                  <th className="py-2.5 px-3 w-16">Mandatory</th>
+                                  <th className="py-2.5 px-3 min-w-[130px]">Populated vs Null</th>
+                                  <th className="py-2.5 px-3">Uniques</th>
+                                  <th className="py-2.5 px-3 min-w-[160px]">Format Anomalies (Count & Details)</th>
+                                  <th className="py-2.5 px-3">Status</th>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
+                              </thead>
+                              <tbody className="divide-y divide-[var(--border)] font-mono">
+                                {displayEdaStats.map((row: any, i: number) => {
+                                  const st = row.status || 'HEALTHY';
+                                  const bc = st === 'HEALTHY' ? { bg: '#10b98115', txt: '#10b981', brd: '#10b98130' }
+                                    : st === 'WARNING' ? { bg: '#f59e0b15', txt: '#f59e0b', brd: '#f59e0b30' }
+                                      : { bg: '#ef444415', txt: '#ef4444', brd: '#ef444430' };
 
-                  {/* Chart 1: ECharts Stacked Bar Column — Field Quality Breakdown */}
-                  {activeTab === 'barcol' && (() => {
-                    const total = state.extracted.length || state.rawData.length || 1;
-                    const barFields = [...displayEdaStats].slice(0, 20);
-                    const fieldLabels = barFields.map((f: any) => f.field.length > 18 ? f.field.slice(0, 16) + '…' : f.field);
+                                  const total = state.extracted.length || state.rawData.length || 1;
+                                  const popPct = Math.round(((row.populated_count || 0) / total) * 100);
+                                  const nullPct = Math.round(((row.null_count || 0) / total) * 100);
 
-                    const barOption: any = {
-                      color: ['#10b981', '#ef4444', '#f59e0b'],
-                      tooltip: {
-                        trigger: 'axis',
-                        axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(99,102,241,0.06)' } },
-                        backgroundColor: 'rgba(15,23,42,0.95)',
-                        borderColor: 'rgba(99,102,241,0.3)',
-                        borderWidth: 1,
-                        textStyle: { color: '#e2e8f0', fontSize: 12 },
-                        formatter: (params: any) => {
-                          const idx = params[0]?.dataIndex;
-                          const f = barFields[idx];
-                          if (!f) return '';
-                          const pop = f.populated_count || 0;
-                          const nul = f.null_count || 0;
-                          const ano = f.format_anomaly_count || 0;
-                          const popPct = Math.round((pop / total) * 100);
-                          const nulPct = Math.round((nul / total) * 100);
-                          const anoPct = Math.round((ano / total) * 100);
-                          return `<div style="font-weight:700;margin-bottom:6px;color:#a5b4fc;font-size:13px">${f.field}</div>
+                                  return (
+                                    <tr key={i} className="hover:bg-[var(--bg-tertiary)]/50 transition-colors">
+                                      <td className="py-2 px-3 font-semibold text-[var(--text-primary)] whitespace-nowrap">
+                                        <div className="flex items-center gap-1.5">
+                                          {isKeyField(row.field) && (
+                                            <span className="flex items-center gap-0.5 text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0" title="Key Field / Primary Identifier">
+                                              <Key className="w-2.5 h-2.5" /> KEY
+                                            </span>
+                                          )}
+                                          <span>{row.field}</span>
+                                          {row.is_mandatory && (
+                                            <span className="text-[8.5px] px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 font-bold">REQ</span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        {row.is_mandatory ? (
+                                          <span className="text-[10px] text-indigo-500 font-bold">Yes</span>
+                                        ) : (
+                                          <span className="text-[10px] text-[var(--text-tertiary)]">No</span>
+                                        )}
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <div className="flex flex-col gap-1 w-full max-w-[130px]">
+                                          <div className="flex justify-between text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider">
+                                            <span>{row.populated_count} Pop ({popPct}%)</span>
+                                            <span>{row.null_count} Null</span>
+                                          </div>
+                                          <div className="w-full h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden flex">
+                                            <div className="h-full bg-emerald-500" style={{ width: `${popPct}%` }} />
+                                            <div className="h-full bg-red-500" style={{ width: `${nullPct}%` }} />
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="py-2 px-3 text-[var(--text-secondary)]">
+                                        <span className="font-semibold">{row.unique_count}</span>
+                                        {row.is_constant && <span className="ml-1 text-[8.5px] text-purple-500 font-bold">(Const)</span>}
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <div className="flex items-center gap-1.5 flex-wrap max-w-[220px]">
+                                          {row.format_anomaly_count > 0 ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => setInspectingField(row)}
+                                              className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 font-bold px-2 py-0.5 rounded text-[9.5px] border border-amber-500/30 cursor-pointer transition-all hover:scale-105 flex items-center gap-1"
+                                              title="Click to inspect failing records"
+                                            >
+                                              <Eye className="w-2.5 h-2.5" />
+                                              {row.format_anomaly_count} rows
+                                            </button>
+                                          ) : (
+                                            <span className="text-emerald-500 font-semibold text-[9.5px]">0 (Clean)</span>
+                                          )}
+                                          {row.anomalies && row.anomalies.map((a: string, ai: number) => (
+                                            <span
+                                              key={ai}
+                                              onClick={() => (row.format_anomaly_count > 0 || (row.is_mandatory && row.null_count > 0)) && setInspectingField(row)}
+                                              className={`bg-[var(--bg-tertiary)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded text-[8.5px] border border-[var(--border)] ${(row.format_anomaly_count > 0 || (row.is_mandatory && row.null_count > 0)) ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
+                                            >
+                                              {a}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <div className="flex items-center gap-2">
+                                          <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 20, fontWeight: 700, background: bc.bg, color: bc.txt, border: `1px solid ${bc.brd}` }}>
+                                            {st}
+                                          </span>
+                                          {(row.format_anomaly_count > 0 || (row.is_mandatory && row.null_count > 0) || row.status === 'CRITICAL') && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setInspectingField(row)}
+                                              className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all font-semibold cursor-pointer shrink-0"
+                                            >
+                                              Inspect
+                                            </button>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Chart 1: ECharts Stacked Bar Column — Field Quality Breakdown */}
+                      {activeTab === 'barcol' && (() => {
+                        const total = state.extracted.length || state.rawData.length || 1;
+                        const barFields = [...displayEdaStats].slice(0, 20);
+                        const fieldLabels = barFields.map((f: any) => f.field.length > 18 ? f.field.slice(0, 16) + '…' : f.field);
+
+                        const barOption: any = {
+                          color: ['#10b981', '#ef4444', '#f59e0b'],
+                          tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(99,102,241,0.06)' } },
+                            backgroundColor: 'rgba(15,23,42,0.95)',
+                            borderColor: 'rgba(99,102,241,0.3)',
+                            borderWidth: 1,
+                            textStyle: { color: '#e2e8f0', fontSize: 12 },
+                            formatter: (params: any) => {
+                              const idx = params[0]?.dataIndex;
+                              const f = barFields[idx];
+                              if (!f) return '';
+                              const pop = f.populated_count || 0;
+                              const nul = f.null_count || 0;
+                              const ano = f.format_anomaly_count || 0;
+                              const popPct = Math.round((pop / total) * 100);
+                              const nulPct = Math.round((nul / total) * 100);
+                              const anoPct = Math.round((ano / total) * 100);
+                              return `<div style="font-weight:700;margin-bottom:6px;color:#a5b4fc;font-size:13px">${f.field}</div>
                             <div style="display:flex;align-items:center;gap:6px;margin:3px 0"><span style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block"></span> Populated: <b>${pop.toLocaleString()}</b> (${popPct}%)</div>
                             <div style="display:flex;align-items:center;gap:6px;margin:3px 0"><span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block"></span> Missing: <b>${nul.toLocaleString()}</b> (${nulPct}%)</div>
                             <div style="display:flex;align-items:center;gap:6px;margin:3px 0"><span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span> Anomalies: <b>${ano.toLocaleString()}</b> (${anoPct}%)</div>
                             <div style="margin-top:6px;padding-top:5px;border-top:1px solid rgba(148,163,184,0.2);font-size:11px;color:#94a3b8">Status: <b style="color:${f.status === 'HEALTHY' ? '#10b981' : f.status === 'WARNING' ? '#f59e0b' : '#ef4444'}">${f.status || 'HEALTHY'}</b></div>`;
-                        }
-                      },
-                      legend: {
-                        data: ['Populated', 'Missing (Null)', 'Format Anomalies'],
-                        bottom: 0,
-                        textStyle: { color: '#94a3b8', fontSize: 11 },
-                        itemWidth: 14,
-                        itemHeight: 10,
-                        selectedMode: true
-                      },
-                      grid: {
-                        left: '3%',
-                        right: '4%',
-                        top: 40,
-                        bottom: 50,
-                        containLabel: true
-                      },
-                      xAxis: {
-                        type: 'category',
-                        data: fieldLabels,
-                        axisLabel: {
-                          color: '#94a3b8',
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                          rotate: barFields.length > 10 ? 35 : 0,
-                          interval: 0
-                        },
-                        axisLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
-                        axisTick: { show: false }
-                      },
-                      yAxis: {
-                        type: 'value',
-                        name: 'Record Count',
-                        nameTextStyle: { color: '#64748b', fontSize: 10, fontFamily: 'monospace' },
-                        axisLabel: {
-                          color: '#94a3b8',
-                          fontSize: 10,
-                          formatter: (v: number) => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v
-                        },
-                        axisLine: { show: false },
-                        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.08)', type: 'dashed' } }
-                      },
-                      series: [
-                        {
-                          name: 'Populated',
-                          type: 'bar',
-                          stack: 'quality',
-                          barMaxWidth: 32,
-                          itemStyle: {
-                            borderRadius: [0, 0, 0, 0],
-                            color: {
-                              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                              colorStops: [
-                                { offset: 0, color: '#34d399' },
-                                { offset: 1, color: '#10b981' }
-                              ]
                             }
                           },
-                          emphasis: {
-                            itemStyle: { shadowBlur: 8, shadowColor: 'rgba(16,185,129,0.4)' }
+                          legend: {
+                            data: ['Populated', 'Missing (Null)', 'Format Anomalies'],
+                            bottom: 0,
+                            textStyle: { color: '#94a3b8', fontSize: 11 },
+                            itemWidth: 14,
+                            itemHeight: 10,
+                            selectedMode: true
                           },
-                          data: barFields.map((f: any) => f.populated_count || 0)
-                        },
-                        {
-                          name: 'Missing (Null)',
-                          type: 'bar',
-                          stack: 'quality',
-                          barMaxWidth: 32,
-                          itemStyle: {
-                            borderRadius: [0, 0, 0, 0],
-                            color: {
-                              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                              colorStops: [
-                                { offset: 0, color: '#f87171' },
-                                { offset: 1, color: '#ef4444' }
-                              ]
+                          grid: {
+                            left: '3%',
+                            right: '4%',
+                            top: 40,
+                            bottom: 50,
+                            containLabel: true
+                          },
+                          xAxis: {
+                            type: 'category',
+                            data: fieldLabels,
+                            axisLabel: {
+                              color: '#94a3b8',
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              rotate: barFields.length > 10 ? 35 : 0,
+                              interval: 0
+                            },
+                            axisLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
+                            axisTick: { show: false }
+                          },
+                          yAxis: {
+                            type: 'value',
+                            name: 'Record Count',
+                            nameTextStyle: { color: '#64748b', fontSize: 10, fontFamily: 'monospace' },
+                            axisLabel: {
+                              color: '#94a3b8',
+                              fontSize: 10,
+                              formatter: (v: number) => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v
+                            },
+                            axisLine: { show: false },
+                            splitLine: { lineStyle: { color: 'rgba(148,163,184,0.08)', type: 'dashed' } }
+                          },
+                          series: [
+                            {
+                              name: 'Populated',
+                              type: 'bar',
+                              stack: 'quality',
+                              barMaxWidth: 32,
+                              itemStyle: {
+                                borderRadius: [0, 0, 0, 0],
+                                color: {
+                                  type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                                  colorStops: [
+                                    { offset: 0, color: '#34d399' },
+                                    { offset: 1, color: '#10b981' }
+                                  ]
+                                }
+                              },
+                              emphasis: {
+                                itemStyle: { shadowBlur: 8, shadowColor: 'rgba(16,185,129,0.4)' }
+                              },
+                              data: barFields.map((f: any) => f.populated_count || 0)
+                            },
+                            {
+                              name: 'Missing (Null)',
+                              type: 'bar',
+                              stack: 'quality',
+                              barMaxWidth: 32,
+                              itemStyle: {
+                                borderRadius: [0, 0, 0, 0],
+                                color: {
+                                  type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                                  colorStops: [
+                                    { offset: 0, color: '#f87171' },
+                                    { offset: 1, color: '#ef4444' }
+                                  ]
+                                }
+                              },
+                              emphasis: {
+                                itemStyle: { shadowBlur: 8, shadowColor: 'rgba(239,68,68,0.4)' }
+                              },
+                              data: barFields.map((f: any) => f.null_count || 0)
+                            },
+                            {
+                              name: 'Format Anomalies',
+                              type: 'bar',
+                              stack: 'quality',
+                              barMaxWidth: 32,
+                              itemStyle: {
+                                borderRadius: [4, 4, 0, 0],
+                                color: {
+                                  type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                                  colorStops: [
+                                    { offset: 0, color: '#fbbf24' },
+                                    { offset: 1, color: '#f59e0b' }
+                                  ]
+                                }
+                              },
+                              emphasis: {
+                                itemStyle: { shadowBlur: 8, shadowColor: 'rgba(245,158,11,0.4)' }
+                              },
+                              data: barFields.map((f: any) => f.format_anomaly_count || 0)
                             }
-                          },
-                          emphasis: {
-                            itemStyle: { shadowBlur: 8, shadowColor: 'rgba(239,68,68,0.4)' }
-                          },
-                          data: barFields.map((f: any) => f.null_count || 0)
-                        },
-                        {
-                          name: 'Format Anomalies',
-                          type: 'bar',
-                          stack: 'quality',
-                          barMaxWidth: 32,
-                          itemStyle: {
-                            borderRadius: [4, 4, 0, 0],
-                            color: {
-                              type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                              colorStops: [
-                                { offset: 0, color: '#fbbf24' },
-                                { offset: 1, color: '#f59e0b' }
-                              ]
-                            }
-                          },
-                          emphasis: {
-                            itemStyle: { shadowBlur: 8, shadowColor: 'rgba(245,158,11,0.4)' }
-                          },
-                          data: barFields.map((f: any) => f.format_anomaly_count || 0)
-                        }
-                      ],
-                      dataZoom: [
-                        {
-                          type: 'slider',
-                          show: barFields.length > 12,
-                          xAxisIndex: 0,
-                          bottom: 30,
-                          height: 16,
-                          startValue: 0,
-                          endValue: Math.min(14, barFields.length - 1),
-                          borderColor: 'rgba(148,163,184,0.15)',
-                          backgroundColor: 'rgba(15,23,42,0.3)',
-                          fillerColor: 'rgba(99,102,241,0.15)',
-                          handleStyle: { color: '#6366f1', borderColor: '#818cf8' },
-                          textStyle: { color: '#94a3b8', fontSize: 9 },
-                          dataBackground: {
-                            lineStyle: { color: 'rgba(99,102,241,0.3)' },
-                            areaStyle: { color: 'rgba(99,102,241,0.08)' }
+                          ],
+                          dataZoom: [
+                            {
+                              type: 'slider',
+                              show: barFields.length > 12,
+                              xAxisIndex: 0,
+                              bottom: 30,
+                              height: 16,
+                              startValue: 0,
+                              endValue: Math.min(14, barFields.length - 1),
+                              borderColor: 'rgba(148,163,184,0.15)',
+                              backgroundColor: 'rgba(15,23,42,0.3)',
+                              fillerColor: 'rgba(99,102,241,0.15)',
+                              handleStyle: { color: '#6366f1', borderColor: '#818cf8' },
+                              textStyle: { color: '#94a3b8', fontSize: 9 },
+                              dataBackground: {
+                                lineStyle: { color: 'rgba(99,102,241,0.3)' },
+                                areaStyle: { color: 'rgba(99,102,241,0.08)' }
+                              }
+                            },
+                            { type: 'inside', xAxisIndex: 0 }
+                          ],
+                          toolbox: {
+                            show: true,
+                            right: 12,
+                            top: 4,
+                            feature: {
+                              magicType: { type: ['stack', 'tiled'], title: { stack: 'Stacked', tiled: 'Side by Side' }, iconStyle: { borderColor: '#94a3b8' } },
+                              saveAsImage: { title: 'Save', pixelRatio: 2, iconStyle: { borderColor: '#94a3b8' } },
+                              restore: { title: 'Reset', iconStyle: { borderColor: '#94a3b8' } }
+                            },
+                            iconStyle: { borderColor: '#64748b' }
                           }
-                        },
-                        { type: 'inside', xAxisIndex: 0 }
-                      ],
-                      toolbox: {
-                        show: true,
-                        right: 12,
-                        top: 4,
-                        feature: {
-                          magicType: { type: ['stack', 'tiled'], title: { stack: 'Stacked', tiled: 'Side by Side' }, iconStyle: { borderColor: '#94a3b8' } },
-                          saveAsImage: { title: 'Save', pixelRatio: 2, iconStyle: { borderColor: '#94a3b8' } },
-                          restore: { title: 'Reset', iconStyle: { borderColor: '#94a3b8' } }
-                        },
-                        iconStyle: { borderColor: '#64748b' }
-                      }
-                    };
+                        };
 
-                    return (
-                      <div className="space-y-3">
-                        <div className="text-[11px] text-[var(--text-secondary)]">
-                          Stacked bar breakdown of Populated, Missing, and Anomalies per field. Use the slider to scroll, toggle stacked/side-by-side with the toolbar, and click legend items to show/hide.
-                        </div>
-                        <div style={{ width: '100%', height: 420 }}>
-                          <ReactECharts option={barOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-                        </div>
-                      </div>
-                    );
-                  })()}
+                        return (
+                          <div className="space-y-3">
+                            <div className="text-[11px] text-[var(--text-secondary)]">
+                              Stacked bar breakdown of Populated, Missing, and Anomalies per field. Use the slider to scroll, toggle stacked/side-by-side with the toolbar, and click legend items to show/hide.
+                            </div>
+                            <div style={{ width: '100%', height: 420 }}>
+                              <ReactECharts option={barOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
+                            </div>
+                          </div>
+                        );
+                      })()}
 
-                  {/* Chart 2: ECharts Quality Radar — Multi-dimensional field quality spider */}
-                  {activeTab === 'radar' && (() => {
-                    const total = state.extracted.length || state.rawData.length || 1;
-                    const radarFields = [...edaStats]
-                      .map((f: any) => ({
-                        field: f.field,
-                        populatedPct: Math.round(((f.populated_count || 0) / total) * 100),
-                        uniquePct: Math.round(((f.unique_count || 0) / total) * 100),
-                        anomalyPct: Math.round(((f.format_anomaly_count || 0) / total) * 100),
-                        nullPct: Math.round(((f.null_count || 0) / total) * 100),
-                        status: f.status || 'HEALTHY'
-                      }))
-                      .sort((a, b) => (b.nullPct + b.anomalyPct) - (a.nullPct + a.anomalyPct))
-                      .slice(0, 8);
+                      {/* Chart 2: ECharts Quality Radar — Multi-dimensional field quality spider */}
+                      {activeTab === 'radar' && (() => {
+                        const total = state.extracted.length || state.rawData.length || 1;
+                        const radarFields = [...edaStats]
+                          .map((f: any) => ({
+                            field: f.field,
+                            populatedPct: Math.round(((f.populated_count || 0) / total) * 100),
+                            uniquePct: Math.round(((f.unique_count || 0) / total) * 100),
+                            anomalyPct: Math.round(((f.format_anomaly_count || 0) / total) * 100),
+                            nullPct: Math.round(((f.null_count || 0) / total) * 100),
+                            status: f.status || 'HEALTHY'
+                          }))
+                          .sort((a, b) => (b.nullPct + b.anomalyPct) - (a.nullPct + a.anomalyPct))
+                          .slice(0, 8);
 
-                    const radarOption: any = {
-                      color: ['#6366f1', '#10b981', '#f59e0b', '#ec4899'],
-                      tooltip: {
-                        trigger: 'item',
-                        backgroundColor: 'rgba(15,23,42,0.95)',
-                        borderColor: 'rgba(99,102,241,0.3)',
-                        borderWidth: 1,
-                        textStyle: { color: '#e2e8f0', fontSize: 12 },
-                        formatter: (params: any) => {
-                          const data = params.data;
-                          const indicators = radarFields.map(f => f.field);
-                          let html = `<div style="font-weight:700;margin-bottom:6px;color:#a5b4fc">${params.seriesName}</div>`;
-                          data.value.forEach((v: number, i: number) => {
-                            html += `<div style="display:flex;justify-content:space-between;gap:16px"><span>${indicators[i]}</span><span style="font-weight:600">${v}%</span></div>`;
-                          });
-                          return html;
-                        }
-                      },
-                      legend: {
-                        data: ['Populated %', 'Uniqueness %', 'Null %', 'Anomaly %'],
-                        bottom: 0,
-                        textStyle: { color: '#94a3b8', fontSize: 11 },
-                        itemWidth: 12,
-                        itemHeight: 8,
-                        selectedMode: true
-                      },
-                      radar: {
-                        indicator: radarFields.map(f => ({ name: f.field.length > 16 ? f.field.slice(0, 14) + '…' : f.field, max: 100 })),
-                        center: ['50%', '48%'],
-                        radius: '65%',
-                        axisName: {
-                          color: '#94a3b8',
-                          fontSize: 10,
-                          fontFamily: 'monospace'
-                        },
-                        splitNumber: 5,
-                        splitArea: {
-                          areaStyle: {
-                            color: ['rgba(99,102,241,0.02)', 'rgba(99,102,241,0.04)', 'rgba(99,102,241,0.06)', 'rgba(99,102,241,0.08)', 'rgba(99,102,241,0.10)']
+                        const radarOption: any = {
+                          color: ['#6366f1', '#10b981', '#f59e0b', '#ec4899'],
+                          tooltip: {
+                            trigger: 'item',
+                            backgroundColor: 'rgba(15,23,42,0.95)',
+                            borderColor: 'rgba(99,102,241,0.3)',
+                            borderWidth: 1,
+                            textStyle: { color: '#e2e8f0', fontSize: 12 },
+                            formatter: (params: any) => {
+                              const data = params.data;
+                              const indicators = radarFields.map(f => f.field);
+                              let html = `<div style="font-weight:700;margin-bottom:6px;color:#a5b4fc">${params.seriesName}</div>`;
+                              data.value.forEach((v: number, i: number) => {
+                                html += `<div style="display:flex;justify-content:space-between;gap:16px"><span>${indicators[i]}</span><span style="font-weight:600">${v}%</span></div>`;
+                              });
+                              return html;
+                            }
+                          },
+                          legend: {
+                            data: ['Populated %', 'Uniqueness %', 'Null %', 'Anomaly %'],
+                            bottom: 0,
+                            textStyle: { color: '#94a3b8', fontSize: 11 },
+                            itemWidth: 12,
+                            itemHeight: 8,
+                            selectedMode: true
+                          },
+                          radar: {
+                            indicator: radarFields.map(f => ({ name: f.field.length > 16 ? f.field.slice(0, 14) + '…' : f.field, max: 100 })),
+                            center: ['50%', '48%'],
+                            radius: '65%',
+                            axisName: {
+                              color: '#94a3b8',
+                              fontSize: 10,
+                              fontFamily: 'monospace'
+                            },
+                            splitNumber: 5,
+                            splitArea: {
+                              areaStyle: {
+                                color: ['rgba(99,102,241,0.02)', 'rgba(99,102,241,0.04)', 'rgba(99,102,241,0.06)', 'rgba(99,102,241,0.08)', 'rgba(99,102,241,0.10)']
+                              }
+                            },
+                            axisLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
+                            splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } }
+                          },
+                          series: [{
+                            name: 'Populated %',
+                            type: 'radar',
+                            symbol: 'circle',
+                            symbolSize: 6,
+                            lineStyle: { width: 2 },
+                            areaStyle: { opacity: 0.15 },
+                            emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.3 } },
+                            data: [{ value: radarFields.map(f => f.populatedPct), name: 'Populated %' }]
+                          }, {
+                            name: 'Uniqueness %',
+                            type: 'radar',
+                            symbol: 'circle',
+                            symbolSize: 6,
+                            lineStyle: { width: 2 },
+                            areaStyle: { opacity: 0.15 },
+                            emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.3 } },
+                            data: [{ value: radarFields.map(f => Math.min(f.uniquePct, 100)), name: 'Uniqueness %' }]
+                          }, {
+                            name: 'Null %',
+                            type: 'radar',
+                            symbol: 'diamond',
+                            symbolSize: 6,
+                            lineStyle: { width: 2, type: 'dashed' },
+                            areaStyle: { opacity: 0.08 },
+                            emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.2 } },
+                            data: [{ value: radarFields.map(f => f.nullPct), name: 'Null %' }]
+                          }, {
+                            name: 'Anomaly %',
+                            type: 'radar',
+                            symbol: 'triangle',
+                            symbolSize: 6,
+                            lineStyle: { width: 2, type: 'dotted' },
+                            areaStyle: { opacity: 0.08 },
+                            emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.2 } },
+                            data: [{ value: radarFields.map(f => f.anomalyPct), name: 'Anomaly %' }]
+                          }],
+                          toolbox: {
+                            show: true,
+                            right: 12,
+                            top: 8,
+                            feature: {
+                              saveAsImage: { title: 'Save', pixelRatio: 2, iconStyle: { borderColor: '#94a3b8' } },
+                              restore: { title: 'Reset', iconStyle: { borderColor: '#94a3b8' } }
+                            },
+                            iconStyle: { borderColor: '#64748b' }
                           }
-                        },
-                        axisLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
-                        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } }
-                      },
-                      series: [{
-                        name: 'Populated %',
-                        type: 'radar',
-                        symbol: 'circle',
-                        symbolSize: 6,
-                        lineStyle: { width: 2 },
-                        areaStyle: { opacity: 0.15 },
-                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.3 } },
-                        data: [{ value: radarFields.map(f => f.populatedPct), name: 'Populated %' }]
-                      }, {
-                        name: 'Uniqueness %',
-                        type: 'radar',
-                        symbol: 'circle',
-                        symbolSize: 6,
-                        lineStyle: { width: 2 },
-                        areaStyle: { opacity: 0.15 },
-                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.3 } },
-                        data: [{ value: radarFields.map(f => Math.min(f.uniquePct, 100)), name: 'Uniqueness %' }]
-                      }, {
-                        name: 'Null %',
-                        type: 'radar',
-                        symbol: 'diamond',
-                        symbolSize: 6,
-                        lineStyle: { width: 2, type: 'dashed' },
-                        areaStyle: { opacity: 0.08 },
-                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.2 } },
-                        data: [{ value: radarFields.map(f => f.nullPct), name: 'Null %' }]
-                      }, {
-                        name: 'Anomaly %',
-                        type: 'radar',
-                        symbol: 'triangle',
-                        symbolSize: 6,
-                        lineStyle: { width: 2, type: 'dotted' },
-                        areaStyle: { opacity: 0.08 },
-                        emphasis: { lineStyle: { width: 4 }, areaStyle: { opacity: 0.2 } },
-                        data: [{ value: radarFields.map(f => f.anomalyPct), name: 'Anomaly %' }]
-                      }],
-                      toolbox: {
-                        show: true,
-                        right: 12,
-                        top: 8,
-                        feature: {
-                          saveAsImage: { title: 'Save', pixelRatio: 2, iconStyle: { borderColor: '#94a3b8' } },
-                          restore: { title: 'Reset', iconStyle: { borderColor: '#94a3b8' } }
-                        },
-                        iconStyle: { borderColor: '#64748b' }
-                      }
-                    };
+                        };
 
-                    return (
-                      <div className="space-y-3">
-                        <div className="text-[11px] text-[var(--text-secondary)]">
-                          Multi-dimensional quality spider chart — compare populated%, uniqueness, nulls, and anomalies across top fields. Click legend items to toggle dimensions.
-                        </div>
-                        <div style={{ width: '100%', height: 420 }}>
-                          <ReactECharts option={radarOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
-                        </div>
-                      </div>
-                    );
-                  })()}
+                        return (
+                          <div className="space-y-3">
+                            <div className="text-[11px] text-[var(--text-secondary)]">
+                              Multi-dimensional quality spider chart — compare populated%, uniqueness, nulls, and anomalies across top fields. Click legend items to toggle dimensions.
+                            </div>
+                            <div style={{ width: '100%', height: 420 }}>
+                              <ReactECharts option={radarOption} style={{ height: '100%', width: '100%' }} opts={{ renderer: 'svg' }} />
+                            </div>
+                          </div>
+                        );
+                      })()}
 
-                  {/* End Tabs */}
-                </div>
+                      {/* End Tabs */}
+                    </div>
 
-              </div>
-
-              {/* RIGHT COLUMN: Modern Compliance & Readiness Dashboard */}
-              <div className="w-full lg:w-[320px] flex flex-col gap-4 shrink-0">
-                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between pb-2 border-b border-[var(--border)]">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                      Compliance Health
-                    </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 font-bold border border-indigo-500/20">
-                      S/4HANA
-                    </span>
                   </div>
 
-                  {/* Mandatory Fields Gauge Card */}
-                  {(() => {
-                    const mand = complianceData.find((c: any) => c.name === 'Mandatory') || { Total: 0, Healthy: 0, Critical: 0, Warning: 0 };
-                    const mandPct = mand.Total > 0 ? Math.round((mand.Healthy / mand.Total) * 100) : 100;
-                    return (
-                      <div className="p-3.5 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)] space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-[var(--text-primary)]">Mandatory Fields</span>
-                          <span className={`text-[11px] font-mono font-extrabold ${mand.Critical > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                            {mandPct}% Compliant
-                          </span>
-                        </div>
-
-                        <div className="w-full h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden flex">
-                          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${mandPct}%` }} />
-                          <div className="h-full bg-red-500 transition-all" style={{ width: `${100 - mandPct}%` }} />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
-                          <div className="flex items-center justify-between px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                            <span>Healthy</span>
-                            <strong>{mand.Healthy} / {mand.Total}</strong>
-                          </div>
-                          <div className="flex items-center justify-between px-2 py-1 rounded bg-red-500/10 text-red-500 border border-red-500/20">
-                            <span>Critical</span>
-                            <strong>{mand.Critical}</strong>
-                          </div>
-                        </div>
+                  {/* RIGHT COLUMN: Modern Compliance & Readiness Dashboard */}
+                  <div className="w-full lg:w-[320px] flex flex-col gap-4 shrink-0">
+                    <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-[var(--border)]">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
+                          Compliance Health
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 font-bold border border-indigo-500/20">
+                          S/4HANA
+                        </span>
                       </div>
-                    );
-                  })()}
 
-                  {/* Optional Fields Gauge Card */}
-                  {(() => {
-                    const opt = complianceData.find((c: any) => c.name === 'Optional') || { Total: 0, Healthy: 0, Warning: 0 };
-                    const optPct = opt.Total > 0 ? Math.round((opt.Healthy / opt.Total) * 100) : 100;
-                    return (
-                      <div className="p-3.5 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)] space-y-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-[var(--text-primary)]">Optional Fields</span>
-                          <span className="text-[11px] font-mono font-extrabold text-amber-500">
-                            {optPct}% Populated
-                          </span>
-                        </div>
+                      {/* Mandatory Fields Gauge Card */}
+                      {(() => {
+                        const mand = complianceData.find((c: any) => c.name === 'Mandatory') || { Total: 0, Healthy: 0, Critical: 0, Warning: 0 };
+                        const mandPct = mand.Total > 0 ? Math.round((mand.Healthy / mand.Total) * 100) : 100;
+                        return (
+                          <div className="p-3.5 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)] space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-[var(--text-primary)]">Mandatory Fields</span>
+                              <span className={`text-[11px] font-mono font-extrabold ${mand.Critical > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                                {mandPct}% Compliant
+                              </span>
+                            </div>
 
-                        <div className="w-full h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden flex">
-                          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${optPct}%` }} />
-                          <div className="h-full bg-amber-500 transition-all" style={{ width: `${100 - optPct}%` }} />
-                        </div>
+                            <div className="w-full h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden flex">
+                              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${mandPct}%` }} />
+                              <div className="h-full bg-red-500 transition-all" style={{ width: `${100 - mandPct}%` }} />
+                            </div>
 
-                        <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
-                          <div className="flex items-center justify-between px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                            <span>Healthy</span>
-                            <strong>{opt.Healthy} / {opt.Total}</strong>
+                            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
+                              <div className="flex items-center justify-between px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                <span>Healthy</span>
+                                <strong>{mand.Healthy} / {mand.Total}</strong>
+                              </div>
+                              <div className="flex items-center justify-between px-2 py-1 rounded bg-red-500/10 text-red-500 border border-red-500/20">
+                                <span>Critical</span>
+                                <strong>{mand.Critical}</strong>
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex items-center justify-between px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                            <span>Warnings</span>
-                            <strong>{opt.Warning}</strong>
+                        );
+                      })()}
+
+                      {/* Optional Fields Gauge Card */}
+                      {(() => {
+                        const opt = complianceData.find((c: any) => c.name === 'Optional') || { Total: 0, Healthy: 0, Warning: 0 };
+                        const optPct = opt.Total > 0 ? Math.round((opt.Healthy / opt.Total) * 100) : 100;
+                        return (
+                          <div className="p-3.5 rounded-xl bg-[var(--bg-tertiary)]/50 border border-[var(--border)] space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-[var(--text-primary)]">Optional Fields</span>
+                              <span className="text-[11px] font-mono font-extrabold text-amber-500">
+                                {optPct}% Populated
+                              </span>
+                            </div>
+
+                            <div className="w-full h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden flex">
+                              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${optPct}%` }} />
+                              <div className="h-full bg-amber-500 transition-all" style={{ width: `${100 - optPct}%` }} />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
+                              <div className="flex items-center justify-between px-2 py-1 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                <span>Healthy</span>
+                                <strong>{opt.Healthy} / {opt.Total}</strong>
+                              </div>
+                              <div className="flex items-center justify-between px-2 py-1 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                <span>Warnings</span>
+                                <strong>{opt.Warning}</strong>
+                              </div>
+                            </div>
                           </div>
+                        );
+                      })()}
+
+                      {/* Format Anomalies Global Count */}
+                      <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-500" />
+                          <span className="text-[11px] font-bold text-[var(--text-primary)]">Format Anomalies</span>
                         </div>
+                        <span className="text-xs font-mono font-extrabold text-amber-500">
+                          {reportMetrics.total_anomalies || 0} total
+                        </span>
                       </div>
-                    );
-                  })()}
-
-                  {/* Format Anomalies Global Count */}
-                  <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-500" />
-                      <span className="text-[11px] font-bold text-[var(--text-primary)]">Format Anomalies</span>
                     </div>
-                    <span className="text-xs font-mono font-extrabold text-amber-500">
-                      {reportMetrics.total_anomalies || 0} total
-                    </span>
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* BOTTOM FULL-WIDTH: Exec Summary, Risks, Actions */}
-            <div className="flex flex-col gap-4 mt-5">
+                {/* BOTTOM FULL-WIDTH: Exec Summary, Risks, Actions */}
+                <div className="flex flex-col gap-4 mt-5">
 
-              {/* Executive Summary Card */}
-              <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
-                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)] mb-2.5">
-                  <ClipboardList className="w-4 h-4 text-indigo-500" /> {aiSummary ? 'AI Executive Summary' : 'Executive Summary'}
-                </div>
-                <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
-                  {aiSummary?.executive_summary || aiSummary?.summary || reportMetrics.summary}
-                </p>
-              </div>
-
-              {/* Critical Migration Risks */}
-              {((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length > 0 && (
-                <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 shadow-sm space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-red-500">
-                      <ShieldAlert className="w-4 h-4" /> {aiSummary ? 'AI Assessed Risks' : 'Critical Migration Risks'} ({((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length})
+                  {/* Executive Summary Card */}
+                  <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)] mb-2.5">
+                      <ClipboardList className="w-4 h-4 text-indigo-500" /> {aiSummary ? 'AI Executive Summary' : 'Executive Summary'}
                     </div>
-                    {((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length > 2 && (
-                      <button
-                        onClick={() => setShowAllRisks(!showAllRisks)}
-                        className="flex items-center gap-1 text-[10.5px] font-semibold text-red-500 hover:text-red-400 transition-colors cursor-pointer bg-red-500/10 px-2.5 py-1 rounded-md"
-                      >
-                        {showAllRisks ? (
-                          <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
-                        ) : (
-                          <>Show All <ChevronDown className="w-3.5 h-3.5" /></>
+                    <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                      {aiSummary?.executive_summary || aiSummary?.summary || reportMetrics.summary}
+                    </p>
+                  </div>
+
+                  {/* Critical Migration Risks */}
+                  {((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length > 0 && (
+                    <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-4 shadow-sm space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-red-500">
+                          <ShieldAlert className="w-4 h-4" /> {aiSummary ? 'AI Assessed Risks' : 'Critical Migration Risks'} ({((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length})
+                        </div>
+                        {((aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) || []).length > 2 && (
+                          <button
+                            onClick={() => setShowAllRisks(!showAllRisks)}
+                            className="flex items-center gap-1 text-[10.5px] font-semibold text-red-500 hover:text-red-400 transition-colors cursor-pointer bg-red-500/10 px-2.5 py-1 rounded-md"
+                          >
+                            {showAllRisks ? (
+                              <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
+                            ) : (
+                              <>Show All <ChevronDown className="w-3.5 h-3.5" /></>
+                            )}
+                          </button>
                         )}
-                      </button>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {(showAllRisks ? (aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) : (aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings).slice(0, 2)).map((w: string, i: number) => (
-                      <div key={i} className="flex gap-2 text-[11.5px] text-red-400 leading-snug bg-red-500/5 p-2.5 rounded-lg border border-red-500/10">
-                        <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-                        <span>{w}</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Action Plan & Recommended Fixes */}
-              {(aiSummary?.recommendations || reportMetrics.recommendations || []).length > 0 && (
-                <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
-                      <Zap className="w-4 h-4 text-amber-500" /> {aiSummary ? 'AI Strategic Plan' : 'Action Plan'} ({(aiSummary?.recommendations || reportMetrics.recommendations || []).length})
+                      <div className="space-y-2">
+                        {(showAllRisks ? (aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings) : (aiSummary?.critical_warnings || aiSummary?.warnings || reportMetrics.warnings).slice(0, 2)).map((w: string, i: number) => (
+                          <div key={i} className="flex gap-2 text-[11.5px] text-red-400 leading-snug bg-red-500/5 p-2.5 rounded-lg border border-red-500/10">
+                            <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                            <span>{w}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    {(aiSummary?.recommendations || reportMetrics.recommendations || []).length > 2 && (
-                      <button
-                        onClick={() => setShowAllActions(!showAllActions)}
-                        className="flex items-center gap-1 text-[10.5px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-500 transition-colors cursor-pointer bg-amber-500/10 px-2.5 py-1 rounded-md"
-                      >
-                        {showAllActions ? (
-                          <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
-                        ) : (
-                          <>Show All <ChevronDown className="w-3.5 h-3.5" /></>
+                  )}
+
+                  {/* Action Plan & Recommended Fixes */}
+                  {(aiSummary?.recommendations || reportMetrics.recommendations || []).length > 0 && (
+                    <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-xl p-4 shadow-sm space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--text-primary)]">
+                          <Zap className="w-4 h-4 text-amber-500" /> {aiSummary ? 'AI Strategic Plan' : 'Action Plan'} ({(aiSummary?.recommendations || reportMetrics.recommendations || []).length})
+                        </div>
+                        {(aiSummary?.recommendations || reportMetrics.recommendations || []).length > 2 && (
+                          <button
+                            onClick={() => setShowAllActions(!showAllActions)}
+                            className="flex items-center gap-1 text-[10.5px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-500 transition-colors cursor-pointer bg-amber-500/10 px-2.5 py-1 rounded-md"
+                          >
+                            {showAllActions ? (
+                              <>Show Less <ChevronUp className="w-3.5 h-3.5" /></>
+                            ) : (
+                              <>Show All <ChevronDown className="w-3.5 h-3.5" /></>
+                            )}
+                          </button>
                         )}
-                      </button>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {(showAllActions ? (aiSummary?.recommendations || reportMetrics.recommendations) : (aiSummary?.recommendations || reportMetrics.recommendations).slice(0, 2)).map((r: string, i: number) => (
-                      <div key={i} className="p-2.5 rounded-lg bg-[var(--bg-tertiary)]/60 border border-[var(--border)] text-[10.5px] text-[var(--text-secondary)] flex items-start gap-2">
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                        {r}
                       </div>
-                    ))}
-                  </div>
+                      <div className="space-y-2">
+                        {(showAllActions ? (aiSummary?.recommendations || reportMetrics.recommendations) : (aiSummary?.recommendations || reportMetrics.recommendations).slice(0, 2)).map((r: string, i: number) => (
+                          <div key={i} className="p-2.5 rounded-lg bg-[var(--bg-tertiary)]/60 border border-[var(--border)] text-[10.5px] text-[var(--text-secondary)] flex items-start gap-2">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                            {r}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                 </div>
-              )}
+
+              </div>
 
             </div>
-
-          </div>
-
-        </div>
-      )}
+          )}
           {has ? (
             <div className="space-y-6">
               {/* Table Filter Toolbar */}
               {(() => {
-                const allTables: TableInfo[] = extractedTables.length > 0 
-                  ? extractedTables 
+                const allTables: TableInfo[] = extractedTables.length > 0
+                  ? extractedTables
                   : [{ table_name: 'Extracted Records', columns: Object.keys(state.extracted[0] || {}) }];
                 const visibleTables = allTables.filter((t: any) => selectedTables.has(t.table_name));
                 // Collect all key columns across all tables for filtering
@@ -1749,49 +1749,49 @@ export function Step3Extract() {
 
                     {openPreviewAccordion && (
                       <div className="space-y-4">
-                    <TableFilterToolbar
-                      tables={allTables}
-                      selectedTables={selectedTables}
-                      onSelectedTablesChange={setSelectedTables}
-                      keyFilterValue={keyFilterValue}
-                      onKeyFilterChange={setKeyFilterValue}
-                      keyColumns={allKeyColumns}
-                      accentColor="cyan"
-                    />
-                    {visibleTables.length === 0 ? (
-                      <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
-                        No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                        <TableFilterToolbar
+                          tables={allTables}
+                          selectedTables={selectedTables}
+                          onSelectedTablesChange={setSelectedTables}
+                          keyFilterValue={keyFilterValue}
+                          onKeyFilterChange={setKeyFilterValue}
+                          keyColumns={allKeyColumns}
+                          accentColor="cyan"
+                        />
+                        {visibleTables.length === 0 ? (
+                          <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
+                            No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
+                          </div>
+                        ) : (
+                          visibleTables.map((t: any) => {
+                            const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                            return (
+                              <Card key={t.table_name}>
+                                <CardHeader title={`Extracted Records: ${t.table_name}`}>
+                                  <div className="ml-auto flex items-center gap-2">
+                                    <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
+                                      {tableCols.length} fields · {tableRows.length} rows{keyFilterValue ? ' (filtered)' : ''}
+                                    </span>
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      icon={<Download className="w-3 h-3" />}
+                                      onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
+                                    >
+                                      Export {t.table_name}
+                                    </Button>
+                                  </div>
+                                </CardHeader>
+                                <CardBody>
+                                  <DataTable rows={tableRows} cols={tableCols} keyCols={allKeyColumns} />
+                                </CardBody>
+                              </Card>
+                            );
+                          })
+                        )}
                       </div>
-                    ) : (
-                      visibleTables.map((t: any) => {
-                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
-                        return (
-                          <Card key={t.table_name}>
-                            <CardHeader title={`Extracted Records: ${t.table_name}`}>
-                              <div className="ml-auto flex items-center gap-2">
-                                <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
-                                  {tableCols.length} fields · {tableRows.length} rows{keyFilterValue ? ' (filtered)' : ''}
-                                </span>
-                                <Button 
-                                  variant="secondary" 
-                                  size="sm" 
-                                  icon={<Download className="w-3 h-3" />} 
-                                  onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
-                                >
-                                  Export {t.table_name}
-                                </Button>
-                              </div>
-                            </CardHeader>
-                            <CardBody>
-                              <DataTable rows={tableRows} cols={tableCols} keyCols={allKeyColumns} />
-                            </CardBody>
-                          </Card>
-                        );
-                      })
                     )}
                   </div>
-                )}
-              </div>
                 );
               })()}
             </div>
@@ -1823,7 +1823,7 @@ export function Step3Extract() {
 
         return (
           <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div 
+            <div
               className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden"
               onClick={e => e.stopPropagation()}
             >

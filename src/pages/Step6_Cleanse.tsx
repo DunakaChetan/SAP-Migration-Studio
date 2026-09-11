@@ -104,8 +104,6 @@ const DEFAULT_CLEANSER_DYNAMIC_RULES: DynamicRuleItem[] = [];
 
 const DEFAULT_STANDARD_RULES: StandardRuleState[] = [
   { code: 'CL_TRIM_WHITESPACE', name: 'Trim Whitespace', description: 'Leading/trailing spaces', enabled: true },
-  { code: 'CL_COUNTRY_TO_ISO', name: 'Country→ISO', description: 'Full names to 2-3 char', enabled: true },
-  { code: 'CL_CURRENCY_TO_ISO', name: 'Currency→ISO', description: 'Map to ISO 4217', enabled: true },
   { code: 'CL_PAD_NUMERIC_IDENTIFIER', name: 'Pad Numeric IDs', description: 'KUNNR/LIFNR 10 digits', enabled: true },
   { code: 'CL_UPPERCASE_CODE_FIELDS', name: 'UPPERCASE Codes', description: 'Org & code fields', enabled: true },
   { code: 'CL_CLEAN_TAX_NUMBER', name: 'Clean Tax Numbers', description: 'Remove special chars', enabled: true },
@@ -2099,52 +2097,52 @@ export function Step6Cleanse() {
 
               {openPreviewAccordion && (
                 <div className="space-y-4">
-                    <TableFilterToolbar
-                      tables={allTables}
-                      selectedTables={selectedCleanseTables}
-                      onSelectedTablesChange={setSelectedCleanseTables}
-                      keyFilterValue={cleanseKeyFilter}
-                      onKeyFilterChange={setCleanseKeyFilter}
-                      keyColumns={allKeyColumns}
-                      accentColor="violet"
-                    />
-                    {visibleTables.length === 0 ? (
-                      <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
-                        No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
-                      </div>
-                    ) : (
-                      visibleTables.map((t: any) => {
-                        const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
-                        return (
-                          <div key={t.table_name} className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3 shadow-xs">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-[12px] text-[var(--text-primary)]">{t.table_name}</span>
-                                <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                                  ({tableCols.length} columns · {tableRows.length} rows{cleanseKeyFilter ? ' filtered' : ''})
-                                </span>
-                              </div>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                icon={<Download className="w-3 h-3" />}
-                                onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_cleansed.csv`, 'text/csv')}
-                              >
-                                Export {t.table_name}
-                              </Button>
-                            </div>
-                            <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} keyCols={allKeyColumns} />
-                          </div>
-                          );
-                        })
-                      )}
+                  <TableFilterToolbar
+                    tables={allTables}
+                    selectedTables={selectedCleanseTables}
+                    onSelectedTablesChange={setSelectedCleanseTables}
+                    keyFilterValue={cleanseKeyFilter}
+                    onKeyFilterChange={setCleanseKeyFilter}
+                    keyColumns={allKeyColumns}
+                    accentColor="violet"
+                  />
+                  {visibleTables.length === 0 ? (
+                    <div className="p-8 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 text-gray-500 dark:text-gray-400 text-xs font-medium">
+                      No tables selected. Click <strong>Tables Selected</strong> above to choose tables to view.
                     </div>
+                  ) : (
+                    visibleTables.map((t: any) => {
+                      const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                      return (
+                        <div key={t.table_name} className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-[12px] text-[var(--text-primary)]">{t.table_name}</span>
+                              <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                                ({tableCols.length} columns · {tableRows.length} rows{cleanseKeyFilter ? ' filtered' : ''})
+                              </span>
+                            </div>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon={<Download className="w-3 h-3" />}
+                              onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_cleansed.csv`, 'text/csv')}
+                            >
+                              Export {t.table_name}
+                            </Button>
+                          </div>
+                          <DataTable rows={tableRows.slice(0, 15)} cols={tableCols} keyCols={allKeyColumns} />
+                        </div>
+                      );
+                    })
                   )}
                 </div>
-              );
-              })() : (
-              <EmptyState icon={<Sparkles className="w-10 h-10 text-violet-500" />} message="Run cleansing to auto-fix data issues and view cleansed output" />
-            )}
+              )}
+            </div>
+          );
+        })() : (
+          <EmptyState icon={<Sparkles className="w-10 h-10 text-violet-500" />} message="Run cleansing to auto-fix data issues and view cleansed output" />
+        )}
 
         {/* Status Notes */}
         <Card>
@@ -2325,31 +2323,28 @@ export function Step6Cleanse() {
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setModalFilter('all')}
-                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
-                        modalFilter === 'all'
+                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${modalFilter === 'all'
                           ? 'bg-amber-500 text-white shadow-sm font-bold'
                           : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                      }`}
+                        }`}
                     >
                       All ({warningList.length})
                     </button>
                     <button
                       onClick={() => setModalFilter('unresolved')}
-                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
-                        modalFilter === 'unresolved'
+                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${modalFilter === 'unresolved'
                           ? 'bg-amber-500 text-white shadow-sm font-bold'
                           : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                      }`}
+                        }`}
                     >
                       Unresolved ({unresolvedCount})
                     </button>
                     <button
                       onClick={() => setModalFilter('fixed')}
-                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
-                        modalFilter === 'fixed'
+                      className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${modalFilter === 'fixed'
                           ? 'bg-emerald-600 text-white shadow-sm font-bold'
                           : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                      }`}
+                        }`}
                     >
                       Fixed ({fixedCount})
                     </button>
@@ -2490,11 +2485,10 @@ export function Step6Cleanse() {
                             return (
                               <div
                                 key={key}
-                                className={`p-3.5 rounded-xl border transition-all duration-200 ${
-                                  isFixed
+                                className={`p-3.5 rounded-xl border transition-all duration-200 ${isFixed
                                     ? 'bg-emerald-50/20 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-900/60 shadow-xs'
                                     : 'bg-slate-50/60 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 hover:border-amber-300 dark:hover:border-amber-700'
-                                }`}
+                                  }`}
                               >
                                 {/* Item Top Info */}
                                 <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-200/60 dark:border-slate-800/60 mb-2.5">
@@ -2554,11 +2548,10 @@ export function Step6Cleanse() {
                                         value={val}
                                         onChange={(e) => setManualFixValues(prev => ({ ...prev, [key]: e.target.value }))}
                                         placeholder={`Enter clean ${warning.field} value...`}
-                                        className={`w-full px-3 py-1.5 text-[12px] font-mono rounded-lg outline-none transition-all ${
-                                          isFixed
+                                        className={`w-full px-3 py-1.5 text-[12px] font-mono rounded-lg outline-none transition-all ${isFixed
                                             ? 'bg-emerald-50/30 dark:bg-emerald-950/20 border border-emerald-500 text-slate-900 dark:text-white focus:ring-1 focus:ring-emerald-500'
                                             : 'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-1 focus:ring-amber-500 focus:border-amber-500'
-                                        }`}
+                                          }`}
                                       />
                                       {val && (
                                         <button

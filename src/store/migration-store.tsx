@@ -13,6 +13,7 @@ export interface MappingEntry {
   note: string;
   req: boolean;
   srcType?: string;
+  transform?: string;
 }
 
 export interface ValidationEntry {

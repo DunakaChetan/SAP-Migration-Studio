@@ -3,6 +3,10 @@ from pydantic import BaseModel
 from typing import List, Optional
 from services.supabase_client import supabase_service
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 class CreateProjectRequest(BaseModel):
@@ -16,16 +20,22 @@ class ProjectResponse(BaseModel):
 
 @router.get("/list", response_model=List[ProjectResponse])
 def list_projects():
-    client = supabase_service.get_client()
-    res = client.table("projects").select("id, name, description").order("created_at", desc=True).execute()
+    try:
+        client = supabase_service.get_client()
+        res = client.table("projects").select("id, name, description").order("created_at", desc=True).execute()
+    except Exception as e:
+        logger.warning(f"list_projects encountered issue ({e}), refreshing Supabase client...")
+        client = supabase_service.refresh_client()
+        res = client.table("projects").select("id, name, description").order("created_at", desc=True).execute()
     
     projects = []
-    for r in res.data:
-        projects.append(ProjectResponse(
-            id=r["id"],
-            name=r["name"],
-            description=r.get("description", "")
-        ))
+    if res and res.data:
+        for r in res.data:
+            projects.append(ProjectResponse(
+                id=r["id"],
+                name=r["name"],
+                description=r.get("description", "")
+            ))
     return projects
 
 @router.post("/create", response_model=ProjectResponse)

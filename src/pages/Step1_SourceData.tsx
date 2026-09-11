@@ -9,7 +9,7 @@ import {
   Card, CardHeader, CardBody, Button, InfoBox, Badge, DataTable,
   PageLayout, PageGrid, GridCol, PageHeader, Divider, SidebarItem, Select, ConfirmModal
 } from '@/components/shared';
-import { Zap, ArrowRight, Link2, Database, LayoutTemplate, FileSpreadsheet, Layers, Cloud, HardDrive, Users, Building2, Package, Cable, Settings2, Download, FolderGit2, Plus, Edit3, Save, Trash2, X, GitMerge, FileText, CheckCircle2 } from 'lucide-react';
+import { Zap, ArrowRight, Link2, Database, LayoutTemplate, FileSpreadsheet, Layers, Cloud, HardDrive, Users, Building2, Package, Cable, Settings2, Download, FolderGit2, Plus, Edit3, Save, Trash2, X, GitMerge, FileText, CheckCircle2, RotateCw } from 'lucide-react';
 import { saveStagedFilesToDB, loadStagedFilesFromDB, removeStagedFileFromDB, clearAllStagedFilesFromDB } from '@/lib/file-storage';
 
 const objIcons = {
@@ -45,6 +45,12 @@ export function Step1SourceData() {
   const [isEditing, setIsEditing] = useState(false);
   const [editProjectName, setEditProjectName] = useState('');
   const [editProjectDesc, setEditProjectDesc] = useState('');
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [backendError, setBackendError] = useState<string | null>(null);
+
+  const getBackendUrl = () => {
+    return (import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+  };
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -204,23 +210,57 @@ export function Step1SourceData() {
     });
   }, []);
 
-  const fetchProjects = async () => {
-    try {
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/list`);
-      if (res.ok) {
-        const data = await res.json();
-        setProjects(data);
+  const fetchProjects = async (retries = 3) => {
+    setIsLoadingProjects(true);
+    setBackendError(null);
+    const backendUrl = getBackendUrl();
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${backendUrl}/api/sap/projects/list`, {
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          setProjects(data);
+          setIsLoadingProjects(false);
+          setBackendError(null);
+          // Auto-select latest project if none selected or current is invalid
+          if (data && data.length > 0) {
+            const hasCurrent = data.some((p: any) => p.id === state.projectId);
+            if (!state.projectId || !hasCurrent) {
+              const defaultProj = data[0];
+              dispatch({
+                type: 'BATCH_UPDATE',
+                updates: { projectId: defaultProj.id, projectName: defaultProj.name }
+              });
+            }
+          }
+          return;
+        } else {
+          throw new Error(`HTTP ${res.status}`);
+        }
+      } catch (err: any) {
+        console.warn(`Attempt ${attempt} to fetch projects failed:`, err);
+        if (attempt < retries) {
+          await new Promise(r => setTimeout(r, 600 * attempt));
+        } else {
+          setBackendError('Backend connection issue. Click refresh to retry.');
+        }
       }
-    } catch (err) {
-      console.error(err);
     }
+    setIsLoadingProjects(false);
   };
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
     setIsCreating(true);
+    const backendUrl = getBackendUrl();
     try {
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/create`, {
+      const res = await fetch(`${backendUrl}/api/sap/projects/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newProjectName, description: newProjectDesc })
@@ -238,7 +278,7 @@ export function Step1SourceData() {
     } catch (err: any) {
       toast(err.message, 'err');
     } finally {
-      setIsFetchingSample(false);
+      setIsCreating(false);
     }
   };
 
@@ -646,8 +686,9 @@ export function Step1SourceData() {
 
   const handleUpdateProject = async () => {
     if (!state.projectId || !editProjectName.trim()) return;
+    const backendUrl = getBackendUrl();
     try {
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/update/${state.projectId}`, {
+      const res = await fetch(`${backendUrl}/api/sap/projects/update/${state.projectId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editProjectName, description: editProjectDesc })
@@ -683,8 +724,9 @@ export function Step1SourceData() {
 
   const handleDeleteProject = async () => {
     if (!state.projectId) return;
+    const backendUrl = getBackendUrl();
     try {
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/projects/delete/${state.projectId}`, {
+      const res = await fetch(`${backendUrl}/api/sap/projects/delete/${state.projectId}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -1348,7 +1390,21 @@ export function Step1SourceData() {
                   />
                 </div>
                 <div>
-                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5 block">Select Existing Project</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] block">
+                      Select Existing Project
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => fetchProjects(2)}
+                      disabled={isLoadingProjects}
+                      title="Refresh project list from backend"
+                      className="inline-flex items-center gap-1 text-[11px] text-primary-500 hover:text-primary-600 disabled:opacity-50 transition-colors cursor-pointer"
+                    >
+                      <RotateCw className={`w-3 h-3 ${isLoadingProjects ? 'animate-spin' : ''}`} />
+                      <span>{isLoadingProjects ? 'Connecting...' : 'Refresh'}</span>
+                    </button>
+                  </div>
                   <div className="flex gap-2">
                     <div className="flex-1">
                       <Select
@@ -1359,12 +1415,14 @@ export function Step1SourceData() {
                           setIsEditing(false);
                         }}
                         options={
-                          projects.length === 0
-                            ? [{ value: '', label: 'No projects found (Create one below)' }]
-                            : [
-                              { value: '', label: '— Select a project —' },
-                              ...projects.map(p => ({ value: p.id, label: p.name }))
-                            ]
+                          isLoadingProjects
+                            ? [{ value: '', label: 'Connecting to backend & loading projects...' }]
+                            : projects.length === 0
+                              ? [{ value: '', label: backendError ? 'Backend unavailable — click Refresh' : 'No projects found (Create one below)' }]
+                              : [
+                                  { value: '', label: '— Select a project —' },
+                                  ...projects.map(p => ({ value: p.id, label: p.name }))
+                                ]
                         }
                       />
                     </div>
@@ -1447,7 +1505,7 @@ export function Step1SourceData() {
 
           {has && (
             <Card>
-              <CardHeader title="Source Data Preview" subtitle={`${state.src} → ${OBJS[state.obj]?.label} | ${state.headers.length} columns`}>
+              <CardHeader title="Source Data Preview" subtitle={`${state.src}${state.src === 'ORACLE_EBS' && state.obj === 'CUSTOMER' ? ' (HZ_PARTIES)' : ''} → ${OBJS[state.obj]?.label} | ${state.headers.length} columns`}>
                 <Badge variant="neutral">Showing 10 of {state.rawData.length} records</Badge>
                 <Button variant="secondary" size="sm" icon={<Download className="w-3.5 h-3.5" />} onClick={() => {
                   import('@/lib/utils').then(({ expCSV, dl }) => {

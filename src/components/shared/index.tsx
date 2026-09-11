@@ -1,7 +1,7 @@
 import React, { type ReactNode, useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Check, Key } from 'lucide-react';
+import { ChevronDown, Check, Key, Pencil } from 'lucide-react';
 
 /* ── Card ── */
 interface CardProps {
@@ -194,7 +194,15 @@ export function CodeBlock({ children, className }: { children: ReactNode; classN
 }
 
 /* ── DataTable ── */
-export function DataTable({ rows, cols, keyCols }: { rows: Record<string, unknown>[]; cols: string[]; keyCols?: string[] }) {
+export interface DataTableProps {
+  rows: Record<string, unknown>[];
+  cols: string[];
+  keyCols?: string[];
+  editable?: boolean;
+  onColumnEdit?: (col: string) => void;
+}
+
+export function DataTable({ rows, cols, keyCols, editable, onColumnEdit }: DataTableProps) {
   if (!rows?.length) return <div className="py-6 text-center text-[var(--text-tertiary)] text-sm">No data</div>;
   const c = cols.length ? cols : Object.keys(rows[0] || {});
 
@@ -272,13 +280,28 @@ export function DataTable({ rows, cols, keyCols }: { rows: Record<string, unknow
                   title={col !== label ? col : undefined}
                   className="px-3.5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border)] sticky top-0 z-10"
                 >
-                  <div className="flex items-center gap-1.5">
-                    {keyCol && (
-                      <span className="flex items-center gap-0.5 text-[8.5px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30" title="Key Field / Identifier">
-                        <Key className="w-2.5 h-2.5" />
-                      </span>
+                  <div className="flex items-center justify-between gap-1.5 w-full">
+                    <div className="flex items-center gap-1.5">
+                      {keyCol && (
+                        <span className="flex items-center gap-0.5 text-[8.5px] px-1 py-0.2 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30" title="Key Field / Identifier">
+                          <Key className="w-2.5 h-2.5" />
+                        </span>
+                      )}
+                      <span>{label}</span>
+                    </div>
+                    {editable && onColumnEdit && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onColumnEdit(col);
+                        }}
+                        title={`Transform column ${col}`}
+                        className="p-1 rounded bg-violet-50 dark:bg-violet-950/50 hover:bg-violet-100 dark:hover:bg-violet-900/70 text-violet-600 dark:text-violet-300 transition-all cursor-pointer shrink-0 border border-violet-200/70 dark:border-violet-800/50 ml-1.5"
+                      >
+                        <Pencil className="w-2.5 h-2.5" />
+                      </button>
                     )}
-                    <span>{label}</span>
                   </div>
                 </th>
               );
@@ -601,3 +624,6 @@ export function ConfirmModal({
     </AnimatePresence>
   );
 }
+
+export { DynamicTransformModal } from './DynamicTransformModal';
+export type { DynamicTransformModalProps } from './DynamicTransformModal';

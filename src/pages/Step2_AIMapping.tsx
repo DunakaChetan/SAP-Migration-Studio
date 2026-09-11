@@ -21,8 +21,9 @@ export function Step2AIMapping() {
   const [sourceSearch, setSourceSearch] = useState('');
   const [targetSearch, setTargetSearch] = useState('');
   const [mappingSearch, setMappingSearch] = useState('');
-  const [editingMapSrc, setEditingMapSrc] = useState<{ index: number, value: string } | null>(null);
+  const [editingMapping, setEditingMapping] = useState<{ index: number, field: 'src' | 'sap', value: string } | null>(null);
   const [stagedMaps, setStagedMaps] = useState<{ src: string, sap: string }[]>([]);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
 
   const [sapFields, setSapFields] = useState<any[]>([]);
@@ -83,26 +84,99 @@ export function Step2AIMapping() {
     fetchSchema();
   }, [state.obj, state.src]);
 
-  const handleSaveMapSrcEdit = (index: number, oldName: string) => {
-    if (!editingMapSrc || !editingMapSrc.value.trim() || editingMapSrc.value === oldName) {
-      setEditingMapSrc(null);
+  const handleSaveMappingEdit = (index: number, oldName: string, field: 'src' | 'sap', newName: string) => {
+    if (!newName.trim() || newName === oldName) {
+      setEditingMapping(null);
       dispatch({ type: 'SET_FIELD', field: 'isMappingSaved', value: false });
       return;
     }
-    const newName = editingMapSrc.value.trim();
 
-    // Update all mappings that used the old name
     const newMappings = state.mapping.map(m =>
-      m.src === oldName ? { ...m, src: newName } : m
+      m[field] === oldName ? { ...m, [field]: newName } : m
     );
     dispatch({ type: 'SET_FIELD', field: 'mapping', value: newMappings });
     dispatch({ type: 'SET_FIELD', field: 'isMappingSaved', value: false });
 
-    // Synchronize with the Source Fields list on the left
-    const newHeaders = state.headers.map(h => h === oldName ? newName : h);
-    dispatch({ type: 'SET_FIELD', field: 'headers', value: newHeaders });
+    // Synchronize with the Source Fields list on the left if src was edited
+    if (field === 'src') {
+      const newHeaders = state.headers.map(h => h === oldName ? newName : h);
+      if (!newHeaders.includes(newName)) {
+        newHeaders.push(newName);
+      }
+      dispatch({ type: 'SET_FIELD', field: 'headers', value: Array.from(new Set(newHeaders)) });
+    }
 
-    setEditingMapSrc(null);
+    setEditingMapping(null);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(line => line.trim());
+      if (lines.length < 2) {
+        toast('Uploaded file is empty or invalid', 'err');
+        return;
+      }
+
+      // Parse headers
+      const parseCSVLine = (str: string) => {
+        let inQuotes = false, token = '', tokens = [];
+        for (let i = 0; i < str.length; i++) {
+          if (str[i] === '"') inQuotes = !inQuotes;
+          else if (str[i] === ',' && !inQuotes) { tokens.push(token.trim()); token = ''; }
+          else token += str[i];
+        }
+        tokens.push(token.trim());
+        return tokens.map(t => t.replace(/^"|"$/g, ''));
+      };
+
+      const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase());
+      const srcIdx = headers.findIndex(h => h === 'src' || h === 'source field');
+      const sapIdx = headers.findIndex(h => h === 'sap' || h === 'sap field');
+      const trIdx = headers.findIndex(h => h === 'tr' || h === 'transform');
+      const confIdx = headers.findIndex(h => h === 'conf' || h === 'confidence');
+      const reqIdx = headers.findIndex(h => h === 'req' || h === 'required');
+      const sapLabelIdx = headers.findIndex(h => h === 'saplabel' || h === 'label');
+      const noteIdx = headers.findIndex(h => h === 'note');
+
+      if (srcIdx === -1 || sapIdx === -1) {
+        toast('CSV must contain "src" and "sap" columns (or "Source Field" / "SAP Field")', 'err');
+        return;
+      }
+
+      const newMappings: MappingEntry[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const row = parseCSVLine(lines[i]);
+        if (row.length < 2) continue; // Skip malformed rows
+
+        const src = row[srcIdx] || '';
+        const sap = row[sapIdx] || '';
+        const tr = trIdx !== -1 ? row[trIdx] || 'none' : 'none';
+        const conf = confIdx !== -1 ? parseInt(row[confIdx], 10) || 100 : 100;
+        const reqStr = reqIdx !== -1 ? row[reqIdx].toLowerCase() : 'false';
+        const req = reqStr === 'true' || reqStr === 'yes';
+        const sapLabel = sapLabelIdx !== -1 ? row[sapLabelIdx] : '';
+        const note = noteIdx !== -1 ? row[noteIdx] : 'Uploaded';
+
+        if (src || sap) {
+          newMappings.push({ src, sap, tr, conf, req, sapLabel, note });
+        }
+      }
+
+      dispatch({ type: 'SET_FIELD', field: 'mapping', value: newMappings });
+      dispatch({ type: 'SET_FIELD', field: 'isMappingSaved', value: false });
+      toast(`Successfully loaded ${newMappings.length} mappings from CSV!`, 'ok');
+
+      // Clear the file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   const removeMap = (sap: string) => {
@@ -204,6 +278,8 @@ export function Step2AIMapping() {
 
   // Calculate unmapped source fields instead of target fields
   const unmappedSource = unmappedSourceList.length;
+
+  const hasErrors = state.mapping.some(m => !state.headers.includes(m.src) || !sapFields.some(f => f.field_name === m.sap));
 
   // -- Auto map fallback (same as original)
   function autoMap(): MappingEntry[] {
@@ -401,10 +477,14 @@ export function Step2AIMapping() {
             <div title={state.headers.length === 0 ? "You must load Source Fields in Step 1 before generating an AI Mapping." : ""}>
               <Button variant="cyan" icon={<Bot className="w-3.5 h-3.5" />} onClick={doAIMap} disabled={state.headers.length === 0}>Generate AI Mapping</Button>
             </div>
-            <div title={!state.mapping.length ? "Generate an AI Mapping first before saving." : ""}>
-              <Button variant="secondary" icon={<Save className="w-3.5 h-3.5" />} onClick={saveMappings} disabled={!state.mapping.length}>Save Mappings</Button>
+            <div title={hasErrors ? "Fix mapping field errors to save." : !state.mapping.length ? "Generate an AI Mapping first before saving." : ""}>
+              <Button variant="secondary" icon={<Save className="w-3.5 h-3.5" />} onClick={saveMappings} disabled={!state.mapping.length || hasErrors}>Save Mappings</Button>
             </div>
             <Button variant="secondary" icon={<Download className="w-3.5 h-3.5" />} onClick={loadMappings}>Load Mappings</Button>
+            <div>
+              <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+              <Button variant="secondary" icon={<Download className="w-3.5 h-3.5 rotate-180" />} onClick={() => fileInputRef.current?.click()}>Upload Mapping</Button>
+            </div>
             <div title={!state.isMappingSaved ? "You must save your mappings before extracting." : ""}>
               <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/extract')} disabled={!state.isMappingSaved}>Next: Extract</Button>
             </div>
@@ -455,39 +535,67 @@ export function Step2AIMapping() {
                         if (a.req === b.req) return 0;
                         return a.req ? -1 : 1;
                       }).map((m, i) => {
+                        const isSrcValid = state.headers.includes(m.src);
+                        const isSapValid = sapFields.some(f => f.field_name === m.sap);
+
                         const c = m.conf || 0;
                         const cc = c >= 80 ? '#10b981' : c >= 60 ? '#f59e0b' : '#ef4444'; // emerald-500, amber-500, red-500
                         const borderCls = c >= 80 ? 'border-emerald-200 dark:border-emerald-800/30' : c >= 60 ? 'border-amber-200 dark:border-amber-800/30' : 'border-red-200 dark:border-red-800/30';
+
                         return (
-                          <div key={i} className={cn('grid grid-cols-[1fr_30px_1fr_70px_140px_28px] gap-2 items-center px-3 py-2 rounded-xl border bg-[var(--bg-tertiary)]/30 group', borderCls)}>
+                          <div key={i} className={cn('grid grid-cols-[1fr_30px_1fr_70px_140px_28px] gap-2 items-center px-3 py-2 rounded-xl border bg-[var(--bg-tertiary)]/30 group', borderCls, { 'border-red-500/50 bg-red-500/5': !isSrcValid || !isSapValid })}>
+
+                            {/* Source Field Column */}
                             <div className="min-w-0">
-                              {editingMapSrc?.index === state.mapping.indexOf(m) ? (
-                                <input
-                                  type="text"
-                                  autoFocus
-                                  value={editingMapSrc.value}
-                                  onChange={e => setEditingMapSrc({ ...editingMapSrc, value: e.target.value })}
-                                  onBlur={() => handleSaveMapSrcEdit(state.mapping.indexOf(m), m.src)}
-                                  onKeyDown={e => { if (e.key === 'Enter') handleSaveMapSrcEdit(state.mapping.indexOf(m), m.src); if (e.key === 'Escape') setEditingMapSrc(null); }}
-                                  className="bg-[var(--bg)] border border-primary-500 rounded px-1 py-0.5 outline-none w-full text-[11px] font-mono text-[var(--text-primary)]"
+                              {editingMapping?.index === state.mapping.indexOf(m) && editingMapping.field === 'src' ? (
+                                <Select
+                                  size="sm"
+                                  searchable
+                                  value={editingMapping.value}
+                                  onChange={val => {
+                                    handleSaveMappingEdit(state.mapping.indexOf(m), m.src, 'src', val);
+                                  }}
+                                  options={[{ value: '', label: 'Select Source...' }, ...state.headers.map(s => ({ value: s, label: s }))]}
                                 />
                               ) : (
                                 <div className="flex items-center min-w-0">
-                                  <div className="font-mono text-[11px] text-primary-600 dark:text-primary-400 truncate">{m.src || <i className="text-[var(--text-tertiary)]">—</i>}</div>
-                                  <button onClick={() => setEditingMapSrc({ index: state.mapping.indexOf(m), value: m.src })} className="opacity-0 group-hover:opacity-100 ml-1 p-1 shrink-0 text-[var(--text-tertiary)] hover:text-primary-500 transition-opacity">
+                                  <div className={cn("font-mono text-[11px] truncate", isSrcValid ? "text-primary-600 dark:text-primary-400" : "text-red-600 dark:text-red-400 font-bold")}>
+                                    {m.src || <i className="text-[var(--text-tertiary)]">—</i>}
+                                  </div>
+                                  <button onClick={() => setEditingMapping({ index: state.mapping.indexOf(m), field: 'src', value: m.src })} className="opacity-0 group-hover:opacity-100 ml-1 p-1 shrink-0 text-[var(--text-tertiary)] hover:text-primary-500 transition-opacity">
                                     <Edit3 className="w-3 h-3" />
                                   </button>
                                 </div>
                               )}
-                              <div className="text-[9.5px] text-[var(--text-tertiary)] truncate">{m.srcType || 'source'}</div>
+                              <div className="text-[9.5px] text-[var(--text-tertiary)] truncate">{!isSrcValid && m.src ? 'Invalid Source Field' : m.srcType || 'source'}</div>
                             </div>
+
                             <div className="text-center text-[var(--text-tertiary)]">→</div>
-                            <div>
-                              <div className="font-mono text-[11px] text-teal-600 dark:text-teal-400 flex items-center gap-1.5">
-                                {m.sap}
-                                {m.req && <Badge variant="red" className="text-[8px] px-1 font-bold">M</Badge>}
-                              </div>
-                              <div className="text-[9.5px] text-[var(--text-tertiary)]">{m.sapLabel}</div>
+
+                            {/* SAP Target Column */}
+                            <div className="min-w-0">
+                              {editingMapping?.index === state.mapping.indexOf(m) && editingMapping.field === 'sap' ? (
+                                <Select
+                                  size="sm"
+                                  searchable
+                                  value={editingMapping.value}
+                                  onChange={val => {
+                                    handleSaveMappingEdit(state.mapping.indexOf(m), m.sap, 'sap', val);
+                                  }}
+                                  options={[{ value: '', label: 'Select SAP Field...' }, ...sapFields.map(s => ({ value: s.field_name, label: s.field_name }))]}
+                                />
+                              ) : (
+                                <div className="flex items-center min-w-0">
+                                  <div className={cn("font-mono text-[11px] flex items-center gap-1.5 truncate", isSapValid ? "text-teal-600 dark:text-teal-400" : "text-red-600 dark:text-red-400 font-bold")}>
+                                    {m.sap}
+                                    {m.req && <Badge variant="red" className="text-[8px] px-1 font-bold shrink-0">M</Badge>}
+                                  </div>
+                                  <button onClick={() => setEditingMapping({ index: state.mapping.indexOf(m), field: 'sap', value: m.sap })} className="opacity-0 group-hover:opacity-100 ml-1 p-1 shrink-0 text-[var(--text-tertiary)] hover:text-primary-500 transition-opacity">
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                              <div className="text-[9.5px] text-[var(--text-tertiary)] truncate">{!isSapValid && m.sap ? 'Invalid SAP Field' : m.sapLabel}</div>
                             </div>
                             <div>
                               <div className="flex items-center gap-1.5">

@@ -32,5 +32,6 @@ backend/*.pyc
 __pycache__/
 **/__pycache__/
 *.pyo
-*.pyd
-
+# Deployment
+manifest.yml
+manifest*.yml

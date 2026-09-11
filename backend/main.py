@@ -8,11 +8,23 @@ load_dotenv()
 # Disable Uvicorn access logs to prevent console spam
 logging.getLogger("uvicorn.access").disabled = True
 
+# Initialize and patch Supabase/httpx before loading routers
+from services.supabase_client import supabase_service
+
 app = FastAPI(title="SAP Migration Studio Backend")
 
+# Allow localhost and 127.0.0.1 on common development ports
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,6 +43,7 @@ from routers.harmonization import router as harmonize_router
 from routers.validate import router as validate_router
 from routers.cleanser import router as cleanser_router
 from routers.transform import router as transform_router
+from routers.tech_docs import router as tech_docs_router
 
 app.include_router(mapping_router, prefix="/api/sap")
 app.include_router(project_router, prefix="/api/sap/projects")
@@ -40,6 +53,7 @@ app.include_router(harmonize_router, prefix="/api/sap")
 app.include_router(validate_router, prefix="/api")
 app.include_router(cleanser_router, prefix="/api/sap/cleanser")
 app.include_router(transform_router, prefix="/api/sap/transform")
+app.include_router(tech_docs_router, prefix="/api/sap/tech-docs")
 app.include_router(auth_router, prefix="/api/auth")
 
 if __name__ == "__main__":

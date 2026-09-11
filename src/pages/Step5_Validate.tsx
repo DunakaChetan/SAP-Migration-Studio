@@ -58,8 +58,6 @@ export function Step5Validate() {
   const STANDARD_RULES = [
     { id: 'REQUIRED_FIELDS', label: 'Required Fields', description: 'Must not be empty' },
     { id: 'FIELD_LENGTH', label: 'Field Length', description: 'Max char enforcement' },
-    { id: 'COUNTRY_ISO', label: 'Country ISO', description: '2-3 letter format' },
-    { id: 'CURRENCY_ISO', label: 'Currency ISO', description: '3-letter ISO 4217' },
     { id: 'NUMERIC_ID', label: 'Numeric IDs', description: 'KUNNR/LIFNR digits' },
     { id: 'EMAIL_FORMAT', label: 'Email Format', description: 'Valid @ format' },
     { id: 'DATE_FORMAT', label: 'Date Format', description: 'YYYYMMDD 8 digits' }
@@ -341,7 +339,7 @@ export function Step5Validate() {
       toast('No project selected to save rules', 'err');
       return;
     }
-    
+
     showLoad('Saving AI Rules...', 'Processing dynamic rules via LLM', [
       'Compiling AI rules into standard executable code...',
       'Validating rule syntax...',
@@ -349,7 +347,7 @@ export function Step5Validate() {
       'Finalizing configuration...'
     ]);
     [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 400 + i * 400));
-    
+
     try {
       // Compile new custom prompts + edited standard rule prompts into executable rules
       const allPrompts = [
@@ -575,7 +573,7 @@ export function Step5Validate() {
       const totalErrors = report.reduce((sum, r) => sum + r.failCount, 0);
       const totalChecks = report.reduce((sum, r) => sum + r.totalChecked, 0);
       const passRate = totalChecks ? (((totalChecks - totalErrors) / totalChecks) * 100).toFixed(1) : '100.0';
-      
+
       doc.text(`Overall Validation Pass Rate: ${passRate}%`, 20, yPos + 8);
 
       doc.setFont('helvetica', 'normal');
@@ -621,7 +619,7 @@ export function Step5Validate() {
       doc.setFont('helvetica', 'normal');
       report.forEach((r, idx) => {
         if (yPos > 275) { doc.addPage(); yPos = 20; }
-        
+
         if (idx % 2 === 1) {
           doc.setFillColor(tableAltRowBg[0], tableAltRowBg[1], tableAltRowBg[2]);
           doc.rect(14, yPos, pageWidth - 28, 6, 'F');
@@ -655,7 +653,7 @@ export function Step5Validate() {
       doc.setTextColor(darkText[0], darkText[1], darkText[2]);
       doc.text('3. Detailed Anomalies Log (Row-Level Audit)', 14, yPos);
       yPos += 6;
-      
+
       const failedRules = report.filter(r => r.failCount > 0);
       if (failedRules.length === 0) {
         doc.setFont('helvetica', 'normal');
@@ -829,8 +827,8 @@ export function Step5Validate() {
                 <CardBody className="space-y-2">
                   {report.map((r) => (
                     <div key={r.rule} className={`px-3 py-2.5 rounded-xl border transition-all ${r.is_dynamic
-                        ? 'border-violet-300 dark:border-violet-700/60 bg-violet-50/20 dark:bg-violet-950/15'
-                        : 'border-[var(--border)] bg-[var(--bg-tertiary)]/30'
+                      ? 'border-violet-300 dark:border-violet-700/60 bg-violet-50/20 dark:bg-violet-950/15'
+                      : 'border-[var(--border)] bg-[var(--bg-tertiary)]/30'
                       }`}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -925,10 +923,10 @@ export function Step5Validate() {
                   <div
                     key={r.id}
                     className={`px-3 py-2.5 rounded-xl border transition-all ${checked
-                        ? 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
-                        : isEdited
-                          ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-75'
-                          : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
+                      ? 'border-[var(--border)] bg-[var(--bg-tertiary)]/50'
+                      : isEdited
+                        ? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/10 opacity-75'
+                        : 'border-[var(--border)] bg-[var(--bg-tertiary)]/15 opacity-60'
                       }`}
                   >
                     <div className="flex items-start gap-2">
@@ -973,10 +971,10 @@ export function Step5Validate() {
                           <div className="flex items-center justify-between">
                             <div className="flex-1">
                               <div className={`text-[11px] font-bold flex items-center gap-2 ${checked
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : isEdited
-                                    ? 'text-amber-700 dark:text-amber-300 line-through'
-                                    : 'text-[var(--text-tertiary)] line-through'
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : isEdited
+                                  ? 'text-amber-700 dark:text-amber-300 line-through'
+                                  : 'text-[var(--text-tertiary)] line-through'
                                 }`}>
                                 {r.label}
                                 {isEdited && (

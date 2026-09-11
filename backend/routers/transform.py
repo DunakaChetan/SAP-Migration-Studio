@@ -28,6 +28,7 @@ class ExecutePipelineRequest(BaseModel):
     project_id: str
     target_object: str
     pipeline: list[PipelineStep]
+    fallback_data: Optional[list] = None
 
 class AIPromptRequest(BaseModel):
     prompt: str
@@ -38,6 +39,13 @@ class AITransformRequest(BaseModel):
     target_object: str
     prompt: str
     current_data: Optional[list] = None
+    fallback_data: Optional[list] = None
+
+class BatchTransformRequest(BaseModel):
+    project_id: str
+    target_object: str
+    rules: list
+    fallback_data: Optional[list] = None
 
 @router.post("/apply-mappings")
 async def apply_transform_mappings(
@@ -141,18 +149,21 @@ def save_transformed_data(req: SaveTransformRequest):
 def apply_ai_transform_mappings(req: AITransformRequest):
     client = supabase_service.get_client()
 
-    # 1. Get Object ID
-    res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
-    if not res_obj.data:
-        raise HTTPException(status_code=400, detail="Target object not found")
-    object_id = res_obj.data[0]["id"]
-
-    # 2. Fetch Cleansed Data or Use Current Data
+    # 1. Fetch Cleansed Data or Use Current/Fallback Data
     cleansed_rows = None
-    if req.current_data and len(req.current_data) > 0:
-        cleansed_rows = req.current_data
+    active_data = req.fallback_data or req.current_data
+    if active_data and len(active_data) > 0:
+        cleansed_rows = active_data
         
     if not cleansed_rows:
+        res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
+        if not res_obj.data:
+            clean_name = "Customer" if "CUSTOMER" in req.target_object.upper() else ("Vendor" if "VENDOR" in req.target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+        if not res_obj or not res_obj.data:
+            raise HTTPException(status_code=400, detail=f"Target object '{req.target_object}' not found")
+        object_id = res_obj.data[0]["id"]
+
         res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
         
         if not res_cleansed.data:
@@ -169,10 +180,10 @@ def apply_ai_transform_mappings(req: AITransformRequest):
     if not cleansed_rows:
         raise HTTPException(400, "Cleansed data is empty.")
 
-    # 3. Get actual columns
+    # 2. Get actual columns dynamically
     available_columns = list(cleansed_rows[0].keys())
 
-    # 4. Prompt LLM
+    # 3. Prompt LLM
     llm = LLMOrchestrator()
     system_prompt = f"""
     You are an SAP migration transformation assistant. 
@@ -188,13 +199,12 @@ def apply_ai_transform_mappings(req: AITransformRequest):
     
     Example response:
     {{
-      "python_code": "def transform_data(df):\\n    df['INC01'] = df['INC01'].fillna('000')\\n    df['INC01'] = df['INC01'].replace('', '000')\\n    return df"
+      "python_code": "def transform_data(df):\\n    df['NAME1'] = df['NAME1'].fillna('')\\n    df['NAME1'] = df['NAME1'].str.upper()\\n    return df"
     }}
     """
 
     llm_response = None
     try:
-        # LLMOrchestrator already parses and returns a Python dict or list!
         llm_response = llm.execute_json_prompt(system_prompt, req.prompt)
         
         if isinstance(llm_response, dict):
@@ -207,7 +217,7 @@ def apply_ai_transform_mappings(req: AITransformRequest):
     except Exception as e:
         raise HTTPException(500, f"Failed to parse AI response: {str(e)}\nRaw Response: {llm_response}")
 
-    # 5. Delegate transformation to the Agent
+    # 4. Delegate transformation to the Agent
     agent = TransformationAgent()
     transformed_rows, summary = agent.apply_ai_script(cleansed_rows, python_code)
 
@@ -215,8 +225,49 @@ def apply_ai_transform_mappings(req: AITransformRequest):
         "status": "success",
         "data": transformed_rows,
         "summary": summary,
-        "ai_rules": [{"Source_Field": "Python Script", "Source_Data": "", "Target_Data": python_code}] # For UI compatibility
+        "python_code": python_code,
+        "ai_rules": [{"Source_Field": "Python Script", "Source_Data": "", "Target_Data": python_code}]
     }
+
+@router.post("/apply-batch-rules")
+def apply_batch_transform_rules(req: BatchTransformRequest):
+    client = supabase_service.get_client()
+
+    cleansed_rows = []
+
+    # Prioritize fallback_data from active browser state if provided
+    if req.fallback_data and len(req.fallback_data) > 0:
+        cleansed_rows = req.fallback_data
+    else:
+        try:
+            res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
+            if not res_obj.data:
+                clean_name = "Customer" if "CUSTOMER" in req.target_object.upper() else ("Vendor" if "VENDOR" in req.target_object.upper() else "Material")
+                res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+            if res_obj and res_obj.data:
+                object_id = res_obj.data[0]["id"]
+                res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+                if res_cleansed.data:
+                    cleansed_payload = res_cleansed.data[0]["payload"]
+                    if isinstance(cleansed_payload, dict) and "rows" in cleansed_payload:
+                        cleansed_rows = cleansed_payload["rows"]
+                    elif isinstance(cleansed_payload, list):
+                        cleansed_rows = cleansed_payload
+        except Exception:
+            pass
+
+    if not cleansed_rows:
+        raise HTTPException(status_code=400, detail="No cleansed data found to transform. Run step 6 first.")
+
+    agent = TransformationAgent()
+    transformed_rows, summary = agent.apply_rule_batch(cleansed_rows, req.rules)
+
+    return {
+        "status": "success",
+        "data": transformed_rows,
+        "summary": summary
+    }
+
 
 @router.post("/parse-mapping-file")
 async def parse_mapping_file(file: UploadFile = File(...)):
@@ -272,23 +323,29 @@ def generate_ai_script(req: AIPromptRequest):
 def execute_pipeline(req: ExecutePipelineRequest):
     client = supabase_service.get_client()
 
-    res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
-    if not res_obj.data:
-        raise HTTPException(status_code=400, detail="Target object not found")
-    object_id = res_obj.data[0]["id"]
-
-    res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
-    
-    if not res_cleansed.data:
-        raise HTTPException(status_code=400, detail="No cleansed data found. Run step 6 first.")
-    
-    cleansed_payload = res_cleansed.data[0]["payload"]
-    if isinstance(cleansed_payload, dict) and "rows" in cleansed_payload:
-        current_rows = cleansed_payload["rows"]
-    elif isinstance(cleansed_payload, list):
-        current_rows = cleansed_payload
+    current_rows = None
+    if req.fallback_data and len(req.fallback_data) > 0:
+        current_rows = req.fallback_data
     else:
-        raise HTTPException(400, "Invalid cleansed data format.")
+        try:
+            res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
+            if not res_obj.data:
+                clean_name = "Customer" if "CUSTOMER" in req.target_object.upper() else ("Vendor" if "VENDOR" in req.target_object.upper() else "Material")
+                res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+            if res_obj and res_obj.data:
+                object_id = res_obj.data[0]["id"]
+                res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+                if res_cleansed.data:
+                    cleansed_payload = res_cleansed.data[0]["payload"]
+                    if isinstance(cleansed_payload, dict) and "rows" in cleansed_payload:
+                        current_rows = cleansed_payload["rows"]
+                    elif isinstance(cleansed_payload, list):
+                        current_rows = cleansed_payload
+        except Exception:
+            pass
+
+    if not current_rows:
+        raise HTTPException(status_code=400, detail="No cleansed data found. Run step 6 first.")
 
     agent = TransformationAgent()
     

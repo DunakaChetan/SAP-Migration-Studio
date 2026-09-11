@@ -2,9 +2,11 @@
 // AI SERVICE — Connects to our FastAPI Backend
 // ═══════════════════════════════════════════════════════
 
+const API_BASE = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/+$/, '');
+
 export async function getSAPSchema(objectName: string): Promise<any> {
   const token = localStorage.getItem('access_token');
-  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/schema?object_name=${objectName}`, {
+  const res = await fetch(`${API_BASE}/api/sap/schema?object_name=${objectName}`, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -22,7 +24,7 @@ export async function getSAPSchema(objectName: string): Promise<any> {
 
 export async function generateMapping(sourceSystem: string, targetObject: string, sourceFields: string[]): Promise<any> {
   const token = localStorage.getItem('access_token');
-  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/map`, {
+  const res = await fetch(`${API_BASE}/api/sap/map`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -41,7 +43,7 @@ export async function generateMapping(sourceSystem: string, targetObject: string
 
 export async function correctMapping(sourceSystem: string, sourceFieldName: string, sapFieldId: string, transformRule: string): Promise<any> {
   const token = localStorage.getItem('access_token');
-  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/map/correct`, {
+  const res = await fetch(`${API_BASE}/api/sap/map/correct`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -60,7 +62,7 @@ export async function correctMapping(sourceSystem: string, sourceFieldName: stri
 
 export async function ai(prompt: string, aiLog: any[], maxTok = 1000): Promise<string> {
   const token = localStorage.getItem('access_token');
-  const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/prompt`, {
+  const res = await fetch(`${API_BASE}/api/sap/prompt`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
