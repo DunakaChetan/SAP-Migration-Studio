@@ -202,7 +202,8 @@ export function Step2AIMapping() {
           projectId: state.projectId,
           sourceSystem: state.src,
           targetObject: objName,
-          mappings: state.mapping
+          mappings: state.mapping,
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
       if (!res.ok) throw new Error('Failed to save mappings');
@@ -228,7 +229,8 @@ export function Step2AIMapping() {
 
     try {
       const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/map/history?project_id=${state.projectId}&source_system=${state.src}&target_object=${objName}`);
+      const mock = state.activeMock || 'mock-0';
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/map/history?project_id=${state.projectId}&source_system=${state.src}&target_object=${objName}&mock_cycle=${mock}`);
       if (!res.ok) throw new Error('Failed to fetch history');
 
       const data = await res.json();

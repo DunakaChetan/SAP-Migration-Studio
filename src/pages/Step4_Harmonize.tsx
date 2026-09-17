@@ -1089,7 +1089,8 @@ export function Step4Harmonize() {
           project_id: state.projectId,
           target_object: state.obj || sapObject,
           rules: payloadRules,
-          source: 'harmonize'
+          source: 'harmonize',
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
 
@@ -1175,7 +1176,8 @@ export function Step4Harmonize() {
           project_id: state.projectId,
           target_object: state.obj,
           payload: result.final_table,
-          tables: currentTables
+          tables: currentTables,
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
 
@@ -1270,6 +1272,7 @@ export function Step4Harmonize() {
             preview: isPreview,
             rule_config: ruleConfig,
             custom_prompts: customPrompts.length > 0 ? customPrompts : null,
+            mock_cycle: state.activeMock || 'mock-0',
           })
         });
       } else if (mode === 'multi') {

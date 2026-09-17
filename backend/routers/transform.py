@@ -8,6 +8,9 @@ from services.supabase_client import supabase_service
 from services.llm_orchestrator import LLMOrchestrator
 from agents.transformation_agent import TransformationAgent
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -15,6 +18,7 @@ class SaveTransformRequest(BaseModel):
     project_id: str
     target_object: str
     payload: list
+    mock_cycle: Optional[str] = "mock-0"
 
 class PipelineStep(BaseModel):
     id: str
@@ -29,6 +33,7 @@ class ExecutePipelineRequest(BaseModel):
     target_object: str
     pipeline: list[PipelineStep]
     fallback_data: Optional[list] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 class AIPromptRequest(BaseModel):
     prompt: str
@@ -40,18 +45,21 @@ class AITransformRequest(BaseModel):
     prompt: str
     current_data: Optional[list] = None
     fallback_data: Optional[list] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 class BatchTransformRequest(BaseModel):
     project_id: str
     target_object: str
     rules: list
     fallback_data: Optional[list] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 @router.post("/apply-mappings")
 async def apply_transform_mappings(
     project_id: Annotated[str, Form()],
     target_object: Annotated[str, Form()],
     current_data: Annotated[Optional[str], Form()] = None,
+    mock_cycle: Annotated[Optional[str], Form()] = "mock-0",
     file: UploadFile = File(...)
 ):
     # 1. Read the uploaded file
@@ -92,7 +100,8 @@ async def apply_transform_mappings(
             pass
             
     if not cleansed_rows:
-        res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+        active_mock = mock_cycle or "mock-0"
+        res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", project_id).eq("object_id", object_id).eq("mock_cycle", active_mock).order("created_at", desc=True).limit(1).execute()
         
         if not res_cleansed.data:
             raise HTTPException(status_code=400, detail="No cleansed data found to transform. Run step 6 first.")
@@ -126,18 +135,21 @@ def save_transformed_data(req: SaveTransformRequest):
             raise HTTPException(400, f"SAP object '{req.target_object}' not found")
         
         obj_id = res_obj.data[0]["id"]
+        mock_cycle = req.mock_cycle or "mock-0"
         
-        # 1. Clear previous records for this object and project
+        # 1. Clear previous records for this object, project and mock cycle
         client.table("transformed_data") \
             .delete() \
             .eq("project_id", req.project_id) \
             .eq("object_id", obj_id) \
+            .eq("mock_cycle", mock_cycle) \
             .execute()
         
         # 2. Insert new payload
         client.table("transformed_data").insert({
             "project_id": req.project_id,
             "object_id": obj_id,
+            "mock_cycle": mock_cycle,
             "payload": req.payload
         }).execute()
         
@@ -163,8 +175,9 @@ def apply_ai_transform_mappings(req: AITransformRequest):
         if not res_obj or not res_obj.data:
             raise HTTPException(status_code=400, detail=f"Target object '{req.target_object}' not found")
         object_id = res_obj.data[0]["id"]
+        active_mock = req.mock_cycle or "mock-0"
 
-        res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+        res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).eq("mock_cycle", active_mock).order("created_at", desc=True).limit(1).execute()
         
         if not res_cleansed.data:
             raise HTTPException(status_code=400, detail="No cleansed data found to transform. Run step 6 first.")
@@ -246,7 +259,8 @@ def apply_batch_transform_rules(req: BatchTransformRequest):
                 res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
             if res_obj and res_obj.data:
                 object_id = res_obj.data[0]["id"]
-                res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+                active_mock = req.mock_cycle or "mock-0"
+                res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).eq("mock_cycle", active_mock).order("created_at", desc=True).limit(1).execute()
                 if res_cleansed.data:
                     cleansed_payload = res_cleansed.data[0]["payload"]
                     if isinstance(cleansed_payload, dict) and "rows" in cleansed_payload:
@@ -334,7 +348,8 @@ def execute_pipeline(req: ExecutePipelineRequest):
                 res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
             if res_obj and res_obj.data:
                 object_id = res_obj.data[0]["id"]
-                res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+                active_mock = req.mock_cycle or "mock-0"
+                res_cleansed = client.table("cleansed_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).eq("mock_cycle", active_mock).order("created_at", desc=True).limit(1).execute()
                 if res_cleansed.data:
                     cleansed_payload = res_cleansed.data[0]["payload"]
                     if isinstance(cleansed_payload, dict) and "rows" in cleansed_payload:
@@ -410,4 +425,24 @@ def execute_pipeline(req: ExecutePipelineRequest):
         "data": current_rows,
         "summary": total_summary
     }
+
+@router.get("/load/{project_id}")
+def load_transformed_data(project_id: str, target_object: Optional[str] = None, mock_cycle: Optional[str] = "mock-0"):
+    try:
+        client = supabase_service.get_client()
+        query = client.table("transformed_data").select("*, sap_objects(name)").eq("project_id", project_id).eq("mock_cycle", mock_cycle or "mock-0")
+        if target_object:
+            clean_name = "Customer" if "CUSTOMER" in target_object.upper() else ("Vendor" if "VENDOR" in target_object.upper() else "Material")
+            res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()
+            if res_obj.data:
+                query = query.eq("object_id", res_obj.data[0]["id"])
+        res = query.order("created_at", desc=True).limit(1).execute()
+        if not res.data:
+            return {"status": "not_found", "data": []}
+        payload = res.data[0].get("payload", [])
+        return {"status": "success", "data": payload if isinstance(payload, list) else (payload.get("rows", []) if isinstance(payload, dict) else [])}
+    except Exception as e:
+        logger.error(f"Failed to load transformed data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to load transformed data: {str(e)}")
+
 

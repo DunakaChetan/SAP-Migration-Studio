@@ -678,6 +678,7 @@ export function Step7Transform() {
           project_id: state.projectId,
           target_object: state.obj,
           source: 'transform',
+          mock_cycle: state.activeMock || 'mock-0',
           rules: rulesToSave.map(r => ({
             ...r,
             enabled: r.active ?? r.enabled ?? true,
@@ -729,6 +730,7 @@ export function Step7Transform() {
         body: JSON.stringify({
           project_id: state.projectId,
           target_object: state.obj,
+          mock_cycle: state.activeMock || 'mock-0',
           rules: activeRules.map(r => ({
             ...r,
             enabled: true,
@@ -955,7 +957,8 @@ export function Step7Transform() {
           project_id: state.projectId,
           target_object: state.obj,
           prompt: aiPrompt,
-          fallback_data: (state.cleaned && state.cleaned.length > 0) ? state.cleaned : state.transformed
+          fallback_data: (state.cleaned && state.cleaned.length > 0) ? state.cleaned : state.transformed,
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
 
@@ -1001,7 +1004,8 @@ export function Step7Transform() {
         body: JSON.stringify({
           project_id: state.projectId,
           target_object: state.obj,
-          payload: state.transformed
+          payload: state.transformed,
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
 

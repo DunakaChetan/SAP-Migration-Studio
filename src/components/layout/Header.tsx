@@ -1,12 +1,16 @@
 import React from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useMigration } from '@/store/migration-store';
-import { Sun, Moon, Settings, Bell, Search, Menu, ChevronRight, Folder, Database, Layers } from 'lucide-react';
-import { STEPS } from '@/config/steps';
+import { Sun, Moon, Settings, Bell, Search, Menu, ChevronRight, Folder, Database, Layers, Sliders, Lock } from 'lucide-react';
+import { MOCK_CONFIGS } from '@/config/steps';
+import { isMock0Completed, isMock1Completed } from '@/store/migration-store';
+import { useToast } from '@/components/ui/toast';
 
 export function Header() {
   const { state, dispatch } = useMigration();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { toast } = useToast();
 
   const toggleTheme = () => {
     const next = state.theme === 'light' ? 'dark' : 'light';
@@ -14,8 +18,33 @@ export function Header() {
     document.documentElement.classList.toggle('dark', next === 'dark');
   };
 
-  const currentStepObj = STEPS.find(s => s.path === location.pathname) || STEPS[0];
+  const isMock1Unlocked = isMock0Completed(state);
+  const isMock2Unlocked = isMock1Completed(state);
+
+  const activeMock = state.activeMock || 'mock-0';
+  const currentMockConfig = MOCK_CONFIGS[activeMock] || MOCK_CONFIGS['mock-0'];
+  const currentStepObj = currentMockConfig.steps.find(
+    s => s.path === location.pathname || (s.path !== '/' && location.pathname.startsWith(s.path))
+  ) || currentMockConfig.steps[0];
   const currentStepLabel = currentStepObj.label;
+
+  const handleCycleMock = () => {
+    if (activeMock === 'mock-0') {
+      if (isMock1Unlocked) {
+        dispatch({ type: 'SET_FIELD', field: 'activeMock', value: 'mock-1' });
+      } else {
+        toast('Mock 1 is locked. Complete all Mock 0 steps including Step 9 Tech Docs first.', 'warn');
+      }
+    } else if (activeMock === 'mock-1') {
+      if (isMock2Unlocked) {
+        dispatch({ type: 'SET_FIELD', field: 'activeMock', value: 'mock-2' });
+      } else {
+        dispatch({ type: 'SET_FIELD', field: 'activeMock', value: 'mock-0' });
+      }
+    } else {
+      dispatch({ type: 'SET_FIELD', field: 'activeMock', value: 'mock-0' });
+    }
+  };
 
   return (
     <header className="shrink-0 relative z-50 h-16 flex items-center px-6 gap-4 border-b border-[var(--border)]/40 bg-[var(--bg-primary)]/80 backdrop-blur-md">
@@ -39,6 +68,18 @@ export function Header() {
             <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold tracking-wide shadow-xs">
               <Database className="w-3 h-3 text-emerald-500" />
               <span>{state.obj || 'CUSTOMER'}</span>
+            </div>
+
+            <ChevronRight className="w-3 h-3 text-[var(--text-tertiary)] shrink-0 opacity-60" />
+
+            {/* Mock Cycle Pill */}
+            <div
+              onClick={handleCycleMock}
+              title="Click to switch Mock environment"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 text-[10px] font-mono font-bold tracking-wide shadow-xs cursor-pointer hover:bg-amber-500/20 transition-all"
+            >
+              <Sliders className="w-3 h-3 text-amber-500" />
+              <span>{currentMockConfig.name.toUpperCase()} ({currentMockConfig.subtitle.toUpperCase()})</span>
             </div>
 
             <ChevronRight className="w-3 h-3 text-[var(--text-tertiary)] shrink-0 opacity-60" />
@@ -77,9 +118,17 @@ export function Header() {
           {state.theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
         </button>
 
-        <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-[12px] font-bold shadow-sm ml-2 cursor-pointer hover:bg-primary-700 transition-colors">
+        <button
+          onClick={() => navigate('/wrapper')}
+          className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-[12px] font-bold shadow-sm ml-2 cursor-pointer transition-all ${
+            location.pathname === '/wrapper'
+              ? 'bg-emerald-600 ring-2 ring-emerald-400 ring-offset-2 ring-offset-[var(--bg-primary)]'
+              : 'bg-primary-600 hover:bg-primary-700'
+          }`}
+          title="Open Master Live Wrapper Dashboard"
+        >
           DC
-        </div>
+        </button>
       </div>
     </header>
   );

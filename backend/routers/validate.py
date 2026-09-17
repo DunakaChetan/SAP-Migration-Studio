@@ -24,6 +24,7 @@ class ValidateFlowRequest(BaseModel):
     custom_prompts: Optional[List[str]] = None
     dynamic_rules: Optional[List[Dict[str, Any]]] = None
     selected_rules: Optional[List[str]] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 class GenerateRulesRequest(BaseModel):
     prompts: List[str]
@@ -182,7 +183,8 @@ def validate_flow(req: ValidateFlowRequest):
 
         # Fetch Harmonized Data from DB
         # Order by created_at desc, limit 1 to get the most recent harmonization result
-        res_data = client.table("harmonized_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+        mock_cycle = req.mock_cycle or "mock-0"
+        res_data = client.table("harmonized_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).eq("mock_cycle", mock_cycle).order("created_at", desc=True).limit(1).execute()
         if not res_data.data:
             raise HTTPException(400, "No harmonized data found for this project and object in the database.")
         
@@ -290,6 +292,7 @@ class SaveValidationRequest(BaseModel):
     target_object: str
     payload: list
     dynamic_rules: Optional[List[Dict[str, Any]]] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 @router.post("/validate/save")
 def save_validation(req: SaveValidationRequest):
@@ -300,18 +303,21 @@ def save_validation(req: SaveValidationRequest):
         if not res_obj.data:
             raise HTTPException(status_code=400, detail=f"SAP object '{req.target_object}' not found.")
         object_id = res_obj.data[0]["id"]
+        mock_cycle = req.mock_cycle or "mock-0"
         
         # Delete old validation if any
         client.table("validation_report") \
             .delete() \
             .eq("project_id", req.project_id) \
             .eq("object_id", object_id) \
+            .eq("mock_cycle", mock_cycle) \
             .execute()
             
         # Insert the new validation payload
         res = client.table("validation_report").insert({
             "project_id": req.project_id,
             "object_id": object_id,
+            "mock_cycle": mock_cycle,
             "payload": req.payload
         }).execute()
 
@@ -322,6 +328,7 @@ def save_validation(req: SaveValidationRequest):
                 .eq("project_id", req.project_id) \
                 .eq("object_id", object_id) \
                 .eq("source", "validate") \
+                .eq("mock_cycle", mock_cycle) \
                 .execute()
 
             if req.dynamic_rules:
@@ -329,6 +336,7 @@ def save_validation(req: SaveValidationRequest):
                     "project_id": req.project_id,
                     "object_id": object_id,
                     "source": "validate",
+                    "mock_cycle": mock_cycle,
                     "payload": req.dynamic_rules
                 }).execute()
         
@@ -343,6 +351,7 @@ class SaveDynamicRulesRequest(BaseModel):
     target_object: str
     rules: Optional[List[Dict[str, Any]]] = None
     source: str = "validate"
+    mock_cycle: Optional[str] = "mock-0"
 
 
 @router.post("/validate/rules/save")
@@ -358,14 +367,16 @@ def save_dynamic_rules(req: SaveDynamicRulesRequest):
                 raise HTTPException(status_code=400, detail=f"SAP object '{req.target_object}' not found.")
         object_id = res_obj.data[0]["id"]
         source_name = req.source or "validate"
+        mock_cycle = req.mock_cycle or "mock-0"
         rules_payload = req.rules or []
 
-        # Remove previous dynamic rules for this project/object and specific source
+        # Remove previous dynamic rules for this project/object, specific source, and mock_cycle
         client.table("dynamic_rules") \
             .delete() \
             .eq("project_id", req.project_id) \
             .eq("object_id", object_id) \
             .eq("source", source_name) \
+            .eq("mock_cycle", mock_cycle) \
             .execute()
 
         if rules_payload:
@@ -373,6 +384,7 @@ def save_dynamic_rules(req: SaveDynamicRulesRequest):
                 "project_id": req.project_id,
                 "object_id": object_id,
                 "source": source_name,
+                "mock_cycle": mock_cycle,
                 "payload": rules_payload
             }).execute()
 
@@ -383,7 +395,7 @@ def save_dynamic_rules(req: SaveDynamicRulesRequest):
 
 
 @router.get("/validate/rules")
-def get_dynamic_rules(project_id: str, target_object: str, source: Optional[str] = "validate"):
+def get_dynamic_rules(project_id: str, target_object: str, source: Optional[str] = "validate", mock_cycle: Optional[str] = "mock-0"):
     try:
         client = supabase_service.get_client()
         res_obj = client.table("sap_objects").select("id").ilike("name", target_object).execute()
@@ -395,6 +407,8 @@ def get_dynamic_rules(project_id: str, target_object: str, source: Optional[str]
         object_id = res_obj.data[0]["id"]
 
         query = client.table("dynamic_rules").select("payload, source").eq("project_id", project_id).eq("object_id", object_id)
+        if mock_cycle:
+            query = query.eq("mock_cycle", mock_cycle)
         if source and source != "all":
             query = query.eq("source", source)
 

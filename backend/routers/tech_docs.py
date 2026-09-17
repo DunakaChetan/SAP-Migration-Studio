@@ -39,6 +39,7 @@ class SaveTechDocRequest(BaseModel):
     object_name: Optional[str] = None
     source_name: Optional[str] = None
     report_title: Optional[str] = "Consolidated Master Report"
+    mock_cycle: Optional[str] = "mock-0"
     pipeline_summary: Optional[dict] = None
     waterfall_stats: Optional[dict] = None
     comparison_stats: Optional[dict] = None
@@ -115,11 +116,13 @@ def resolve_project_name(client, project_id: str) -> str:
         logger.debug(f"Failed to resolve project name: {e}")
     return "SAP Migration Project"
 
-def fetch_table_rows(client, table_name: str, project_id: str, object_id: Optional[str]) -> list:
+def fetch_table_rows(client, table_name: str, project_id: str, object_id: Optional[str], mock_cycle: Optional[str] = "mock-0") -> list:
     try:
         query = client.table(table_name).select("payload").eq("project_id", project_id)
         if object_id:
             query = query.eq("object_id", object_id)
+        if mock_cycle:
+            query = query.eq("mock_cycle", mock_cycle)
         res = query.order("created_at", desc=True).limit(1).execute()
         if res.data:
             payload = res.data[0].get("payload")
@@ -136,21 +139,22 @@ def save_tech_doc(req: SaveTechDocRequest):
     client = supabase_service.get_client()
     obj_id = resolve_object_id(client, req.target_object)
     source_id, resolved_source_name = resolve_source_system(client, req.source or "ORACLE_EBS")
+    mock_cycle = req.mock_cycle or "mock-0"
     
     project_name = req.project_name or resolve_project_name(client, req.project_id)
     object_display = req.object_name or OBJECT_DISPLAY_NAMES.get(req.target_object.upper(), req.target_object)
     source_display = req.source_name or resolved_source_name
 
     # 1. Gather baseline row counts from Supabase if not provided
-    extracted_rows = fetch_table_rows(client, "extracted_data", req.project_id, obj_id)
-    harmonized_rows = fetch_table_rows(client, "harmonized_data", req.project_id, obj_id)
-    cleansed_rows = fetch_table_rows(client, "cleansed_data", req.project_id, obj_id)
-    transformed_rows = fetch_table_rows(client, "transformed_data", req.project_id, obj_id)
+    extracted_rows = fetch_table_rows(client, "extracted_data", req.project_id, obj_id, mock_cycle)
+    harmonized_rows = fetch_table_rows(client, "harmonized_data", req.project_id, obj_id, mock_cycle)
+    cleansed_rows = fetch_table_rows(client, "cleansed_data", req.project_id, obj_id, mock_cycle)
+    transformed_rows = fetch_table_rows(client, "transformed_data", req.project_id, obj_id, mock_cycle)
 
     # Fetch validation report
     val_report_payload = []
     try:
-        res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id)
+        res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("mock_cycle", mock_cycle)
         if obj_id:
             res_val = res_val.eq("object_id", obj_id)
         res_val_data = res_val.order("created_at", desc=True).limit(1).execute()
@@ -226,17 +230,19 @@ def save_tech_doc(req: SaveTechDocRequest):
         "blocking_errors_remaining": 0
     }
 
-    # 3. CHECK FOR EXISTING RECORD FOR THIS (project_id, object_id, source) COMBINATION!
+    # 3. Check for existing record for this (project_id, object_id, source, mock_cycle) combination!
     existing_doc = None
     try:
-        q = client.table("tech_docs").select("*").eq("project_id", req.project_id)
-        if obj_id:
-            q = q.eq("object_id", obj_id)
-        
-        # Try matching source_id if present
         if source_id:
             try:
-                res_exist = q.eq("source_id", source_id).limit(1).execute()
+                res_exist = client.table("tech_docs") \
+                    .select("id, created_at") \
+                    .eq("project_id", req.project_id) \
+                    .eq("source_id", source_id) \
+                    .eq("mock_cycle", mock_cycle)
+                if obj_id:
+                    res_exist = res_exist.eq("object_id", obj_id)
+                res_exist = res_exist.limit(1).execute()
                 if res_exist.data and len(res_exist.data) > 0:
                     existing_doc = res_exist.data[0]
             except Exception:
@@ -244,7 +250,7 @@ def save_tech_doc(req: SaveTechDocRequest):
         
         # Fallback to match by source text
         if not existing_doc:
-            res_legacy = client.table("tech_docs").select("*").eq("project_id", req.project_id)
+            res_legacy = client.table("tech_docs").select("*").eq("project_id", req.project_id).eq("mock_cycle", mock_cycle)
             if obj_id:
                 res_legacy = res_legacy.eq("object_id", obj_id)
             res_legacy = res_legacy.eq("source", req.source or "ORACLE_EBS").order("created_at", desc=False).limit(1).execute()
@@ -274,6 +280,7 @@ def save_tech_doc(req: SaveTechDocRequest):
         "object_name": object_display,
         "source_name": source_display,
         "report_title": req.report_title or "Consolidated Master Report",
+        "mock_cycle": mock_cycle,
         "pipeline_summary": req.pipeline_summary or computed_summary,
         "waterfall_stats": req.waterfall_stats or computed_waterfall,
         "comparison_stats": req.comparison_stats or computed_comparison,
@@ -310,14 +317,15 @@ def save_tech_doc(req: SaveTechDocRequest):
     }
 
 @router.get("/latest")
-def get_latest_tech_doc(project_id: str, target_object: str, source: Optional[str] = "ORACLE_EBS"):
+def get_latest_tech_doc(project_id: str, target_object: str, source: Optional[str] = "ORACLE_EBS", mock_cycle: Optional[str] = "mock-0"):
     client = supabase_service.get_client()
     obj_id = resolve_object_id(client, target_object)
     source_id, _ = resolve_source_system(client, source or "ORACLE_EBS")
+    active_mock = mock_cycle or "mock-0"
 
     # 1. Try fetching from tech_docs table
     try:
-        q = client.table("tech_docs").select("*").eq("project_id", project_id)
+        q = client.table("tech_docs").select("*").eq("project_id", project_id).eq("mock_cycle", active_mock)
         if obj_id:
             q = q.eq("object_id", obj_id)
         if source_id:
@@ -334,7 +342,7 @@ def get_latest_tech_doc(project_id: str, target_object: str, source: Optional[st
         logger.debug(f"Could not read from tech_docs table: {e}")
 
     # 2. Fallback: synthesize fresh report from underlying step tables
-    req = SaveTechDocRequest(project_id=project_id, target_object=target_object, source=source)
+    req = SaveTechDocRequest(project_id=project_id, target_object=target_object, source=source, mock_cycle=active_mock)
     result = save_tech_doc(req)
     return {"status": "success", "data": result["data"]}
 

@@ -202,6 +202,7 @@ class HarmonizeFlowRequest(BaseModel):
     preview: bool = False
     rule_config: Optional[Dict[str, Any]] = None
     custom_prompts: Optional[List[str]] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 @router.post("/harmonize/flow")
 def run_harmonization_flow(req: HarmonizeFlowRequest):
@@ -218,9 +219,10 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
         if not res_obj.data:
             raise HTTPException(400, f"SAP object '{req.sap_object}' not found")
         object_id = res_obj.data[0]["id"]
+        mock_cycle = req.mock_cycle or "mock-0"
 
-        # 1. Fetch Extracted Data from DB
-        res_data = client.table("extracted_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).execute()
+        # 1. Fetch Extracted Data from DB for this mock cycle
+        res_data = client.table("extracted_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).eq("mock_cycle", mock_cycle).order("created_at", desc=True).limit(1).execute()
         if not res_data.data:
             raise HTTPException(400, "No extracted data found for this project and object in the database.")
         
@@ -243,7 +245,7 @@ def run_harmonization_flow(req: HarmonizeFlowRequest):
         primary_df = pd.DataFrame(extracted_rows)
 
         # 2. Fetch User Corrected Mappings from DB
-        res_map = client.table("user_corrected_mappings").select("source_field_name, transform_rule, confidence, sap_fields(sap_structure, field_name)").eq("project_id", req.project_id).execute()
+        res_map = client.table("user_corrected_mappings").select("source_field_name, transform_rule, confidence, sap_fields(sap_structure, field_name)").eq("project_id", req.project_id).eq("mock_cycle", mock_cycle).execute()
         if not res_map.data:
             raise HTTPException(400, "No user corrected mappings found in the database for this project.")
 
@@ -325,6 +327,7 @@ async def run_harmonization_multi_flow(
     rule_config_json: str = Form(""),
     custom_prompts_json: str = Form(""),
     join_keys_json: str = Form(""),
+    mock_cycle: str = Form("mock-0"),
 ):
     """
     Multi-source harmonization with primary data from DB and secondary data uploaded.
@@ -370,8 +373,8 @@ async def run_harmonization_multi_flow(
             raise HTTPException(400, f"SAP object '{sap_object}' not found")
         object_id = res_obj.data[0]["id"]
 
-        # 1. Fetch Primary Data from DB
-        res_data = client.table("extracted_data").select("payload").eq("project_id", project_id).eq("object_id", object_id).execute()
+        # 1. Fetch Primary Data from DB for this mock cycle
+        res_data = client.table("extracted_data").select("payload").eq("project_id", project_id).eq("object_id", object_id).eq("mock_cycle", mock_cycle or "mock-0").order("created_at", desc=True).limit(1).execute()
         if not res_data.data:
             raise HTTPException(400, "No extracted data found. Please extract and save data in Step 3 first.")
 
@@ -394,9 +397,10 @@ async def run_harmonization_multi_flow(
         primary_df = pd.DataFrame(extracted_rows)
 
         # 2. Fetch Primary Mappings from DB
+        active_mock = mock_cycle or "mock-0"
         res_map = client.table("user_corrected_mappings").select(
             "source_field_name, transform_rule, confidence, sap_fields(sap_structure, field_name)"
-        ).eq("project_id", project_id).execute()
+        ).eq("project_id", project_id).eq("mock_cycle", active_mock).execute()
         if not res_map.data:
             raise HTTPException(400, "No user corrected mappings found in the database for this project.")
 
@@ -573,6 +577,7 @@ class SaveHarmonizedRequest(BaseModel):
     target_object: str
     payload: list
     tables: Optional[list] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 @router.post("/harmonize/save")
 def save_harmonized_data(req: SaveHarmonizedRequest):
@@ -586,12 +591,14 @@ def save_harmonized_data(req: SaveHarmonizedRequest):
                 raise HTTPException(400, f"SAP object '{req.target_object}' not found")
         
         obj_id = res_obj.data[0]["id"]
+        mock_cycle = req.mock_cycle or "mock-0"
         
-        # Delete old harmonized data if any
+        # Delete old harmonized data if any for this mock cycle
         client.table("harmonized_data") \
             .delete() \
             .eq("project_id", req.project_id) \
             .eq("object_id", obj_id) \
+            .eq("mock_cycle", mock_cycle) \
             .execute()
         
         stored_payload = {
@@ -602,6 +609,7 @@ def save_harmonized_data(req: SaveHarmonizedRequest):
         client.table("harmonized_data").insert({
             "project_id": req.project_id,
             "object_id": obj_id,
+            "mock_cycle": mock_cycle,
             "payload": stored_payload
         }).execute()
         

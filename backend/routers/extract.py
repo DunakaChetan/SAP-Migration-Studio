@@ -530,6 +530,7 @@ class SaveExtractionRequest(BaseModel):
     target_object: str
     payload: list = []
     tables: Optional[list] = None
+    mock_cycle: Optional[str] = "mock-0"
 
 @router.post("/save")
 def save_extraction(req: SaveExtractionRequest):
@@ -544,12 +545,14 @@ def save_extraction(req: SaveExtractionRequest):
         if not res_obj.data:
             raise HTTPException(status_code=400, detail=f"SAP object '{req.target_object}' not found.")
         object_id = res_obj.data[0]["id"]
+        mock_cycle = req.mock_cycle or "mock-0"
         
-        # Delete old extraction if any
+        # Delete old extraction if any for this mock cycle
         client.table("extracted_data") \
             .delete() \
             .eq("project_id", req.project_id) \
             .eq("object_id", object_id) \
+            .eq("mock_cycle", mock_cycle) \
             .execute()
             
         # Store both flat rows and separated tables
@@ -562,6 +565,7 @@ def save_extraction(req: SaveExtractionRequest):
         res = client.table("extracted_data").insert({
             "project_id": req.project_id,
             "object_id": object_id,
+            "mock_cycle": mock_cycle,
             "payload": stored_payload
         }).execute()
         
@@ -571,10 +575,12 @@ def save_extraction(req: SaveExtractionRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save extraction: {str(e)}")
 
 @router.get("/load/{project_id}")
-def load_saved_extraction(project_id: str, target_object: Optional[str] = None):
+def load_saved_extraction(project_id: str, target_object: Optional[str] = None, mock_cycle: Optional[str] = "mock-0"):
     try:
         client = supabase_service.get_client()
         query = client.table("extracted_data").select("*, sap_objects(name)").eq("project_id", project_id)
+        if mock_cycle:
+            query = query.eq("mock_cycle", mock_cycle)
         if target_object:
             clean_name = "Customer" if "CUSTOMER" in target_object.upper() else ("Vendor" if "VENDOR" in target_object.upper() else "Material")
             res_obj = client.table("sap_objects").select("id").ilike("name", clean_name).execute()

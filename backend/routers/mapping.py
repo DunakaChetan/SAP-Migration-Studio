@@ -30,6 +30,7 @@ class SaveAllRequest(BaseModel):
     sourceSystem: str
     targetObject: str
     mappings: List[MappingItem]
+    mock_cycle: Optional[str] = "mock-0"
 
 class PromptRequest(BaseModel):
     prompt: str
@@ -211,12 +212,15 @@ def save_all_mappings(req: SaveAllRequest):
             field_map[f['field_name']] = []
         field_map[f['field_name']].append(f["id"])
         
-    # Delete old mappings for this object in this project to replace them cleanly
+    mock_cycle = req.mock_cycle or "mock-0"
+
+    # Delete old mappings for this object in this project and mock_cycle to replace them cleanly
     existing = client.table("user_corrected_mappings") \
         .select("id, sap_fields!inner(object_id)") \
         .eq("project_id", req.projectId) \
         .eq("source_system_id", sys_id) \
         .eq("sap_fields.object_id", obj_id) \
+        .eq("mock_cycle", mock_cycle) \
         .execute()
         
     ids_to_delete = [row["id"] for row in existing.data]
@@ -238,7 +242,8 @@ def save_all_mappings(req: SaveAllRequest):
                 "source_field_name": f"[{i}]{m.src}",
                 "sap_field_id": fid,
                 "transform_rule": m.tr,
-                "confidence": getattr(m, 'conf', 100)
+                "confidence": getattr(m, 'conf', 100),
+                "mock_cycle": mock_cycle
             })
                 
     if inserts:
@@ -247,8 +252,9 @@ def save_all_mappings(req: SaveAllRequest):
     return {"status": "success", "inserted": len(inserts)}
 
 @router.get("/map/history")
-def get_mapping_history(project_id: str, source_system: str, target_object: str):
+def get_mapping_history(project_id: str, source_system: str, target_object: str, mock_cycle: Optional[str] = "mock-0"):
     client = supabase_service.get_client()
+    active_mock = mock_cycle or "mock-0"
     
     sys_res = client.table("source_systems").select("id").eq("name", source_system).execute()
     if not sys_res.data:
@@ -260,12 +266,13 @@ def get_mapping_history(project_id: str, source_system: str, target_object: str)
         return {"mappings": []}
     obj_id = obj_res.data[0]["id"]
     
-    # Get project mappings
+    # Get project mappings for this mock cycle
     res = client.table("user_corrected_mappings") \
         .select("source_field_name, transform_rule, confidence, sap_fields!inner(field_name, sap_structure, object_id)") \
         .eq("project_id", project_id) \
         .eq("source_system_id", sys_id) \
         .eq("sap_fields.object_id", obj_id) \
+        .eq("mock_cycle", active_mock) \
         .execute()
         
     import re

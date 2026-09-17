@@ -25,7 +25,10 @@ export interface ValidationEntry {
   st: 'ERROR' | 'WARN' | 'PASS';
 }
 
+export type MockCycle = 'mock-0' | 'mock-1' | 'mock-2';
+
 export interface MigrationState {
+  activeMock: MockCycle;
   projectId: string | null;
   projectName: string | null;
   connUrl: string;
@@ -72,6 +75,9 @@ export interface MigrationState {
   transformSummary: any;
   transformPipeline: any[];
   isTransformedSaved: boolean;
+  isTechDocsSaved: boolean;
+  techDocId: string | null;
+  isMock1Completed: boolean;
   uploadedFilesMeta: { name: string; size: number; headersCount?: number }[];
   fileSchemas: { filename: string; headers: string[] }[];
   joinConfig: {
@@ -86,7 +92,18 @@ export interface MigrationState {
   };
 }
 
+export const isMock0Completed = (state: MigrationState): boolean => {
+  if (!state.projectId) return false;
+  // Strictly require Mock 0 to be completely finished including Step 9 Tech Docs
+  return Boolean(state.isTechDocsSaved || state.techDocId);
+};
+
+export const isMock1Completed = (state: MigrationState): boolean => {
+  return Boolean(isMock0Completed(state) && state.isMock1Completed);
+};
+
 const defaultState: MigrationState = {
+  activeMock: 'mock-0',
   projectId: null,
   projectName: null,
   connUrl: '',
@@ -133,6 +150,9 @@ const defaultState: MigrationState = {
   transformSummary: null,
   transformPipeline: [],
   isTransformedSaved: false,
+  isTechDocsSaved: false,
+  techDocId: null,
+  isMock1Completed: false,
   uploadedFilesMeta: [],
   fileSchemas: [],
   joinConfig: { base_file: '', joins: [] },

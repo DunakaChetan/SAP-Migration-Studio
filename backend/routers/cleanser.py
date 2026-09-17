@@ -18,11 +18,13 @@ class FlowRequest(BaseModel):
     custom_prompts: list[str] | None = None
     standard_rules_config: list[dict] | None = None
     excluded_validation_rules: list[str] | None = None
+    mock_cycle: str | None = "mock-0"
 
 class SaveRequest(BaseModel):
     project_id: str
     target_object: str
     payload: list
+    mock_cycle: str | None = "mock-0"
 
 def parse_cleaned_csv(csv_path: Path):
     df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
@@ -31,13 +33,13 @@ def parse_cleaned_csv(csv_path: Path):
     return df.to_dict(orient="records")
 
 @router.get("/validation-rules")
-async def get_validation_report_rules(project_id: str, target_object: str):
+async def get_validation_report_rules(project_id: str, target_object: str, mock_cycle: str = "mock-0"):
     client = supabase_service.get_client()
     res_obj = client.table("sap_objects").select("id").ilike("name", target_object).execute()
     if not res_obj.data:
         return {"rules": []}
     object_id = res_obj.data[0]["id"]
-    res_val = client.table("validation_report").select("payload").eq("project_id", project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+    res_val = client.table("validation_report").select("payload").eq("project_id", project_id).eq("object_id", object_id).eq("mock_cycle", mock_cycle).order("created_at", desc=True).limit(1).execute()
     validation_payload = res_val.data[0]["payload"] if res_val.data else []
 
     rules_map = {}
@@ -60,6 +62,7 @@ async def get_validation_report_rules(project_id: str, target_object: str):
 @router.post("/flow")
 async def cleanser_flow(req: FlowRequest):
     client = supabase_service.get_client()
+    mock_cycle = req.mock_cycle or "mock-0"
     
     # 1. Fetch Object ID
     res_obj = client.table("sap_objects").select("id").ilike("name", req.target_object).execute()
@@ -68,7 +71,7 @@ async def cleanser_flow(req: FlowRequest):
     object_id = res_obj.data[0]["id"]
     
     # 2. Fetch Harmonized Data
-    res_harm = client.table("harmonized_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+    res_harm = client.table("harmonized_data").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).eq("mock_cycle", mock_cycle).order("created_at", desc=True).limit(1).execute()
     if not res_harm.data:
         raise HTTPException(status_code=400, detail="No harmonized data found for this project/object")
     harmonized_data = res_harm.data[0]["payload"]
@@ -76,7 +79,7 @@ async def cleanser_flow(req: FlowRequest):
         harmonized_data = harmonized_data["rows"]
     
     # 3. Fetch complete Validation Report payload.
-    res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).order("created_at", desc=True).limit(1).execute()
+    res_val = client.table("validation_report").select("payload").eq("project_id", req.project_id).eq("object_id", object_id).eq("mock_cycle", mock_cycle).order("created_at", desc=True).limit(1).execute()
     validation_payload = res_val.data[0]["payload"] if res_val.data else []
 
     # 4. Fetch Dynamic Rules from Supabase for Cleanse ONLY (source == 'cleanse')
@@ -86,6 +89,7 @@ async def cleanser_flow(req: FlowRequest):
         .eq("project_id", req.project_id)
         .eq("object_id", object_id)
         .eq("source", "cleanse")
+        .eq("mock_cycle", mock_cycle)
         .execute()
     )
     all_dynamic_rules = []
@@ -209,18 +213,21 @@ async def cleanser_save(req: SaveRequest):
         if not res_obj.data:
             raise HTTPException(status_code=400, detail="Target object not found")
         object_id = res_obj.data[0]["id"]
+        mock_cycle = req.mock_cycle or "mock-0"
         
-        # Delete old
+        # Delete old for this mock cycle
         client.table("cleansed_data") \
             .delete() \
             .eq("project_id", req.project_id) \
             .eq("object_id", object_id) \
+            .eq("mock_cycle", mock_cycle) \
             .execute()
             
         # Insert new
         res = client.table("cleansed_data").insert({
             "project_id": req.project_id,
             "object_id": object_id,
+            "mock_cycle": mock_cycle,
             "payload": req.payload
         }).execute()
         

@@ -1,21 +1,56 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { useMigration } from '@/store/migration-store';
+import { useMigration, type MockCycle } from '@/store/migration-store';
 import { cn } from '@/lib/utils';
-import { Check, Cpu, ChevronLeft, ChevronRight } from 'lucide-react';
-import { STEPS } from '@/config/steps';
+import { Check, ChevronLeft, ChevronRight, Sliders, Bot, Sparkles, Lock } from 'lucide-react';
+import { MOCK_CONFIGS } from '@/config/steps';
+import { isMock0Completed, isMock1Completed } from '@/store/migration-store';
+import { useToast } from '@/components/ui/toast';
 
 export function StepNavigation() {
-  const { state } = useMigration();
+  const { state, dispatch } = useMigration();
   const location = useLocation();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
-  const currentStepIndex = STEPS.findIndex(s => s.path === location.pathname);
+  const isMock0Unlocked = true;
+  const isMock1Unlocked = isMock0Completed(state);
+  const isMock2Unlocked = isMock1Completed(state);
+
+  const activeMock = state.activeMock || 'mock-0';
+  const currentMockConfig = MOCK_CONFIGS[activeMock] || MOCK_CONFIGS['mock-0'];
+  const activeSteps = currentMockConfig.steps;
+
+  const currentStepIndex = activeSteps.findIndex(
+    s => s.path === location.pathname || (s.path !== '/' && location.pathname.startsWith(s.path))
+  );
   const activeStep = currentStepIndex === -1 ? 0 : currentStepIndex;
-  const progress = (activeStep / 8) * 100;
+  const progress = activeSteps.length > 1 ? (activeStep / (activeSteps.length - 1)) * 100 : 100;
 
   const [isCollapsed, setIsCollapsed] = React.useState(false);
+
+  const handleMockSwitch = (newMock: MockCycle) => {
+    if (newMock === 'mock-1' && !isMock1Unlocked) {
+      toast('Mock 1 is locked. Complete all Mock 0 steps including Step 9 Tech Docs first.', 'warn');
+      return;
+    }
+    if (newMock === 'mock-2' && !isMock2Unlocked) {
+      toast('Mock 2 is locked. Complete Mock 1 first.', 'warn');
+      return;
+    }
+
+    dispatch({ type: 'SET_FIELD', field: 'activeMock', value: newMock });
+    if (newMock === 'mock-0') {
+      if (location.pathname.startsWith('/mock-1') || location.pathname.startsWith('/mock-2')) {
+        navigate('/');
+      }
+    } else if (newMock === 'mock-1') {
+      navigate('/mock-1');
+    } else if (newMock === 'mock-2') {
+      navigate('/mock-2');
+    }
+  };
 
   return (
     <aside className={cn(
@@ -39,15 +74,82 @@ export function StepNavigation() {
         )}
       </div>
 
+      {/* Mock Cycle Switcher (Mock 0, Mock 1, Mock 2) */}
+      <div className="p-3 border-b border-[var(--border)] shrink-0 bg-[var(--bg-tertiary)]/20">
+        {!isCollapsed ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider px-1">
+              <span>Pipeline Mock</span>
+              <span className="font-mono text-primary-600 dark:text-primary-400 font-bold">{currentMockConfig.name}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1 bg-[var(--bg-tertiary)]/60 p-1 rounded-xl border border-[var(--border)]">
+              {(['mock-0', 'mock-1', 'mock-2'] as MockCycle[]).map((m) => {
+                const isSelected = activeMock === m;
+                const isUnlocked = m === 'mock-0' ? true : (m === 'mock-1' ? isMock1Unlocked : isMock2Unlocked);
+                const label = m === 'mock-0' ? 'Mock 0' : m === 'mock-1' ? 'Mock 1' : 'Mock 2';
+                const sub = !isUnlocked ? 'Locked' : (m === 'mock-0' ? 'Standard' : m === 'mock-1' ? 'Agentic' : 'Options');
+                return (
+                  <button
+                    key={m}
+                    onClick={() => handleMockSwitch(m)}
+                    className={cn(
+                      'py-1.5 px-1 rounded-lg text-center transition-all flex flex-col items-center justify-center relative cursor-pointer',
+                      isSelected
+                        ? 'bg-primary-600 text-white font-bold shadow-xs'
+                        : isUnlocked
+                          ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]'
+                          : 'text-[var(--text-tertiary)] opacity-60 hover:opacity-100 hover:bg-amber-500/10'
+                    )}
+                    title={!isUnlocked ? `${MOCK_CONFIGS[m].name} is Locked` : MOCK_CONFIGS[m].subtitle}
+                  >
+                    <div className="flex items-center gap-0.5">
+                      <span className="text-[11px] leading-tight font-black">{label}</span>
+                      {!isUnlocked && <Lock className="w-2.5 h-2.5 text-amber-500" />}
+                    </div>
+                    <span className={cn(
+                      "text-[8px] font-mono leading-tight mt-0.5",
+                      isSelected ? "text-primary-100" : isUnlocked ? "text-[var(--text-tertiary)]" : "text-amber-500 font-semibold"
+                    )}>
+                      {sub}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={() => {
+                if (activeMock === 'mock-0') {
+                  if (isMock1Unlocked) handleMockSwitch('mock-1');
+                  else toast('Mock 1 is locked. Complete all Mock 0 steps including Step 9 Tech Docs first.', 'warn');
+                } else if (activeMock === 'mock-1') {
+                  if (isMock2Unlocked) handleMockSwitch('mock-2');
+                  else handleMockSwitch('mock-0');
+                } else {
+                  handleMockSwitch('mock-0');
+                }
+              }}
+              className="w-8 h-8 rounded-lg bg-primary-600 text-white text-[10px] font-black flex items-center justify-center shadow-xs cursor-pointer relative"
+              title={`Active: ${currentMockConfig.name} - Click to switch`}
+            >
+              {activeMock.replace('mock-', 'M')}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Steps List */}
-      <div className="flex-1 overflow-y-auto px-3 py-6 space-y-1.5 scrollbar-none">
+      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1.5 scrollbar-none">
         {!isCollapsed && (
-          <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest px-3 mb-4 whitespace-nowrap">
-            Pipeline Steps
+          <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest px-3 mb-3 whitespace-nowrap flex items-center justify-between">
+            <span>{currentMockConfig.name} Stages</span>
+            <span className="text-[9px] font-mono text-[var(--text-tertiary)]">({activeSteps.length})</span>
           </div>
         )}
 
-        {STEPS.map((step, i) => {
+        {activeSteps.map((step, i) => {
           const Icon = step.icon;
           const isActive = activeStep === i;
           const isDone = activeStep > i;
@@ -57,7 +159,7 @@ export function StepNavigation() {
               key={i}
               onClick={() => navigate(step.path)}
               className={cn(
-                'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors duration-200 group relative',
+                'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors duration-200 group relative cursor-pointer',
                 isActive && 'text-primary-800 dark:text-primary-300 font-bold',
                 isDone && 'text-teal-600 dark:text-teal-400 font-semibold hover:bg-[var(--bg-tertiary)]',
                 !isActive && !isDone && 'text-[var(--text-secondary)] font-medium hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
@@ -83,7 +185,16 @@ export function StepNavigation() {
               >
                 {isDone ? <Check className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
               </div>
-              {!isCollapsed && <span className="relative z-10 text-[13px] whitespace-nowrap">{step.label}</span>}
+              {!isCollapsed && (
+                <div className="relative z-10 flex-1 min-w-0">
+                  <div className="text-[13px] whitespace-nowrap truncate">{step.label}</div>
+                  {step.desc && (
+                    <div className="text-[10px] text-[var(--text-tertiary)] font-normal truncate">
+                      {step.desc}
+                    </div>
+                  )}
+                </div>
+              )}
             </button>
           );
         })}
@@ -91,9 +202,9 @@ export function StepNavigation() {
 
       {/* Bottom Progress */}
       {!isCollapsed && (
-        <div className="p-5 border-t border-[var(--border)] bg-[var(--bg-tertiary)]/30 shrink-0">
+        <div className="p-4 border-t border-[var(--border)] bg-[var(--bg-tertiary)]/30 shrink-0">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-[var(--text-secondary)]">Progress</span>
+            <span className="text-[11px] font-bold text-[var(--text-secondary)]">Pipeline Progress</span>
             <span className="text-[11px] font-mono text-primary-600 dark:text-primary-400 font-bold">{Math.round(progress)}%</span>
           </div>
           <div className="h-1.5 w-full bg-[var(--border)] rounded-full overflow-hidden">
@@ -110,7 +221,7 @@ export function StepNavigation() {
       {/* Collapse Toggle */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute -right-3 top-20 w-6 h-6 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-full flex items-center justify-center shadow-md text-[var(--text-secondary)] hover:text-primary-500 transition-colors z-30"
+        className="absolute -right-3 top-20 w-6 h-6 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-full flex items-center justify-center shadow-md text-[var(--text-secondary)] hover:text-primary-500 transition-colors z-30 cursor-pointer"
       >
         {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
       </button>

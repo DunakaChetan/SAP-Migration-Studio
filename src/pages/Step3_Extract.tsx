@@ -119,7 +119,8 @@ export function Step3Extract() {
           project_id: state.projectId,
           target_object: state.obj,
           payload: state.extracted,
-          tables: currentTables
+          tables: currentTables,
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
 

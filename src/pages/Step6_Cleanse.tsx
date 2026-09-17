@@ -947,7 +947,8 @@ export function Step6Cleanse() {
               name: r.name,
               description: r.description,
               enabled: r.enabled
-            }))
+            })),
+            mock_cycle: state.activeMock || 'mock-0'
           })
         });
       } else {
@@ -1035,7 +1036,7 @@ export function Step6Cleanse() {
       const res2 = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules, source: 'cleanse' })
+        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules, source: 'cleanse', mock_cycle: state.activeMock || 'mock-0' })
       });
       const resJson = await res2.json().catch(() => (null));
 
@@ -1069,7 +1070,8 @@ export function Step6Cleanse() {
         body: JSON.stringify({
           project_id: state.projectId,
           target_object: state.obj,
-          payload: state.cleaned
+          payload: state.cleaned,
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
 

@@ -218,7 +218,8 @@ export function Step5Validate() {
             target_object: state.obj,
             custom_prompts: allPrompts,
             selected_rules: Object.keys(selectedRules).filter((k) => selectedRules[k] && !standardRuleOverrides[k]),
-            dynamic_rules: savedDynamicRules.filter((r) => selectedDynamicRules[r.id] !== false) || []
+            dynamic_rules: savedDynamicRules.filter((r) => selectedDynamicRules[r.id] !== false) || [],
+            mock_cycle: state.activeMock || 'mock-0'
           }),
         });
         if (!res.ok) {
@@ -322,7 +323,7 @@ export function Step5Validate() {
         await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: updated, source: 'validate' })
+          body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: updated, source: 'validate', mock_cycle: state.activeMock || 'mock-0' })
         });
       } catch (e) {
         console.error("Failed to auto-sync rule deletion to DB", e);
@@ -384,7 +385,7 @@ export function Step5Validate() {
       const res2 = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/validate/rules/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules, source: 'validate' })
+        body: JSON.stringify({ project_id: state.projectId, target_object: state.obj, rules: payloadRules, source: 'validate', mock_cycle: state.activeMock || 'mock-0' })
       });
       const resJson = await res2.json().catch(() => (null));
       if (!res2.ok) {
@@ -428,6 +429,7 @@ export function Step5Validate() {
           target_object: state.obj,
           payload: rowsToSave,
           tables: state.extractedTables || [],
+          mock_cycle: state.activeMock || 'mock-0'
         }),
       });
 
@@ -490,7 +492,8 @@ export function Step5Validate() {
           project_id: state.projectId,
           target_object: state.obj,
           payload: errorReport,
-          dynamic_rules: state.dynamicRules || []
+          dynamic_rules: state.dynamicRules || [],
+          mock_cycle: state.activeMock || 'mock-0'
         })
       });
 

@@ -16,6 +16,9 @@ import { Step8DMCExport } from '@/pages/Step8_DMCExport';
 import { Step9TechDocs } from '@/pages/Step9_TechDocs';
 import { Auth } from '@/pages/Auth';
 import { InsertMapping } from '@/pages/InsertMapping';
+import { Mock1Agentic } from '@/pages/Mock1_Agentic';
+import { Mock2Options } from '@/pages/Mock2_Options';
+import { WrapperDashboard } from '@/pages/WrapperDashboard';
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   // const token = localStorage.getItem('access_token');
@@ -47,6 +50,7 @@ function AppContent() {
       <Route path="*" element={
         <ProtectedLayout>
           <Routes>
+            {/* Mock 0 Pipeline Routes */}
             <Route path="/" element={<Step1SourceData />} />
             <Route path="/mapping" element={<Step2AIMapping />} />
             <Route path="/extract" element={<Step3Extract />} />
@@ -58,6 +62,17 @@ function AppContent() {
             <Route path="/docs/:id" element={<Step9TechDocs />} />
             <Route path="/docs" element={<Step9TechDocs />} />
             <Route path="/insert" element={<InsertMapping />} />
+
+            {/* Mock 1 & Mock 2 Routes */}
+            <Route path="/mock-1" element={<Mock1Agentic />} />
+            <Route path="/mock-1/*" element={<Mock1Agentic />} />
+            <Route path="/mock-2" element={<Mock2Options />} />
+            <Route path="/mock-2/*" element={<Mock2Options />} />
+
+            {/* Live Data Wrapper Dashboard */}
+            <Route path="/wrapper" element={<WrapperDashboard />} />
+            <Route path="/dashboard" element={<WrapperDashboard />} />
+
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ProtectedLayout>

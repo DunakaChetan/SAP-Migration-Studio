@@ -38,7 +38,7 @@ const SOURCE_DISPLAY_NAMES: Record<string, string> = {
 };
 
 export function Step9TechDocs() {
-  const { state } = useMigration();
+  const { state, dispatch } = useMigration();
   const { toast } = useToast();
   const navigate = useNavigate();
   const params = useParams();
@@ -142,6 +142,7 @@ export function Step9TechDocs() {
         source: sourceSystem,
         source_name: sourceDisplayName,
         report_title: `Consolidated Master & Post-Load Audit Report`,
+        mock_cycle: state.activeMock || 'mock-0',
         pipeline_summary: {
           extracted_rows: extractedCount,
           harmonized_rows: harmonizedCount,
@@ -212,6 +213,8 @@ export function Step9TechDocs() {
         if (data.id) {
           setDocId(data.id);
           setPersistedReport(data.data);
+          dispatch({ type: 'SET_FIELD', field: 'isTechDocsSaved', value: true });
+          dispatch({ type: 'SET_FIELD', field: 'techDocId', value: data.id });
           // Attach single existing record ID to URL without full page reload
           setSearchParams({ id: data.id }, { replace: true });
         }
@@ -235,6 +238,8 @@ export function Step9TechDocs() {
             if (data.data) {
               setPersistedReport(data.data);
               setDocId(routeDocId);
+              dispatch({ type: 'SET_FIELD', field: 'isTechDocsSaved', value: true });
+              dispatch({ type: 'SET_FIELD', field: 'techDocId', value: routeDocId });
               toast('Consolidated report loaded successfully from Supabase!', 'ok');
             }
           }
