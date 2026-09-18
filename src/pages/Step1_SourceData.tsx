@@ -7,7 +7,7 @@ import { SAMPLE } from '@/data/sample-data';
 import { OBJS } from '@/data/sap-schemas';
 import {
   Card, CardHeader, CardBody, Button, InfoBox, Badge, DataTable,
-  PageLayout, PageGrid, GridCol, PageHeader, Divider, SidebarItem, Select, ConfirmModal
+  PageLayout, PageGrid, GridCol, PageHeader, Divider, SidebarItem, Select, ConfirmModal, TargetObjectImportModal
 } from '@/components/shared';
 import { Zap, ArrowRight, Link2, Database, LayoutTemplate, FileSpreadsheet, Layers, Cloud, HardDrive, Users, Building2, Package, Cable, Settings2, Download, FolderGit2, Plus, Edit3, Save, Trash2, X, GitMerge, FileText, CheckCircle2, RotateCw } from 'lucide-react';
 import { saveStagedFilesToDB, loadStagedFilesFromDB, removeStagedFileFromDB, clearAllStagedFilesFromDB } from '@/lib/file-storage';
@@ -53,6 +53,26 @@ export function Step1SourceData() {
   };
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Dynamic Target Objects & Import Modal State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [backendObjects, setBackendObjects] = useState<{ id?: string; name: string; description?: string }[]>([]);
+  const [isLoadingObjects, setIsLoadingObjects] = useState(false);
+
+  const fetchBackendObjects = React.useCallback(async () => {
+    setIsLoadingObjects(true);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/sap/objects`);
+      if (res.ok) {
+        const data = await res.json();
+        setBackendObjects(data.objects || []);
+      }
+    } catch (err) {
+      console.warn('Failed to load target objects from backend:', err);
+    } finally {
+      setIsLoadingObjects(false);
+    }
+  }, []);
 
   // Connection State
   const updateField = (field: any, value: any) => dispatch({ type: 'SET_FIELD', field, value });
@@ -200,6 +220,7 @@ export function Step1SourceData() {
 
   useEffect(() => {
     fetchProjects();
+    fetchBackendObjects();
     loadStagedFilesFromDB().then((persistedFiles) => {
       if (persistedFiles && persistedFiles.length > 0) {
         setStagedFiles(persistedFiles);
@@ -890,10 +911,19 @@ export function Step1SourceData() {
   return (
     <PageLayout>
       <PageHeader title="Step 1 — Source & Data Connect" subtitle="Upload legacy ECC extracts or connect to source databases">
-        <div title={nextDisabled ? "Complete all connection fields, select a project, and load sample data to proceed." : ""}>
-          <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/mapping')} disabled={nextDisabled}>
-            Next: AI Mapping
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Button
+            variant="secondary"
+            icon={<FileSpreadsheet className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />}
+            onClick={() => setIsImportModalOpen(true)}
+          >
+            Upload Target Object Fields
           </Button>
+          <div title={nextDisabled ? "Complete all connection fields, select a project, and load sample data to proceed." : ""}>
+            <Button variant="primary" icon={<ArrowRight className="w-3.5 h-3.5" />} onClick={() => navigate('/mapping')} disabled={nextDisabled}>
+              Next: AI Mapping
+            </Button>
+          </div>
         </div>
       </PageHeader>
 
@@ -1379,13 +1409,32 @@ export function Step1SourceData() {
               <CardHeader icon={<FolderGit2 className="w-4 h-4" />} title="Project Workspace" subtitle="Required for mapping" />
               <CardBody className="space-y-4">
                 <div>
-                  <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5 block">Target Object</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] block">Target Object</label>
+                    <button
+                      type="button"
+                      onClick={() => fetchBackendObjects()}
+                      disabled={isLoadingObjects}
+                      title="Reload target objects from backend database"
+                      className="inline-flex items-center gap-1 text-[10.5px] text-teal-600 dark:text-teal-400 hover:underline disabled:opacity-50 transition-colors cursor-pointer"
+                    >
+                      <RotateCw className={`w-3 h-3 ${isLoadingObjects ? 'animate-spin' : ''}`} />
+                      <span>{isLoadingObjects ? 'Loading...' : 'Refresh'}</span>
+                    </button>
+                  </div>
                   <Select
                     value={state.obj || ''}
                     onChange={(val) => pickObj(val)}
                     options={[
-                      { value: '', label: '— Select a target object —' },
-                      ...Object.entries(OBJS).map(([k, v]) => ({ value: k, label: `${v.label} (${v.module})` }))
+                      { value: '', label: isLoadingObjects ? 'Loading target objects...' : '— Select a target object —' },
+                      ...(() => {
+                        const staticList = Object.entries(OBJS).map(([k, v]) => ({ value: k, label: `${v.label} (${v.module})` }));
+                        const staticKeys = new Set(staticList.map(o => o.value.toUpperCase()));
+                        const dynamicList = backendObjects
+                          .filter(bo => !staticKeys.has(bo.name.toUpperCase()))
+                          .map(bo => ({ value: bo.name, label: `${bo.name} (Custom Target Object)` }));
+                        return [...staticList, ...dynamicList];
+                      })()
                     ]}
                   />
                 </div>
@@ -1528,6 +1577,14 @@ export function Step1SourceData() {
         onConfirm={handleDeleteProject}
         onCancel={() => setShowDeleteConfirm(false)}
         isDestructive={true}
+      />
+      <TargetObjectImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onSuccess={(newObj) => {
+          fetchBackendObjects();
+          pickObj(newObj);
+        }}
       />
     </PageLayout>
   );
