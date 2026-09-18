@@ -3,6 +3,14 @@ import re
 import pandas as pd
 import numpy as np
 
+from services.dynamic_guardrails import (
+    validate_transformation_script_ast,
+    SAFE_DYNAMIC_BUILTINS,
+    check_master_data_preservation,
+    verify_dataset_invariance,
+    verify_required_columns_intact,
+)
+
 class TransformationAgent:
     def __init__(self):
         pass
@@ -171,6 +179,27 @@ class TransformationAgent:
         if not cleansed_rows or not python_code.strip():
             return cleansed_rows, {"rows_loaded": len(cleansed_rows), "rows_modified": 0, "total_modifications": 0, "audit_log": []}
 
+        # 1. AST Security Sandbox Guardrail
+        is_valid, reason = validate_transformation_script_ast(python_code)
+        if not is_valid:
+            print(f"[TransformationAgent] Guardrail rejected AI script: {reason}")
+            return cleansed_rows, {
+                "rows_loaded": len(cleansed_rows),
+                "rows_modified": 0,
+                "total_modifications": 0,
+                "audit_log": [{
+                    "id": str(uuid.uuid4()),
+                    "row": 0,
+                    "phase": "AI Python Transform",
+                    "rule_code": "GUARDRAIL_REJECTED",
+                    "field": "General",
+                    "old_value": "AI Script",
+                    "new_value": f"Guardrail security violation: {reason}",
+                    "status": "REJECTED"
+                }],
+                "error": f"Guardrail rejected AI script: {reason}"
+            }
+
         original_df = pd.DataFrame(cleansed_rows)
         df = original_df.copy()
 
@@ -191,18 +220,23 @@ class TransformationAgent:
 
         baseline_df = df.copy()
 
-        # Prepend standard data manipulation imports to avoid NameError inside exec functions/lambdas
-        header = "import pandas as pd\nimport numpy as np\nimport re\n"
         clean_code = python_code.replace("```python", "").replace("```", "").strip()
-        code_to_exec = header + clean_code
+        cleaned_lines = []
+        for line in clean_code.splitlines():
+            trimmed = line.strip()
+            if re.match(r"^(?:import\s+(?:pandas|numpy|math|re|datetime)(?:\s+as\s+\w+)?|from\s+(?:pandas|numpy|math|re|datetime)\s+import\s+.*)$", trimmed):
+                continue
+            cleaned_lines.append(line)
+        code_to_exec = "\n".join(cleaned_lines)
         
+        # 2. Restricted Builtins Execution Sandbox
         exec_scope = {
             "pd": pd,
             "pandas": pd,
             "np": np,
             "numpy": np,
             "re": re,
-            "__builtins__": __builtins__,
+            "__builtins__": SAFE_DYNAMIC_BUILTINS,
         }
 
         try:
@@ -235,6 +269,46 @@ class TransformationAgent:
                     "status": "FAILED"
                 }],
                 "error": str(e)
+            }
+
+        # 3. Schema Integrity Guardrail: check required columns preserved
+        col_ok, col_reason = verify_required_columns_intact(baseline_df, transformed_df, list(original_df.columns))
+        if not col_ok:
+            return cleansed_rows, {
+                "rows_loaded": len(cleansed_rows),
+                "rows_modified": 0,
+                "total_modifications": 0,
+                "audit_log": [{
+                    "id": str(uuid.uuid4()),
+                    "row": 0,
+                    "phase": "AI Python Transform",
+                    "rule_code": "SCHEMA_GUARDRAIL",
+                    "field": "Schema",
+                    "old_value": "Columns",
+                    "new_value": col_reason,
+                    "status": "REJECTED"
+                }],
+                "error": col_reason
+            }
+
+        # 4. Dataset Invariance Guardrail: check row count bounds
+        inv_ok, inv_reason = verify_dataset_invariance(baseline_df, transformed_df, allow_drops=False, max_explosion_ratio=1.0)
+        if not inv_ok:
+            return cleansed_rows, {
+                "rows_loaded": len(cleansed_rows),
+                "rows_modified": 0,
+                "total_modifications": 0,
+                "audit_log": [{
+                    "id": str(uuid.uuid4()),
+                    "row": 0,
+                    "phase": "AI Python Transform",
+                    "rule_code": "INVARIANCE_GUARDRAIL",
+                    "field": "Row Count",
+                    "old_value": f"{len(baseline_df)} rows",
+                    "new_value": inv_reason,
+                    "status": "REJECTED"
+                }],
+                "error": inv_reason
             }
 
         # Sync changes between created aliases and origin columns
@@ -270,6 +344,23 @@ class TransformationAgent:
                     new_val = str(new_row[col]).strip() if new_row[col] is not None else ""
                     
                     if orig_val != new_val:
+                        # Master Data Preservation Guardrail
+                        allowed, reason = check_master_data_preservation(col, orig_val, new_val)
+                        if not allowed:
+                            # Revert cell change and log safeguard alert
+                            transformed_df.iloc[row_idx, transformed_df.columns.get_loc(col)] = orig_val
+                            audit_log.append({
+                                "id": str(uuid.uuid4()),
+                                "row": row_idx + 1,
+                                "phase": "AI Python Transform",
+                                "rule_code": "MASTER_DATA_PRESERVED",
+                                "field": col,
+                                "old_value": orig_val,
+                                "new_value": f"[Preserved] {reason}",
+                                "status": "SAFEGUARD"
+                            })
+                            continue
+
                         audit_log.append({
                             "id": str(uuid.uuid4()),
                             "row": row_idx + 1,

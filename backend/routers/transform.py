@@ -6,6 +6,7 @@ import pandas as pd
 
 from services.supabase_client import supabase_service
 from services.llm_orchestrator import LLMOrchestrator
+from services.dynamic_guardrails import validate_transformation_script_ast
 from agents.transformation_agent import TransformationAgent
 import json
 import logging
@@ -227,6 +228,13 @@ def apply_ai_transform_mappings(req: AITransformRequest):
             
         if not python_code:
             raise ValueError("'python_code' is missing or empty")
+
+        # AST Security Sandbox Guardrail
+        is_valid, reason = validate_transformation_script_ast(python_code)
+        if not is_valid:
+            raise HTTPException(400, f"Transformation AI script failed security guardrail: {reason}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to parse AI response: {str(e)}\nRaw Response: {llm_response}")
 
@@ -328,8 +336,15 @@ def generate_ai_script(req: AIPromptRequest):
             
         if not python_code:
             raise ValueError("'python_code' is missing or empty")
+
+        # AST Security Sandbox Guardrail
+        is_valid, reason = validate_transformation_script_ast(python_code)
+        if not is_valid:
+            raise HTTPException(400, f"Generated script failed security guardrail: {reason}")
             
         return {"python_code": python_code}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to parse AI response: {str(e)}")
 

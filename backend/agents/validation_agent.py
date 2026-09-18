@@ -2,6 +2,8 @@ import re
 import random
 from typing import Dict, List, Any, Optional
 
+from services.dynamic_guardrails import validate_validation_condition_ast
+
 # SAP schemas
 OBJS: Dict[str, List[Dict[str, Any]]] = {
     "CUSTOMER": [
@@ -195,6 +197,14 @@ class ValidationAgent:
         Safely evaluate a compiled Python rule condition against a row dictionary.
         Returns True if rule condition is violated (i.e. validation fails).
         """
+        if not code or not str(code).strip():
+            return False
+
+        # Pre-validate condition AST security
+        is_valid, _ = validate_validation_condition_ast(str(code))
+        if not is_valid:
+            return False
+
         try:
             allowed_globals = {
                 "__builtins__": None,

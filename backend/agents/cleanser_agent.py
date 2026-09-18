@@ -25,6 +25,12 @@ import numpy as np
 import pandas as pd
 
 from services.cleanser_dynamic_rules import get_relevant_rules_for_cleanser
+from services.dynamic_guardrails import (
+    validate_cleansing_fixer_ast,
+    UNSAFE_DEFAULT_FIELDS,
+    SAFE_DYNAMIC_BUILTINS,
+    verify_dataset_invariance,
+)
 
 
 # =============================================================================
@@ -1095,6 +1101,15 @@ def apply_clean_tax_number(df: pd.DataFrame, summary: CleaningSummary, rule_code
                 _set_value(df, idx, field_name, cleaned, summary, "cleanser", rule_code)
 
 
+def apply_payment_terms_to_sap(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
+    payterm_fields = [col for col in df.columns if _field_key(col) in {"ZTERM", "PAYMENT_TERMS", "PAYTERMS"}]
+    for field_name in payterm_fields:
+        for idx in df.index:
+            value = _get_value(df, idx, field_name)
+            if not _is_empty(value):
+                _set_value(df, idx, field_name, value.upper().strip(), summary, "cleanser", rule_code)
+
+
 def apply_fill_empty_fields(df: pd.DataFrame, summary: CleaningSummary, rule_code: str) -> None:
     for idx in df.index:
         for field_name in df.columns:
@@ -1137,6 +1152,7 @@ CLEANSER_RULES: list[tuple[str, CleanserRule]] = [
     ("CL_TRIM_WHITESPACE", apply_trim_whitespace),
     ("CL_COUNTRY_TO_ISO", apply_country_to_iso),
     ("CL_CURRENCY_TO_ISO", apply_currency_to_iso),
+    ("CL_PAYMENT_TERMS_TO_SAP", apply_payment_terms_to_sap),
     ("CL_PAD_NUMERIC_IDENTIFIER", apply_pad_numeric_identifier),
     ("CL_UPPERCASE_CODE_FIELDS", apply_uppercase_code_fields),
     ("CL_CLEAN_TAX_NUMBER", apply_clean_tax_number),
@@ -1151,6 +1167,7 @@ CLEANSER_RULES: list[tuple[str, CleanserRule]] = [
 SEMANTIC_CLEANSER_RULE_FIELDS: dict[str, set[str]] = {
     "CL_COUNTRY_TO_ISO": COUNTRY_FIELD_NAMES,
     "CL_CURRENCY_TO_ISO": CURRENCY_FIELD_NAMES,
+    "CL_PAYMENT_TERMS_TO_SAP": {"ZTERM", "PAYMENT_TERMS", "PAYTERMS"},
     "CL_PAD_NUMERIC_IDENTIFIER": set(IDENTIFIER_LENGTHS),
     "CL_UPPERCASE_CODE_FIELDS": CODE_FIELD_NAMES,
     "CL_CLEAN_TAX_NUMBER": {"STCD1", "STCD2", "TAX_NUMBER", "PAN", "GST"},
@@ -1578,53 +1595,10 @@ def _extract_dynamic_fixer_code(raw_response: str) -> str:
 def validate_dynamic_fixer_code(code: str) -> tuple[bool, str]:
     """
     Validate generated Python without executing it.
-
-    The only accepted contract is:
-        def fix_dynamic_rule(df, issue_rows):
-            ...
+    Delegates to centralized validate_cleansing_fixer_ast.
     """
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as exc:
-        return False, f"Python syntax error: {exc}"
+    return validate_cleansing_fixer_ast(code)
 
-    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
-    if len(functions) != 1 or functions[0].name != "fix_dynamic_rule":
-        return False, "Code must define exactly one function named fix_dynamic_rule."
-
-    function = functions[0]
-    arg_names = [arg.arg for arg in function.args.args]
-    if arg_names != ["df", "issue_rows"]:
-        return False, "fix_dynamic_rule must accept exactly df and issue_rows."
-    if function.decorator_list:
-        return False, "Decorators are not allowed."
-    if not any(isinstance(node, ast.Return) for node in ast.walk(function)):
-        return False, "fix_dynamic_rule must return a dataframe/result."
-
-    ALLOWED_IMPORTS = {"pandas", "numpy", "math", "re", "datetime"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name not in ALLOWED_IMPORTS:
-                    return False, f"Import of '{alias.name}' is not allowed in dynamic fixer code."
-        elif isinstance(node, ast.ImportFrom):
-            if node.module not in ALLOWED_IMPORTS:
-                return False, f"Import from '{node.module}' is not allowed in dynamic fixer code."
-        if isinstance(node, (ast.AsyncFunctionDef, ast.ClassDef, ast.Global, ast.Nonlocal, ast.Delete, ast.With, ast.AsyncWith)):
-            return False, f"{type(node).__name__} is not allowed in dynamic fixer code."
-        if isinstance(node, ast.Name):
-            if node.id.startswith("__") or node.id in FORBIDDEN_DYNAMIC_FIXER_NAMES:
-                return False, f"Forbidden name used: {node.id}"
-        if isinstance(node, ast.Attribute):
-            if node.attr.startswith("__"):
-                return False, f"Forbidden attribute used: {node.attr}"
-        if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_DYNAMIC_FIXER_CALLS:
-                return False, f"Forbidden call used: {node.func.id}"
-            if isinstance(node.func, ast.Attribute) and node.func.attr in FORBIDDEN_DYNAMIC_FIXER_METHODS:
-                return False, f"Forbidden method call used: {node.func.attr}"
-
-    return True, "ok"
 
 
 def _build_dynamic_fixer_prompts(rule_item: dict[str, Any], issue_group: dict[str, Any]) -> tuple[str, str]:
@@ -2001,6 +1975,15 @@ def execute_dynamic_fixers(
                 "rule_code": rule_code,
                 "field": field_name,
                 "reason": "Fixer unexpectedly added new rows to dataset.",
+            })
+            continue
+        elif list(after_df.columns) != list(before_df.columns):
+            print(f"❌ [DYNAMIC FIXER EXECUTION] Fixer altered column structure from {list(before_df.columns)} to {list(after_df.columns)}")
+            failed_list.append({
+                "group_id": group_id,
+                "rule_code": rule_code,
+                "field": field_name,
+                "reason": f"Structural validation failed: altered column structure from {list(before_df.columns)} to {list(after_df.columns)}",
             })
             continue
         else:

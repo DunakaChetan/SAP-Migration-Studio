@@ -23,6 +23,10 @@ from pydantic import BaseModel
 import pandas as pd
 
 from services.supabase_client import supabase_service
+from services.dynamic_guardrails import (
+    validate_harmonization_transform_ast,
+    is_master_data_field,
+)
 from agents.harmonization_agent import (
     HarmonizationAgent,
     HarmonizationConfig,
@@ -525,12 +529,32 @@ CRITICAL RULES:
         user_msg += f"{i}. {p}\n"
 
     try:
-        rules = llm_orchestrator.execute_json_prompt(system_prompt, user_msg)
-        if not isinstance(rules, list):
-            rules = [rules]
+        validated_rules = []
+        for r in rules:
+            if not isinstance(r, dict):
+                continue
+            code = r.get("python_code", "")
+            target_fld = r.get("target_field", "")
+            if not code or not target_fld:
+                continue
 
-        logger.info(f"Generated {len(rules)} dynamic harmonization rules from {len(prompts)} prompts via LLMOrchestrator")
-        return rules
+            # AST Security Sandbox Guardrail
+            is_valid, reason = validate_harmonization_transform_ast(code)
+            if not is_valid:
+                logger.warning(f"Harmonization dynamic rule '{r.get('id')}' rejected by AST guardrail: {reason}")
+                r["status"] = "rejected"
+                r["rejection_reason"] = reason
+                continue
+
+            # Master Data Safeguard check
+            if is_master_data_field(target_fld):
+                r["is_master_data_field"] = True
+                r["safeguard_notice"] = f"Master data preservation active for field '{target_fld}'."
+
+            validated_rules.append(r)
+
+        logger.info(f"Generated and validated {len(validated_rules)} dynamic harmonization rules from {len(prompts)} prompts via LLMOrchestrator")
+        return validated_rules
 
     except Exception as e:
         logger.exception(f"Failed to generate dynamic harmonization rules: {e}")

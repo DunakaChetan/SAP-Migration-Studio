@@ -10,6 +10,7 @@ import pandas as pd
 
 from services.supabase_client import supabase_service
 from services.cleanser_dynamic_rules import save_rules, normalize_dynamic_rule
+from services.dynamic_guardrails import validate_validation_condition_ast
 from agents.validation_agent import ValidationAgent, gen_customer_rows, OBJS, RULES
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,14 @@ Output MUST be a JSON object with key "rules" containing a list of rule objects:
             sanitized_code = sanitize_python_code(raw_code, prompt_str)
             is_ambiguous = bool(r.get("is_ambiguous", False))
             clarification = r.get("clarification") or ""
+
+            # AST Security Sandbox Guardrail
+            is_valid_ast, ast_reason = validate_validation_condition_ast(sanitized_code)
+            if not is_valid_ast:
+                logger.warning(f"Validation dynamic rule {r.get('id')} rejected by AST guardrail: {ast_reason}")
+                sanitized_code = "False"
+                clarification = f"{clarification} [AST Guardrail: {ast_reason}]".strip()
+                is_ambiguous = True
             
             cleaned_rules.append({
                 "id": r.get("id") or f"DYNAMIC_RULE_{idx}",

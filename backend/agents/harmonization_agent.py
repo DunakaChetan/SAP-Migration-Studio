@@ -39,6 +39,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from services.dynamic_guardrails import (
+    validate_harmonization_transform_ast,
+    SAFE_DYNAMIC_BUILTINS,
+    check_master_data_preservation,
+    verify_dataset_invariance,
+)
+
 
 # ══════════════════════════════════════════════════════════
 # 1. LOOKUP MAPS (ported from src/data/lookup-maps.ts)
@@ -1419,7 +1426,13 @@ class HarmonizationAgent:
                 self.fix_log.append(f"[DynamicAI] Skipping rule '{label}' — missing code or target field")
                 continue
 
-            # Find the actual column in df
+            # 1. AST Security Sandbox Guardrail
+            is_valid, reason = validate_harmonization_transform_ast(python_code)
+            if not is_valid:
+                self.fix_log.append(f"[DynamicAI] Blocked rule '{label}' — AST guardrail rejection: {reason}")
+                continue
+
+            # 2. Find the actual column in df
             actual_col = None
             for col in df.columns:
                 if col.upper() == target_field.upper() or col.split('.')[-1].upper() == target_field.upper():
@@ -1430,9 +1443,15 @@ class HarmonizationAgent:
                 self.fix_log.append(f"[DynamicAI] Skipping rule '{label}' — field '{target_field}' not found in data")
                 continue
 
+            before_df = df.copy()
+
             try:
-                # Build the transform function from LLM code
-                exec_globals = {"re": re, "pd": pd}
+                # 3. Build transform function inside restricted execution sandbox
+                exec_globals = {
+                    "__builtins__": SAFE_DYNAMIC_BUILTINS,
+                    "re": re,
+                    "pd": pd,
+                }
                 exec(python_code, exec_globals)
                 transform_fn = exec_globals.get("transform")
                 if not callable(transform_fn):
@@ -1447,12 +1466,26 @@ class HarmonizationAgent:
                         new_val = str(transform_fn(old_val, row_dict))
                     except Exception:
                         new_val = old_val
+
+                    # 4. Master Data Preservation Guardrail
+                    allowed, reason = check_master_data_preservation(actual_col, old_val, new_val)
+                    if not allowed:
+                        self.fix_log.append(f"[DynamicAI] Master data safeguard active for '{actual_col}' (row {idx + 1}): {reason}")
+                        continue
+
                     if new_val != old_val:
                         df.at[idx, actual_col] = new_val
                         changed_count += 1
                         if changed_count <= 5:
                             key_info = self._row_key_info(df, idx)
                             self.fix_log.append(f"[DynamicAI] Row {idx + 1}{key_info} ({actual_col}): '{old_val[:30]}' → '{new_val[:30]}'")
+
+                # 5. Dataset Invariance Guardrail
+                inv_ok, inv_reason = verify_dataset_invariance(before_df, df, allow_drops=False)
+                if not inv_ok:
+                    self.fix_log.append(f"[DynamicAI] Rolled back rule '{label}' due to invariance violation: {inv_reason}")
+                    df = before_df
+                    continue
 
                 if changed_count > 5:
                     self.fix_log.append(f"[DynamicAI] ... and {changed_count - 5} more changes for '{label}'")
@@ -1461,6 +1494,7 @@ class HarmonizationAgent:
 
             except Exception as e:
                 self.fix_log.append(f"[DynamicAI] Error executing rule '{label}': {str(e)[:100]}")
+                df = before_df
 
         return df
 
