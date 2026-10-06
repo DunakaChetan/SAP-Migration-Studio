@@ -31,6 +31,7 @@ const OBJECT_DISPLAY_NAMES: Record<string, string> = {
 const SOURCE_DISPLAY_NAMES: Record<string, string> = {
   SAP_ECC: 'SAP ECC 6.0',
   ORACLE_EBS: 'Oracle E-Business Suite (EBS)',
+  INFOR: 'Infor CloudSuite',
   EXCEL_CSV: 'Excel / Flat CSV Files',
   DYNAMICS: 'Microsoft Dynamics 365',
   SALESFORCE: 'Salesforce CRM',

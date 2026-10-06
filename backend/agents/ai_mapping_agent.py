@@ -43,7 +43,7 @@ Output MUST be a JSON array of objects with the following keys for ONLY the fiel
 You need to accurately map fields from {source_system} to SAP S/4HANA target object {target_object}.
 You are given a STRICT list of MANDATORY target fields in SAP formatted as {{"sap_field": "STRUCTURE.FIELD_NAME", "description": "Human readable description"}}. 
 CRITICAL REQUIREMENT: You MUST provide EXACTLY ONE mapping for EVERY SINGLE field in the target list. Do NOT omit any fields. If there are duplicate field names (e.g. KUNNR), you must map each one individually because they belong to different SAP structures. Do NOT summarize or truncate.
-Because the known source fields list is empty, you MUST act as a Senior Architect and perform a deep internal knowledge search to find the EXACT standard database table and column names in {source_system} (e.g., for Oracle EBS, use standard tables like HZ_PARTIES, AP_SUPPLIERS) that correspond to each SAP target field.
+Because the known source fields list is empty, you MUST act as a Senior Architect and perform a deep internal knowledge search to find the EXACT standard database table and column names in {source_system} (e.g., for Oracle EBS, use standard tables like HZ_PARTIES; for Infor, use standard tables like tccom100) that correspond to each SAP target field.
 
 EXTREMELY CRITICAL INSTRUCTION FOR SOURCE FIELD NAMES:
 You MUST output EXACT, accurate, and short technical field names ONLY for the `source_field` (e.g., "HZ_CUST_ACCOUNTS.ACCOUNT_NUMBER" or "ACCOUNT_NUMBER"). 

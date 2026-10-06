@@ -223,6 +223,29 @@ export function Step3Extract() {
         } catch (e) {
           console.warn('Could not auto-fetch full Oracle dataset, proceeding with existing data', e);
         }
+      } else if (state.src === 'INFOR' && sourceData.length <= 10) {
+        try {
+          const inforRes = await fetch('/Infor.xlsx');
+          if (inforRes.ok) {
+            const blob = await inforRes.blob();
+            const file = new File([blob], 'Infor.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const formData = new FormData();
+            formData.append('file', file);
+            const upRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, {
+              method: 'POST',
+              body: formData
+            });
+            if (upRes.ok) {
+              const upData = await upRes.json();
+              if (upData.data && upData.data.length > 0) {
+                sourceData = upData.data;
+                dispatch({ type: 'SET_FIELD', field: 'uploadedData', value: upData.data });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not auto-fetch full Infor dataset, proceeding with existing data', e);
+        }
       }
 
       if (sourceData.length === 0) {

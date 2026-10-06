@@ -228,6 +228,7 @@ function DropZone({
 const SOURCE_OPTIONS = [
   { value: 'SAP_ECC', label: 'SAP ECC 6.0' },
   { value: 'ORACLE_EBS', label: 'Oracle EBS R12' },
+  { value: 'INFOR', label: 'Infor CloudSuite' },
   { value: 'EXCEL_CSV', label: 'Excel / CSV' },
   { value: 'DYNAMICS', label: 'MS Dynamics 365' },
   { value: 'SALESFORCE', label: 'Salesforce CRM' },
@@ -1291,7 +1292,7 @@ export function Step4Harmonize() {
           formData.append('division', division);
           formData.append('currency', currency);
           formData.append('primary_source', state.src || primarySource);
-          formData.append('secondary_source', secondarySource || 'ORACLE_EBS');
+          formData.append('secondary_source', secondarySource || (state.src === 'INFOR' ? 'INFOR' : 'ORACLE_EBS'));
           formData.append('secondary_file', secFile);
           if (secMappingFile) {
             formData.append('secondary_mapping_file', secMappingFile);
@@ -1314,7 +1315,7 @@ export function Step4Harmonize() {
           formData.append('division', division);
           formData.append('currency', currency);
           formData.append('primary_source', primarySource);
-          formData.append('secondary_source', secondarySource || 'ORACLE_EBS');
+          formData.append('secondary_source', secondarySource || (state.src === 'INFOR' ? 'INFOR' : 'ORACLE_EBS'));
           formData.append('secondary_file', secFile);
           if (secMappingFile) {
             formData.append('secondary_mapping_file', secMappingFile);
@@ -1906,6 +1907,7 @@ export function Step4Harmonize() {
                       { value: 'EXCEL_CSV', label: 'Excel/CSV' },
                       { value: 'SAP_ECC', label: 'SAP ECC 6.0' },
                       { value: 'ORACLE_EBS', label: 'Oracle EBS R12' },
+                      { value: 'INFOR', label: 'Infor CloudSuite' },
                       { value: 'DYNAMICS', label: 'MS Dynamics' },
                       { value: 'SALESFORCE', label: 'Salesforce' },
                       { value: 'LEGACY', label: 'Legacy DB' }

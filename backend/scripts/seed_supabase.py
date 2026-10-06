@@ -25,6 +25,7 @@ def seed():
     systems = [
         {"name": "SAP_ECC"},
         {"name": "ORACLE_EBS"},
+        {"name": "INFOR"},
         {"name": "EXCEL_CSV"},
         {"name": "DYNAMICS"},
         {"name": "SALESFORCE"},

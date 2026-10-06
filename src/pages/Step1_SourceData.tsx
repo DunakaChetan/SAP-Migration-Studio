@@ -21,6 +21,7 @@ const objIcons = {
 const SOURCES = [
   { key: 'SAP_ECC', icon: <Database className="w-4 h-4 text-blue-500" />, name: 'SAP ECC 6.0', sub: 'Classic SAP — KNA1/LFA1' },
   { key: 'ORACLE_EBS', icon: <Layers className="w-4 h-4 text-red-500" />, name: 'Oracle EBS R12', sub: 'AR/AP tables' },
+  { key: 'INFOR', icon: <Database className="w-4 h-4 text-orange-500" />, name: 'Infor CloudSuite', sub: 'LN/Baan tables' },
   { key: 'EXCEL_CSV', icon: <FileSpreadsheet className="w-4 h-4 text-emerald-500" />, name: 'Excel / CSV', sub: 'Flat file upload' },
   { key: 'DYNAMICS', icon: <LayoutTemplate className="w-4 h-4 text-blue-600" />, name: 'MS Dynamics 365', sub: 'CRM/ERP export' },
   { key: 'SALESFORCE', icon: <Cloud className="w-4 h-4 text-sky-500" />, name: 'Salesforce CRM', sub: 'Account data' },
@@ -30,6 +31,7 @@ const SOURCES = [
 const DATASETS = [
   { title: 'SAP ECC Customers', desc: '10 records with intentional errors — missing IDs, wrong country/currency format, empty required fields', srcKey: 'SAP_ECC', objKey: 'CUSTOMER' },
   { title: 'Oracle ERP Vendors', desc: '7 vendor records — mixed country formats, duplicate entry, payment term variations', srcKey: 'ORACLE_EBS', objKey: 'VENDOR' },
+  { title: 'Infor LN Partners', desc: '7 business partners — duplicates, missing fields, format violations', srcKey: 'INFOR', objKey: 'VENDOR' },
   { title: 'Excel Materials', desc: '8 material records — mixed material type formats, empty rows, various industry sectors', srcKey: 'EXCEL_CSV', objKey: 'MATERIAL' },
 ];
 
@@ -705,6 +707,49 @@ export function Step1SourceData() {
     }
   };
 
+  const handleLoadInfor = async () => {
+    setIsUploading(true);
+    showLoad('Loading Infor Extract...', 'Parsing Infor sample data', ['Reading columns...', 'Extracting 10 sample rows...']);
+    try {
+      const response = await fetch('/Infor.xlsx');
+      if (!response.ok) throw new Error('Failed to fetch Infor.xlsx from public folder');
+
+      const blob = await response.blob();
+      const file = new File([blob], 'Infor.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Failed to upload file');
+      }
+
+      const data = await res.json();
+      const sampleData = (data.data || []).slice(0, 10);
+      dispatch({
+        type: 'BATCH_UPDATE',
+        updates: {
+          headers: data.headers || [],
+          rawData: sampleData,
+          uploadedData: data.data || []
+        }
+      });
+      toast(`Successfully loaded ${data.headers?.length || 0} columns and ${sampleData.length} sample rows from Infor CloudSuite!`, 'ok');
+    } catch (err: any) {
+      toast(err.message, 'err');
+    } finally {
+      setIsUploading(false);
+      hideLoad();
+    }
+  };
+
+
   const handleUpdateProject = async () => {
     if (!state.projectId || !editProjectName.trim()) return;
     const backendUrl = getBackendUrl();
@@ -952,7 +997,7 @@ export function Step1SourceData() {
                   <Select
                     value={state.src}
                     onChange={(val) => pickSrc(val)}
-                    options={[['SAP_ECC', 'SAP ECC 6.0'], ['ORACLE_EBS', 'Oracle EBS R12'], ['EXCEL_CSV', 'Excel/CSV'], ['DYNAMICS', 'MS Dynamics'], ['SALESFORCE', 'Salesforce'], ['LEGACY', 'Legacy DB']].map(([k, l]) => ({ value: k, label: l }))}
+                    options={[['SAP_ECC', 'SAP ECC 6.0'], ['ORACLE_EBS', 'Oracle EBS R12'], ['INFOR', 'Infor CloudSuite'], ['EXCEL_CSV', 'Excel/CSV'], ['DYNAMICS', 'MS Dynamics'], ['SALESFORCE', 'Salesforce'], ['LEGACY', 'Legacy DB']].map(([k, l]) => ({ value: k, label: l }))}
                   />
                 </div>
 
@@ -997,6 +1042,31 @@ export function Step1SourceData() {
                       <div>
                         <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Username</label>
                         <input type="text" value="APPS" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Password</label>
+                        <input type="password" value="••••••••" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {(state.src === 'INFOR') && (
+                  <>
+                    <div className="grid grid-cols-4 gap-2.5">
+                      <div className="col-span-3">
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Infor Host URL</label>
+                        <input type="text" value="jdbc:infor:cloudsuite:@infor-prod.internal:1433:INFORDB" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Port</label>
+                        <input type="text" value="1433" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Username</label>
+                        <input type="text" value="INFOR_ADMIN" disabled className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-3 py-2 text-[12.5px] text-[var(--text-tertiary)] outline-none cursor-not-allowed opacity-70" />
                       </div>
                       <div>
                         <label className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-1 block">Password</label>
@@ -1338,7 +1408,7 @@ export function Step1SourceData() {
                   </div>
                 )}
 
-                {state.src !== 'SAP_ECC' && state.src !== 'EXCEL_CSV' && state.src !== 'ORACLE_EBS' && (
+                {state.src !== 'SAP_ECC' && state.src !== 'EXCEL_CSV' && state.src !== 'ORACLE_EBS' && state.src !== 'INFOR' && (
                   <>
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
@@ -1367,7 +1437,7 @@ export function Step1SourceData() {
                   </>
                 )}
 
-                {(state.src === 'SAP_ECC' || state.src === 'ORACLE_EBS') && (
+                {(state.src === 'SAP_ECC' || state.src === 'ORACLE_EBS' || state.src === 'INFOR') && (
                   <div className="flex gap-2 pt-1">
                     <Button
                       variant="secondary"
@@ -1377,8 +1447,10 @@ export function Step1SourceData() {
                       onClick={() => {
                         if (state.src === 'SAP_ECC') {
                           testConn();
-                        } else {
+                        } else if (state.src === 'ORACLE_EBS') {
                           toast('Connection to Oracle EBS successful!', 'ok');
+                        } else if (state.src === 'INFOR') {
+                          toast('Connection to Infor CloudSuite successful!', 'ok');
                         }
                       }}
                     >
@@ -1392,8 +1464,10 @@ export function Step1SourceData() {
                       onClick={() => {
                         if (state.src === 'SAP_ECC') {
                           autoLoad();
-                        } else {
+                        } else if (state.src === 'ORACLE_EBS') {
                           handleLoadOracle();
+                        } else if (state.src === 'INFOR') {
+                          handleLoadInfor();
                         }
                       }}
                     >
@@ -1554,7 +1628,7 @@ export function Step1SourceData() {
 
           {has && (
             <Card>
-              <CardHeader title="Source Data Preview" subtitle={`${state.src}${state.src === 'ORACLE_EBS' && state.obj === 'CUSTOMER' ? ' (HZ_PARTIES)' : ''} → ${OBJS[state.obj]?.label} | ${state.headers.length} columns`}>
+              <CardHeader title="Source Data Preview" subtitle={`${state.src}${state.src === 'ORACLE_EBS' && state.obj === 'CUSTOMER' ? ' (HZ_PARTIES)' : state.src === 'INFOR' && state.obj === 'CUSTOMER' ? ' (tccom100)' : ''} → ${OBJS[state.obj]?.label} | ${state.headers.length} columns`}>
                 <Badge variant="neutral">Showing 10 of {state.rawData.length} records</Badge>
                 <Button variant="secondary" size="sm" icon={<Download className="w-3.5 h-3.5" />} onClick={() => {
                   import('@/lib/utils').then(({ expCSV, dl }) => {
