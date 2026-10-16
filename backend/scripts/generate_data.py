@@ -1,6 +1,7 @@
 import csv
 import random
 import datetime
+import os
 
 NUM_RECORDS = 1200
 
@@ -117,23 +118,27 @@ def generate():
         company_codes.insert(random.randint(0, len(company_codes)-1), ["", "", "", "", "", ""])
         customer_sales.insert(random.randint(0, len(customer_sales)-1), ["", "", "", "", "", "", ""])
 
+    # Ensure public directory exists
+    public_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../public'))
+    os.makedirs(public_dir, exist_ok=True)
+
     # Write to files
-    with open('Customers.csv', 'w', newline='', encoding='utf-8') as f:
+    with open(os.path.join(public_dir, 'Customers.csv'), 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['CustomerID', 'FirstName', 'LastName', 'Email', 'Phone', 'TaxNumber', 'DateOfBirth'])
         writer.writerows(customers)
         
-    with open('Addresses.csv', 'w', newline='', encoding='utf-8') as f:
+    with open(os.path.join(public_dir, 'Addresses.csv'), 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['AddressID', 'CustID', 'Street', 'City', 'State', 'Zip', 'Country'])
         writer.writerows(addresses)
         
-    with open('CompanyCode.csv', 'w', newline='', encoding='utf-8') as f:
+    with open(os.path.join(public_dir, 'CompanyCode.csv'), 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['Cust_ID', 'Company_Code', 'Reconciliation_Account', 'Payment_Terms', 'Currency', 'Credit_Limit'])
         writer.writerows(company_codes)
         
-    with open('CustomerSales.csv', 'w', newline='', encoding='utf-8') as f:
+    with open(os.path.join(public_dir, 'CustomerSales.csv'), 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['CustID', 'CoCode', 'Sales_Org', 'Dist_Channel', 'Division', 'Price_Group', 'Incoterms'])
         writer.writerows(customer_sales)

@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 
 def generate_mapping():
     # Based on the error in the screenshot, the exact required columns are:
@@ -24,8 +25,10 @@ def generate_mapping():
     
     df = pd.DataFrame(data)
     
-    # Save the mapping file
-    output_path = 'public/Transform_Mapping.csv'
+    # Save the mapping file using absolute pathing
+    public_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../public'))
+    os.makedirs(public_dir, exist_ok=True)
+    output_path = os.path.join(public_dir, 'Transform_Mapping.csv')
     df.to_csv(output_path, index=False)
     print(f"Successfully generated mapping file with required columns: {output_path}")
 

@@ -1,5 +1,6 @@
 import pandas as pd
 import random
+import os
 
 NUM_RECORDS = 1200
 
@@ -170,7 +171,9 @@ def generate():
     final_data = [header_row_1, header_row_2] + data
     
     df = pd.DataFrame(final_data)
-    df.to_excel('public/Oracle.xlsx', index=False, header=False)
+    public_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../public'))
+    os.makedirs(public_dir, exist_ok=True)
+    df.to_excel(os.path.join(public_dir, 'Oracle.xlsx'), index=False, header=False)
 
 if __name__ == '__main__':
     generate()

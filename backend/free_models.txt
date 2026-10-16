@@ -1,0 +1,93 @@
+=== Gemini (All available models are free on Developer API) ===
+Model                                         TPM             TPD             Tokens         
+------------------------------------------------------------------------------------------
+gemini-2.5-flash                              N/A             N/A             1048576        
+gemini-2.5-pro                                N/A             N/A             1048576        
+gemini-2.5-flash-preview-tts                  N/A             N/A             8192           
+gemini-2.5-pro-preview-tts                    N/A             N/A             8192           
+gemma-4-26b-a4b-it                            N/A             N/A             262144         
+gemma-4-31b-it                                N/A             N/A             262144         
+gemini-flash-latest                           N/A             N/A             1048576        
+gemini-flash-lite-latest                      N/A             N/A             1048576        
+gemini-pro-latest                             N/A             N/A             1048576        
+gemini-2.5-flash-lite                         N/A             N/A             1048576        
+gemini-2.5-flash-image                        N/A             N/A             32768          
+gemini-3-flash-preview                        N/A             N/A             1048576        
+gemini-3.1-pro-preview                        N/A             N/A             1048576        
+gemini-3.1-pro-preview-customtools            N/A             N/A             1048576        
+gemini-3.1-flash-lite-preview                 N/A             N/A             1048576        
+gemini-3.1-flash-lite                         N/A             N/A             1048576        
+gemini-3-pro-image-preview                    N/A             N/A             131072         
+gemini-3-pro-image                            N/A             N/A             131072         
+nano-banana-pro-preview                       N/A             N/A             131072         
+gemini-3.1-flash-image-preview                N/A             N/A             65536          
+gemini-3.1-flash-image                        N/A             N/A             65536          
+gemini-3.1-flash-lite-image                   N/A             N/A             65536          
+gemini-3.5-flash                              N/A             N/A             1048576        
+gemini-3.5-flash-lite                         N/A             N/A             1048576        
+gemini-omni-flash-preview                     N/A             N/A             131072         
+gemini-omni-1.1-flash                         N/A             N/A             131072         
+gemini-3.5-transcribe                         N/A             N/A             98304          
+gemini-3.6-flash                              N/A             N/A             1048576        
+gemini-3.7-flash                              N/A             N/A             1048576        
+gemini-3.8-flash                              N/A             N/A             1048576        
+lyria-3-clip-preview                          N/A             N/A             1048576        
+lyria-3-pro-preview                           N/A             N/A             1048576        
+lyria-3.5                                     N/A             N/A             1048576        
+gemini-3.1-flash-tts-preview                  N/A             N/A             8192           
+gemini-3.8-flash-tts                          N/A             N/A             8192           
+gemini-3.8-flash-lite-tts                     N/A             N/A             8192           
+gemini-robotics-er-2-preview                  N/A             N/A             131072         
+gemini-2.5-computer-use-preview-10-2025       N/A             N/A             131072         
+antigravity-preview-05-2026                   N/A             N/A             1048576        
+antigravity-preview-09-2026                   N/A             N/A             1048576        
+antigravity-preview-latest                    N/A             N/A             1048576        
+deep-research-max-preview-04-2026             N/A             N/A             131072         
+deep-research-preview-04-2026                 N/A             N/A             131072         
+deep-research-pro-preview-12-2025             N/A             N/A             131072         
+gemini-embedding-001                          N/A             N/A             2048           
+gemini-embedding-2-preview                    N/A             N/A             8192           
+gemini-embedding-2                            N/A             N/A             8192           
+aqa                                           N/A             N/A             7168           
+veo-3.1-generate-preview                      N/A             N/A             480            
+veo-3.1-fast-generate-preview                 N/A             N/A             480            
+
+=== Groq (All available models are free) ===
+Model                                         TPM             TPD             Tokens         
+------------------------------------------------------------------------------------------
+meta-llama/llama-prompt-guard-2-86m           N/A             N/A             512            
+canopylabs/orpheus-v1-english                 N/A             N/A             4000           
+openai/gpt-oss-20b                            N/A             N/A             131072         
+whisper-large-v3-turbo                        N/A             N/A             448            
+qwen/qwen3.8-27b                              N/A             N/A             131072         
+allam-2-7b                                    N/A             N/A             4096           
+canopylabs/orpheus-arabic-saudi               N/A             N/A             4000           
+meta-llama/llama-prompt-guard-2-22m           N/A             N/A             512            
+openai/gpt-oss-safeguard-20b                  N/A             N/A             131072         
+openai/gpt-oss-120b                           N/A             N/A             131072         
+whisper-large-v3                              N/A             N/A             448            
+
+=== OpenRouter (Only 100% FREE models) ===
+Model                                         TPM             TPD             Tokens         
+------------------------------------------------------------------------------------------
+inclusionai/ling-3.1-flash                    N/A             N/A             262144         
+apodex/apodex-1.1-mini:free                   N/A             N/A             262144         
+inclusionai/ling-3.0-flash-sante:free         N/A             N/A             262144         
+dots-studio/dots-3-note-preview:free          N/A             N/A             512000         
+liquid/lfm-2.5-2.6b:free                      N/A             N/A             65536          
+nvidia/nemotron-3.5-lightning:free            N/A             N/A             1000000        
+thinkingmachines/inkling-small:free           N/A             N/A             1048576        
+poolside/laguna-s-2.1:free                    N/A             N/A             262144         
+thinkingmachines/inkling:free                 N/A             N/A             1048576        
+poolside/laguna-xs-2.1:free                   N/A             N/A             262144         
+cohere/north-mini-code:free                   N/A             N/A             256000         
+nvidia/nemotron-3.5-content-safety:free       N/A             N/A             128000         
+nvidia/nemotron-3-ultra-550b-a55b:free        N/A             N/A             1000000        
+nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free N/A             N/A             256000         
+google/gemma-4-26b-a4b-it:free                N/A             N/A             262144         
+google/gemma-4-31b-it:free                    N/A             N/A             262144         
+google/lyria-3-pro-preview                    N/A             N/A             1048576        
+google/lyria-3-clip-preview                   N/A             N/A             1048576        
+nvidia/nemotron-3-super-120b-a12b:free        N/A             N/A             262144         
+openrouter/free                               N/A             N/A             200000         
+

@@ -2,6 +2,7 @@ import logging
 import json
 import os
 import requests
+import concurrent.futures
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,10 @@ THIRD_PROVIDER = os.environ.get("THIRD_PROVIDER")
 THIRD_MODEL = os.environ.get("THIRD_MODEL")
 FOURTH_PROVIDER = os.environ.get("FOURTH_PROVIDER")
 FOURTH_MODEL = os.environ.get("FOURTH_MODEL")
+FIFTH_PROVIDER = os.environ.get("FIFTH_PROVIDER")
+FIFTH_MODEL = os.environ.get("FIFTH_MODEL")
+SIXTH_PROVIDER = os.environ.get("SIXTH_PROVIDER")
+SIXTH_MODEL = os.environ.get("SIXTH_MODEL")
 
 
 def _call_gemini(model: str, system_prompt: str, user_prompt: str, api_key: str | None = None) -> str:
@@ -33,7 +38,7 @@ def _call_gemini(model: str, system_prompt: str, user_prompt: str, api_key: str 
         "generationConfig": {"responseMimeType": "application/json"}
     }
     
-    response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=120)
+    response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=(10, 45))
     response.raise_for_status()
     
     data = response.json()
@@ -61,7 +66,7 @@ def _call_openai_compatible(url: str, api_key: str | None, model: str, system_pr
         "response_format": {"type": "json_object"}
     }
     
-    response = requests.post(url, headers=headers, json=payload, timeout=120)
+    response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
     response.raise_for_status()
     
     data = response.json()
@@ -85,10 +90,12 @@ def _route_provider(provider: str, model: str, system_prompt: str, user_prompt: 
 
 def _get_chain():
     return [
-        {"tier": "PRIMARY", "provider": os.environ.get("PRIMARY_PROVIDER", "gemini"), "model": os.environ.get("PRIMARY_MODEL", "gemini-2.0-flash")},
-        {"tier": "SECONDARY", "provider": os.environ.get("SECONDARY_PROVIDER", "openrouter"), "model": os.environ.get("SECONDARY_MODEL", "google/gemini-2.0-flash-001")},
-        {"tier": "THIRD", "provider": os.environ.get("THIRD_PROVIDER", "openrouter"), "model": os.environ.get("THIRD_MODEL", "meta-llama/llama-3.3-70b-instruct")},
-        {"tier": "FOURTH", "provider": os.environ.get("FOURTH_PROVIDER", "openrouter"), "model": os.environ.get("FOURTH_MODEL", "qwen/qwen-2.5-72b-instruct")},
+        {"tier": "PRIMARY", "provider": os.environ.get("PRIMARY_PROVIDER", "gemini"), "model": os.environ.get("PRIMARY_MODEL", "gemini-flash-latest")},
+        {"tier": "SECONDARY", "provider": os.environ.get("SECONDARY_PROVIDER", "gemini"), "model": os.environ.get("SECONDARY_MODEL", "gemini-flash-lite-latest")},
+        {"tier": "THIRD", "provider": os.environ.get("THIRD_PROVIDER", "groq"), "model": os.environ.get("THIRD_MODEL", "qwen/qwen3.8-27b")},
+        {"tier": "FOURTH", "provider": os.environ.get("FOURTH_PROVIDER", "groq"), "model": os.environ.get("FOURTH_MODEL", "openai/gpt-oss-20b")},
+        {"tier": "FIFTH", "provider": os.environ.get("FIFTH_PROVIDER", "openrouter"), "model": os.environ.get("FIFTH_MODEL", "google/gemma-4-31b-it:free")},
+        {"tier": "SIXTH", "provider": os.environ.get("SIXTH_PROVIDER", "openrouter"), "model": os.environ.get("SIXTH_MODEL", "google/gemma-4-26b-a4b-it:free")},
     ]
 
 
@@ -143,5 +150,87 @@ class LLMOrchestrator:
                 logger.warning(f"Failed using {provider.upper()} ({model}). Reason: {e}")
                 
         return '{"error": "All LLM providers failed"}'
+
+    def execute_json_ensemble(self, system_prompt: str, user_prompt: str) -> list:
+        chain = _get_chain()
+        all_mappings = []
+        
+        def call_provider(step, index):
+            import time
+            time.sleep(index * 3.5)  # Stagger requests by 3.5 seconds to prevent 429 Too Many Requests
+            
+            provider = step["provider"]
+            model = step["model"]
+            if not provider or not model:
+                return None
+            
+            print(f"\n🚀 [LLM ENGINE ENSEMBLE] Triggering -> Provider: {provider.upper()} | Model: {model}\n")
+            logger.info(f"Ensemble Execution: Attempting {provider.upper()} (Model: {model})")
+            
+            try:
+                result = _route_provider(provider, model, system_prompt, user_prompt)
+                clean_result = result.replace("```json", "").replace("```", "").strip()
+                
+                parsed_json = None
+                try:
+                    parsed_json = json.loads(clean_result)
+                except json.JSONDecodeError:
+                    import re
+                    json_match = re.search(r'(\{.*\}|\[.*\])', clean_result, re.DOTALL)
+                    if json_match:
+                        parsed_json = json.loads(json_match.group(1))
+                        
+                if isinstance(parsed_json, list):
+                    return parsed_json
+                elif isinstance(parsed_json, dict) and "mappings" in parsed_json:
+                    return parsed_json["mappings"]
+                return None
+            except Exception as e:
+                print(f"Ensemble: Failed using {provider.upper()} ({model}). Reason: {e}")
+                logger.warning(f"Ensemble: Failed using {provider.upper()} ({model}). Reason: {e}")
+                return None
+
+        # Execute all LLM calls simultaneously
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(chain)) as executor:
+            future_to_step = {executor.submit(call_provider, step, idx): step for idx, step in enumerate(chain)}
+            for future in concurrent.futures.as_completed(future_to_step):
+                res = future.result()
+                if res:
+                    all_mappings.append(res)
+
+        if not all_mappings:
+            logger.error("ALL LLM PROVIDERS IN THE ENSEMBLE FAILED.")
+            return []
+
+        # Merge mappings based on target_field, prioritizing highest confidence
+        merged_map = {}
+        for mapping_array in all_mappings:
+            for mapping in mapping_array:
+                if not isinstance(mapping, dict):
+                    continue
+                
+                target_field = mapping.get("target_field")
+                if not target_field:
+                    continue
+                
+                confidence = mapping.get("confidence", 0)
+                try:
+                    confidence = int(confidence)
+                except (ValueError, TypeError):
+                    confidence = 0
+                
+                if target_field not in merged_map:
+                    merged_map[target_field] = mapping
+                else:
+                    existing_confidence = merged_map[target_field].get("confidence", 0)
+                    try:
+                        existing_confidence = int(existing_confidence)
+                    except (ValueError, TypeError):
+                        existing_confidence = 0
+                        
+                    if confidence > existing_confidence:
+                        merged_map[target_field] = mapping
+
+        return list(merged_map.values())
 
 llm_orchestrator = LLMOrchestrator()

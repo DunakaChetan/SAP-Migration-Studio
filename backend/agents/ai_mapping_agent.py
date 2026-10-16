@@ -57,7 +57,7 @@ Output MUST be a JSON array of objects with the following keys:
 """
             user_prompt = f"Mandatory Target Fields: {json.dumps(target_fields)}\nGenerate the mapping JSON array."
 
-        # Pass the prompts to the generic orchestrator
-        return llm_orchestrator.execute_json_prompt(system_prompt, user_prompt)
+        # Pass the prompts to the generic ensemble orchestrator
+        return llm_orchestrator.execute_json_ensemble(system_prompt, user_prompt)
 
 ai_mapping_agent = AIMappingAgent()
