@@ -117,38 +117,76 @@ const FIELD_SYNONYMS: Record<string, string[]> = {
   city2: ['city2', 'city', 'city1', 'home_city', 'ort01'],
   home_city: ['home_city', 'city', 'city1', 'city2', 'ort01'],
   ort01: ['ort01', 'city', 'city1', 'city2', 'home_city'],
-  state: ['state', 'region', 'regio', 'uf', 'province', 'district', 'state_province', 'billing_state'],
-  region: ['region', 'state', 'regio', 'uf', 'province', 'district'],
-  regio: ['regio', 'region', 'state', 'uf', 'province'],
-  uf: ['uf', 'state', 'region', 'regio'],
-  post_code1: ['post_code1', 'postal_code', 'postalcode', 'pstlz', 'zip', 'zip_code', 'zipcode', 'post_code', 'post_code2', 'post_code3'],
-  postal_code: ['postal_code', 'post_code1', 'postalcode', 'pstlz', 'zip', 'zip_code', 'zipcode', 'post_code'],
-  pstlz: ['pstlz', 'postal_code', 'post_code1', 'zip', 'zip_code'],
-  country: ['country', 'land1', 'country_code', 'ctry', 'nation', 'nationality', 'billing_country', 'ship_country'],
-  land1: ['land1', 'country', 'country_code', 'ctry'],
-  street: ['street', 'stras', 'address1', 'street_address', 'addr1', 'address_line1', 'street1', 'address'],
-  stras: ['stras', 'street', 'address1', 'street_address'],
-  address1: ['address1', 'street', 'stras', 'street_address', 'addr1'],
-  kunnr: ['kunnr', 'bpext', 'customer_number', 'account_number', 'party_number', 'customer_no', 'partner', 'id', 'customer'],
-  bpext: ['bpext', 'kunnr', 'account_number', 'customer_number', 'party_number', 'partner'],
-  nameorg1: ['nameorg1', 'name1', 'party_name', 'organization_name', 'name', 'company_name', 'customer_name'],
-  name1: ['name1', 'nameorg1', 'party_name', 'organization_name', 'name', 'company_name'],
-  party_name: ['party_name', 'nameorg1', 'name1', 'company_name', 'name'],
+  state: ['state', 'region', 'regio', 'uf', 'province', 'district', 'state_province', 'billing_state', 'stat'],
+  region: ['region', 'state', 'regio', 'uf', 'province', 'district', 'stat'],
+  regio: ['regio', 'region', 'state', 'uf', 'province', 'stat'],
+  uf: ['uf', 'state', 'region', 'regio', 'stat'],
+  stat: ['stat', 'state', 'regio', 'region', 'uf', 'province'],
+  post_code1: ['post_code1', 'postal_code', 'postalcode', 'pstlz', 'zip', 'zip_code', 'zipcode', 'post_code', 'pstc', 'post_code2', 'post_code3'],
+  postal_code: ['postal_code', 'post_code1', 'postalcode', 'pstlz', 'zip', 'zip_code', 'zipcode', 'post_code', 'pstc'],
+  pstlz: ['pstlz', 'postal_code', 'post_code1', 'zip', 'zip_code', 'pstc'],
+  pstc: ['pstc', 'pstlz', 'postal_code', 'post_code1', 'zip', 'zip_code'],
+  country: ['country', 'land1', 'country_code', 'ctry', 'tccom100.ctry', 'tccom130.ctry', 'nation', 'nationality', 'billing_country', 'ship_country'],
+  land1: ['land1', 'country', 'country_code', 'ctry', 'tccom100.ctry', 'tccom130.ctry'],
+  ctry: ['ctry', 'country', 'land1', 'country_code', 'tccom100.ctry', 'tccom130.ctry'],
+  'tccom100.ctry': ['tccom100.ctry', 'land1', 'country', 'ctry'],
+  'tccom130.ctry': ['tccom130.ctry', 'land1', 'country', 'ctry'],
+  street: ['street', 'stras', 'address1', 'street_address', 'addr1', 'address_line1', 'street1', 'address', 'add1', 'add2', 'cadr'],
+  stras: ['stras', 'street', 'address1', 'street_address', 'addr1', 'add1', 'cadr'],
+  address1: ['address1', 'street', 'stras', 'street_address', 'addr1', 'add1', 'cadr'],
+  add1: ['add1', 'address1', 'street', 'stras', 'addr1', 'cadr'],
+  add2: ['add2', 'address2', 'addr2'],
+  cadr: ['cadr', 'add1', 'address1', 'street', 'stras'],
+  kunnr: ['kunnr', 'bpext', 'customer_number', 'account_number', 'party_number', 'bpid', 'cuno', 'customer_no', 'partner', 'id', 'customer'],
+  bpext: ['bpext', 'kunnr', 'account_number', 'customer_number', 'party_number', 'bpid', 'cuno', 'partner'],
+  party_number: ['party_number', 'kunnr', 'bpid', 'account_number', 'customer_number', 'cuno', 'id', 'bpext', 'partner'],
+  bpid: ['bpid', 'kunnr', 'party_number', 'account_number', 'customer_number', 'cuno', 'id', 'bpext', 'partner'],
+  account_number: ['account_number', 'party_number', 'kunnr', 'bpid', 'customer_number', 'cuno', 'id', 'bpext'],
+  customer_number: ['customer_number', 'party_number', 'kunnr', 'bpid', 'account_number', 'cuno', 'id', 'bpext'],
+  cuno: ['cuno', 'bpid', 'kunnr', 'party_number', 'customer_number'],
+  nameorg1: ['nameorg1', 'name1', 'party_name', 'organization_name', 'name', 'company_name', 'customer_name', 'nama', 'namn'],
+  name1: ['name1', 'nameorg1', 'party_name', 'organization_name', 'name', 'company_name', 'nama', 'namn'],
+  party_name: ['party_name', 'nameorg1', 'name1', 'company_name', 'name', 'nama', 'namn'],
+  nama: ['nama', 'name1', 'party_name', 'nameorg1', 'name', 'namn', 'company_name'],
+  namn: ['namn', 'nama', 'name1', 'party_name', 'name'],
+  sort: ['sort', 'sortl', 'search_term', 'party_name', 'name1'],
+  sortl: ['sortl', 'sort', 'search_term', 'party_name', 'name1'],
   natpers: ['natpers', 'party_type', 'person_type', 'business_type'],
-  smtp_addr: ['smtp_addr', 'email', 'email_address', 'mail', 'contact_email'],
-  email: ['email', 'smtp_addr', 'email_address', 'mail'],
-  telnr_long: ['telnr_long', 'phone', 'phone_number', 'telf1', 'telephone', 'mobile_number', 'cell_phone'],
-  phone: ['phone', 'telnr_long', 'phone_number', 'telf1', 'telephone'],
-  telf1: ['telf1', 'phone', 'telnr_long', 'phone_number', 'telephone'],
-  waers: ['waers', 'currency', 'currency_code', 'ccy', 'doc_curr'],
-  currency: ['currency', 'waers', 'currency_code', 'ccy'],
-  zterm: ['zterm', 'payment_terms', 'pay_terms', 'payterms', 'terms_of_payment'],
-  payment_terms: ['payment_terms', 'zterm', 'pay_terms', 'payterms'],
+  party_type: ['party_type', 'natpers', 'person_type', 'business_type'],
+  smtp_addr: ['smtp_addr', 'email', 'email_address', 'mail', 'contact_email', 'tccom100.email', 'tccom140.email'],
+  email: ['email', 'smtp_addr', 'email_address', 'mail', 'tccom100.email', 'tccom140.email'],
+  'tccom100.email': ['tccom100.email', 'email', 'smtp_addr', 'email_address'],
+  'tccom140.email': ['tccom140.email', 'email', 'smtp_addr', 'email_address'],
+  telnr_long: ['telnr_long', 'phone', 'phone_number', 'telf1', 'telephone', 'mobile_number', 'cell_phone', 'telp', 'tccom100.telp', 'tccom140.telp'],
+  phone: ['phone', 'telnr_long', 'phone_number', 'telf1', 'telephone', 'telp', 'tccom100.telp', 'tccom140.telp'],
+  telf1: ['telf1', 'phone', 'telnr_long', 'phone_number', 'telephone', 'telp', 'tccom100.telp'],
+  telp: ['telp', 'telf1', 'phone', 'telnr_long', 'phone_number', 'telephone', 'tccom100.telp'],
+  'tccom100.telp': ['tccom100.telp', 'telp', 'telf1', 'phone', 'telnr_long'],
+  'tccom140.telp': ['tccom140.telp', 'telp', 'telf1', 'phone', 'telnr_long'],
+  waers: ['waers', 'currency', 'currency_code', 'ccy', 'doc_curr', 'curr'],
+  currency: ['currency', 'waers', 'currency_code', 'ccy', 'curr'],
+  curr: ['curr', 'currency', 'waers', 'currency_code'],
+  zterm: ['zterm', 'payment_terms', 'pay_terms', 'payterms', 'terms_of_payment', 'paym', 'pymt'],
+  payment_terms: ['payment_terms', 'zterm', 'pay_terms', 'payterms', 'paym', 'pymt'],
+  paym: ['paym', 'payment_terms', 'zterm', 'pay_terms', 'payterms', 'pymt'],
+  pymt: ['pymt', 'payment_terms', 'zterm', 'paym'],
   bukrs: ['bukrs', 'company_code', 'org_id', 'company'],
-  vkorg: ['vkorg', 'sales_org', 'sales_organization'],
-  vtweg: ['vtweg', 'dist_channel', 'distribution_channel'],
-  spart: ['spart', 'division'],
-  akont: ['akont', 'recon_account', 'reconciliation_account'],
+  vkorg: ['vkorg', 'sales_org', 'sales_organization', 'slso'],
+  slso: ['slso', 'vkorg', 'sales_org'],
+  vtweg: ['vtweg', 'dist_channel', 'distribution_channel', 'dist'],
+  dist: ['dist', 'vtweg', 'dist_channel'],
+  spart: ['spart', 'division', 'divi'],
+  divi: ['divi', 'spart', 'division'],
+  akont: ['akont', 'recon_account', 'reconciliation_account', 'recon'],
+  recon_account: ['recon_account', 'akont', 'reconciliation_account', 'recon'],
+  recon: ['recon', 'akont', 'recon_account', 'reconciliation_account'],
+  klimk: ['klimk', 'credit_limit', 'credlim'],
+  credit_limit: ['credit_limit', 'klimk', 'credlim'],
+  credlim: ['credlim', 'credit_limit', 'klimk'],
+  ship_to: ['ship_to', 'shipto', 'party_number', 'kunnr', 'bpid'],
+  shipto: ['shipto', 'ship_to', 'party_number', 'kunnr', 'bpid'],
+  creation_date: ['creation_date', 'erdat', 'created_date', 'created_at', 'date_created'],
+  erdat: ['erdat', 'creation_date', 'created_date', 'created_at'],
 };
 
 export function getTableDisplayData(
@@ -161,7 +199,17 @@ export function getTableDisplayData(
   }
 
   const sampleRow = rows[0] || {};
-  const rowKeys = Object.keys(sampleRow);
+  // Collect all row keys across all rows (handling multi-source datasets)
+  const allRowKeysSet = new Set<string>();
+  for (let i = 0; i < Math.min(rows.length, 500); i++) {
+    const r = rows[i];
+    if (r) {
+      for (const k of Object.keys(r)) {
+        allRowKeysSet.add(k);
+      }
+    }
+  }
+  const rowKeys = Array.from(allRowKeysSet);
   const rowKeysLower = new Map<string, string>();
   rowKeys.forEach(k => rowKeysLower.set(k.toLowerCase(), k));
 
@@ -291,7 +339,7 @@ export function getTableDisplayData(
   });
 
   // If table had NO matching columns at all in rowKeys, fallback to all rowKeys
-  const matchedCount = columnBindings.filter(b => sampleRow[b.actualKey] !== undefined).length;
+  const matchedCount = columnBindings.filter(b => allRowKeysSet.has(b.actualKey) || sampleRow[b.actualKey] !== undefined).length;
   if (matchedCount === 0 && rowKeys.length > 0) {
     return {
       columns: rowKeys,
@@ -307,18 +355,36 @@ export function getTableDisplayData(
     columnBindings.forEach(b => {
       let val = r[b.actualKey] !== undefined ? r[b.actualKey] : (r[b.displayCol] ?? '');
       // If value is empty or undefined, try fallback synonyms for this column
-      if (val === '' || val === null || val === undefined) {
+      if (val === '' || val === null || val === undefined || String(val).trim() === '' || String(val).trim().toLowerCase() === 'nan') {
         const colLow = b.displayCol.toLowerCase().replace(/^\[\d+\]\s*/, '').split('.').pop() || '';
-        const syns = FIELD_SYNONYMS[colLow] || [];
+        const actualLow = b.actualKey.toLowerCase().replace(/^\[\d+\]\s*/, '').split('.').pop() || '';
+        const syns = Array.from(new Set([
+          ...(FIELD_SYNONYMS[colLow] || []),
+          ...(FIELD_SYNONYMS[actualLow] || []),
+          ...(srcToSapMap.get(colLow) || []),
+          ...(sapToSrcMap.get(colLow) || []),
+          ...(srcToSapMap.get(actualLow) || []),
+          ...(sapToSrcMap.get(actualLow) || []),
+        ]));
         for (const s of syns) {
-          if (r[s] !== undefined && r[s] !== '' && r[s] !== null) {
-            val = r[s];
+          const sClean = s.replace(/^\[\d+\]\s*/, '').trim();
+          const sBase = sClean.split('.').pop() || sClean;
+          for (const cand of [s, sClean, sBase, s.toLowerCase(), sClean.toLowerCase(), sBase.toLowerCase()]) {
+            if (r[cand] !== undefined && r[cand] !== null && String(r[cand]).trim() !== '' && String(r[cand]).trim().toLowerCase() !== 'nan') {
+              val = r[cand];
+              break;
+            }
+          }
+          if (val !== '' && val !== null && val !== undefined && String(val).trim() !== '' && String(val).trim().toLowerCase() !== 'nan') {
             break;
           }
         }
       }
-      projected[b.displayCol] = val !== undefined ? val : '';
+      projected[b.displayCol] = (val !== undefined && val !== null && String(val).trim().toLowerCase() !== 'nan') ? val : '';
     });
+    if (r._source_name !== undefined && projected._source_name === undefined) {
+      projected._source_name = r._source_name;
+    }
     if (r.SOURCE !== undefined && projected.SOURCE === undefined) {
       projected.SOURCE = r.SOURCE;
     }

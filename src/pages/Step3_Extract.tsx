@@ -24,8 +24,18 @@ import { SAMPLE } from '@/data/sample-data';
 // Helper to group columns into standard SAP structure tables (General, Address, Company, Sales, Purchasing, Financial)
 function groupRowsBySAPStructure(rows: Record<string, any>[], sapObject: string, mappings: any[] = []): TableInfo[] {
   if (!rows || rows.length === 0) return [];
-  const sample = rows[0] || {};
-  const allCols = Object.keys(sample).filter(c => c !== '_source_name');
+  
+  // Collect all unique columns across all rows (handling multi-source datasets)
+  const colSet = new Set<string>();
+  for (let i = 0; i < Math.min(rows.length, 1000); i++) {
+    const r = rows[i];
+    if (r) {
+      for (const k of Object.keys(r)) {
+        if (k !== '_source_name') colSet.add(k);
+      }
+    }
+  }
+  const allCols = Array.from(colSet);
 
   const structMap: Record<string, string[]> = {
     'General Data': [],
@@ -44,23 +54,27 @@ function groupRowsBySAPStructure(rows: Record<string, any>[], sapObject: string,
     if (
       cUpper.includes('NAME') || cBase === 'KUNNR' || cBase === 'LIFNR' || cBase === 'MATNR' ||
       cBase === 'KTOKD' || cBase === 'KTOKK' || cBase === 'MTART' || cUpper.includes('PARTY') ||
-      cUpper.includes('GENERAL') || cUpper.includes('KNA1') || cUpper.includes('LFA1') || cUpper.includes('MARA')
+      cUpper.includes('GENERAL') || cUpper.includes('KNA1') || cUpper.includes('LFA1') || cUpper.includes('MARA') ||
+      cBase === 'BPID' || cBase === 'CUNO' || cBase === 'NAMA' || cBase === 'NAMN' || cBase === 'SORT' || cBase === 'BPEXT'
     ) {
       structMap['General Data'].push(col);
     } else if (
       cBase === 'LAND1' || cBase === 'ORT01' || cBase === 'PSTLZ' || cBase === 'REGIO' ||
       cBase === 'STRAS' || cUpper.includes('ADDRESS') || cUpper.includes('CITY') || cUpper.includes('POST') ||
-      cUpper.includes('STREET') || cUpper.includes('COUNTRY')
+      cUpper.includes('STREET') || cUpper.includes('COUNTRY') || cBase === 'ADD1' || cBase === 'ADD2' ||
+      cBase === 'CADR' || cBase === 'STAT' || cBase === 'PSTC' || cBase === 'CTRY' || cBase === 'TELP' ||
+      cBase === 'EMAIL' || cBase === 'FAXN' || cUpper.includes('TELP') || cUpper.includes('EMAIL') || cUpper.includes('CTRY')
     ) {
       structMap['Address Data'].push(col);
     } else if (
       cBase === 'BUKRS' || cBase === 'AKONT' || cBase === 'ZWELS' || cUpper.includes('COMPANY') ||
-      cUpper.includes('KNB1') || cUpper.includes('LFB1')
+      cUpper.includes('KNB1') || cUpper.includes('LFB1') || cBase === 'RECON'
     ) {
       structMap['Company Data'].push(col);
     } else if (
       cBase === 'VKORG' || cBase === 'VTWEG' || cBase === 'SPART' || cBase === 'KDGRP' ||
-      cUpper.includes('SALES') || cUpper.includes('KNVV') || cUpper.includes('MVKE')
+      cUpper.includes('SALES') || cUpper.includes('KNVV') || cUpper.includes('MVKE') ||
+      cBase === 'SLSO' || cBase === 'DIST' || cBase === 'DIVI'
     ) {
       structMap['Sales Data'].push(col);
     } else if (
@@ -69,7 +83,9 @@ function groupRowsBySAPStructure(rows: Record<string, any>[], sapObject: string,
       structMap['Purchasing Data'].push(col);
     } else if (
       cBase === 'WAERS' || cBase === 'ZTERM' || cBase === 'STCD1' || cBase === 'TAXKD' ||
-      cUpper.includes('TAX') || cUpper.includes('BANK') || cUpper.includes('CURRENCY')
+      cUpper.includes('TAX') || cUpper.includes('BANK') || cUpper.includes('CURRENCY') ||
+      cBase === 'PAYM' || cBase === 'PYMT' || cBase === 'CURR' || cBase === 'CREDLIM' || cBase === 'KLIMK' ||
+      cUpper.includes('CREDIT')
     ) {
       structMap['Tax & Financial Data'].push(col);
     } else {

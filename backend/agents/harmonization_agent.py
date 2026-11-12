@@ -591,7 +591,15 @@ class HarmonizationAgent:
 
                 orig_series = df[matched_col].astype(str)
                 transformed_series = df[matched_col].apply(tf_fn)
-                result[target_col] = transformed_series
+                if target_col in result.columns:
+                    existing_s = result[target_col].fillna("").astype(str)
+                    new_s = transformed_series.fillna("").astype(str)
+                    is_empty = existing_s.str.strip().isin(["", "nan", "None", "null", "<NA>"])
+                    is_valid = ~new_s.str.strip().isin(["", "nan", "None", "null", "<NA>"])
+                    existing_s.loc[is_empty & is_valid] = new_s.loc[is_empty & is_valid]
+                    result[target_col] = existing_s
+                else:
+                    result[target_col] = transformed_series
 
                 # Log transformations that actually changed values
                 tag_map = {
@@ -637,53 +645,72 @@ class HarmonizationAgent:
         # Ensure existing columns in result sync values from donor source if they are currently empty
         synonym_groups = [
             ["CITY", "CITY1", "CITY2", "HOME_CITY", "ORT01"],
-            ["STATE", "REGION", "REGIO", "UF"],
-            ["POST_CODE1", "POSTAL_CODE", "PSTLZ", "POSTCODE", "POST_CODE"],
-            ["STREET", "STRAS", "ADDRESS1", "ADDR1"],
-            ["COUNTRY", "LAND1", "COUNTRY_CODE"],
-            ["KUNNR", "BPEXT", "ACCOUNT_NUMBER", "CUSTOMER_NUMBER", "PARTY_NUMBER"],
-            ["NAMEORG1", "NAME1", "PARTY_NAME"],
-            ["SMTP_ADDR", "EMAIL", "EMAIL_ADDRESS"],
-            ["TELNR_LONG", "PHONE", "TELF1", "PHONE_NUMBER"],
-            ["AKONT", "RECON_ACCOUNT"],
-            ["WAERS", "CURRENCY", "CURRENCY_CODE"],
-            ["ZTERM", "PAYMENT_TERMS", "PAY_TERMS"],
+            ["STATE", "REGION", "REGIO", "UF", "STAT"],
+            ["POST_CODE1", "POSTAL_CODE", "PSTLZ", "POSTCODE", "POST_CODE", "PSTC"],
+            ["STREET", "STRAS", "ADDRESS1", "ADDR1", "ADD1", "CADR"],
+            ["COUNTRY", "LAND1", "COUNTRY_CODE", "CTRY", "TCCOM100.CTRY", "TCCOM130.CTRY"],
+            ["KUNNR", "BPEXT", "ACCOUNT_NUMBER", "CUSTOMER_NUMBER", "PARTY_NUMBER", "BPID", "CUNO"],
+            ["NAMEORG1", "NAME1", "PARTY_NAME", "NAMA", "NAMN", "NAME"],
+            ["SMTP_ADDR", "EMAIL", "EMAIL_ADDRESS", "TCCOM100.EMAIL", "TCCOM140.EMAIL"],
+            ["TELNR_LONG", "PHONE", "TELF1", "PHONE_NUMBER", "TELP", "TCCOM100.TELP", "TCCOM140.TELP"],
+            ["AKONT", "RECON_ACCOUNT", "RECON"],
+            ["WAERS", "CURRENCY", "CURRENCY_CODE", "CURR"],
+            ["ZTERM", "PAYMENT_TERMS", "PAY_TERMS", "PAYM", "PYMT"],
+            ["KLIMK", "CREDIT_LIMIT", "CREDLIM"],
+            ["SHIP_TO", "SHIPTO"],
             ["BUKRS", "COMPANY_CODE", "ORG_ID"],
-            ["VKORG", "SALES_ORG"],
-            ["VTWEG", "DIST_CHANNEL"],
-            ["SPART", "DIVISION"],
+            ["VKORG", "SALES_ORG", "SLSO"],
+            ["VTWEG", "DIST_CHANNEL", "DIST"],
+            ["SPART", "DIVISION", "DIVI"],
         ]
         for syn_group in synonym_groups:
-            donor_series = None
-            # Find the best donor series (with most non-empty values)
-            for col_name in syn_group:
-                if col_name in result.columns:
-                    s = result[col_name].dropna().astype(str).str.strip()
-                    valid_count = ((s != "") & (s != "nan") & (s != "none") & (s != "null")).sum()
-                    if valid_count > 0:
-                        donor_series = result[col_name]
-                        break
-            if donor_series is None:
-                for col_name in syn_group:
-                    for df_c in df.columns:
-                        clean_df_c = re.sub(r"^\[\d+\]", "", str(df_c)).strip()
-                        clean_base = clean_df_c.split(".")[-1]
-                        if clean_base.upper() == col_name.upper():
-                            s = df[df_c].dropna().astype(str).str.strip()
-                            valid_count = ((s != "") & (s != "nan") & (s != "none") & (s != "null")).sum()
-                            if valid_count > 0:
-                                donor_series = df[df_c]
-                                break
-                    if donor_series is not None:
-                        break
+            # Columns in result that belong to this synonym group
+            group_cols_in_result = [c for c in syn_group if c in result.columns]
+            if not group_cols_in_result:
+                continue
 
-            if donor_series is not None:
-                # ONLY fill columns that already exist in result.columns (do not inject phantom columns)
-                for col_name in syn_group:
-                    if col_name in result.columns:
-                        curr_s = result[col_name].fillna("").astype(str).str.strip()
-                        if ((curr_s == "") | (curr_s == "nan") | (curr_s == "none") | (curr_s == "null")).all():
-                            result[col_name] = donor_series
+            # Columns in df that belong to this synonym group
+            group_cols_in_df = []
+            for c in syn_group:
+                for df_c in df.columns:
+                    clean_df_c = re.sub(r"^\[\d+\]", "", str(df_c)).strip()
+                    clean_base = clean_df_c.split(".")[-1]
+                    if clean_base.upper() == c.upper() and df_c not in group_cols_in_df:
+                        group_cols_in_df.append(df_c)
+
+            # For each target column in result, fill empty rows from synonym columns in result or df
+            for target_c in group_cols_in_result:
+                curr_s = result[target_c].fillna("").astype(str)
+                is_empty = curr_s.str.strip().isin(["", "nan", "none", "null", "<NA>"])
+                if not is_empty.any():
+                    continue
+
+                # 1. Try donor columns already in result
+                for donor_c in group_cols_in_result:
+                    if donor_c == target_c:
+                        continue
+                    donor_s = result[donor_c].fillna("").astype(str)
+                    donor_valid = ~donor_s.str.strip().isin(["", "nan", "none", "null", "<NA>"])
+                    fill_mask = is_empty & donor_valid
+                    if fill_mask.any():
+                        curr_s.loc[fill_mask] = donor_s.loc[fill_mask]
+                        is_empty = curr_s.str.strip().isin(["", "nan", "none", "null", "<NA>"])
+                        if not is_empty.any():
+                            break
+
+                # 2. Try donor columns from input df (e.g. unmapped raw Infor fields)
+                if is_empty.any():
+                    for donor_df_c in group_cols_in_df:
+                        donor_s = df[donor_df_c].fillna("").astype(str)
+                        donor_valid = ~donor_s.str.strip().isin(["", "nan", "none", "null", "<NA>"])
+                        fill_mask = is_empty & donor_valid
+                        if fill_mask.any():
+                            curr_s.loc[fill_mask] = donor_s.loc[fill_mask]
+                            is_empty = curr_s.str.strip().isin(["", "nan", "none", "null", "<NA>"])
+                            if not is_empty.any():
+                                break
+
+                result[target_c] = curr_s
 
         return result
 
@@ -850,7 +877,7 @@ class HarmonizationAgent:
         schema_fields = set(self.schema.get("currency_fields", []))
         KNOWN_CURR_COLS = {
             "WAERS", "CURRENCY", "CURRENCY_CODE", "PRICE_CURR", "DOC_CURR",
-            "BASE_CURR", "ORDER_CURRENCY", "SALES_CURRENCY", "CCY"
+            "BASE_CURR", "ORDER_CURRENCY", "SALES_CURRENCY", "CCY", "CURR"
         }
         for col in df.columns:
             col_upper = col.upper().strip()
@@ -860,7 +887,7 @@ class HarmonizationAgent:
             is_named_curr = False
             if base in schema_fields or base in KNOWN_CURR_COLS:
                 is_named_curr = True
-            elif re.search(r'(?i)(^|[_\s])(currency|currency_code|waers|ccy|price_curr|doc_curr)([_\s]|$)', base):
+            elif re.search(r'(?i)(^|[_\s])(currency|currency_code|waers|ccy|curr|price_curr|doc_curr)([_\s]|$)', base):
                 if not re.search(r'(?i)(current_|concurrent|recurring|occurrence)', base):
                     is_named_curr = True
 
@@ -884,7 +911,7 @@ class HarmonizationAgent:
         target_cols = []
         schema_fields = set(self.schema.get("payterm_fields", []))
         KNOWN_PAY_COLS = {
-            "ZTERM", "PAYMENT_TERMS", "PAY_TERMS", "PAYTERMS", "PAY_TERM", "TERMS_OF_PAYMENT"
+            "ZTERM", "PAYMENT_TERMS", "PAY_TERMS", "PAYTERMS", "PAY_TERM", "TERMS_OF_PAYMENT", "PAYM", "PYMT"
         }
         for col in df.columns:
             col_upper = col.upper().strip()
@@ -894,7 +921,7 @@ class HarmonizationAgent:
             is_named_pay = False
             if base in schema_fields or base in KNOWN_PAY_COLS:
                 is_named_pay = True
-            elif re.search(r'(?i)(^|[_\s])(zterm|payment_terms?|pay_terms?|payterms?)([_\s]|$)', base):
+            elif re.search(r'(?i)(^|[_\s])(zterm|payment_terms?|pay_terms?|payterms?|paym|pymt)([_\s]|$)', base):
                 if not re.search(r'(?i)(payroll|payee|taxpayer|display|company|repay|overpay|pay_grade)', base):
                     is_named_pay = True
 
@@ -974,9 +1001,19 @@ class HarmonizationAgent:
 
         before = len(df)
         # Drop rows with empty key first
-        df = df[df[key_col].apply(lambda v: str(v).strip() != "" and str(v) != "nan")]
-        # Drop duplicate keys, keep first
-        df = df.drop_duplicates(subset=[key_col], keep="first")
+        df = df[df[key_col].apply(lambda v: str(v).strip().lower() not in ["", "nan", "none", "null", "<na>"])]
+        # Drop duplicate keys: if multi-source (_source_name or SOURCE present), deduplicate within each source
+        # so records with identical keys in different ERPs are not wiped out against each other
+        src_col = None
+        if "_source_name" in df.columns:
+            src_col = "_source_name"
+        elif "SOURCE" in df.columns:
+            src_col = "SOURCE"
+
+        if src_col:
+            df = df.drop_duplicates(subset=[key_col, src_col], keep="first")
+        else:
+            df = df.drop_duplicates(subset=[key_col], keep="first")
         after = len(df)
         removed = before - after
         if removed > 0:
@@ -1163,7 +1200,7 @@ class HarmonizationAgent:
         PHONE_NAMES = {
             "TELF1", "TELF2", "TELFX", "TELMOB", "TEL_NUMBER", "TELNR",
             "FAX_NUMBER", "PHONE_NUMBER", "MOBILE_NUMBER", "TELEPHONE",
-            "CELL_PHONE", "PHONE", "FAX", "MOBILE"
+            "CELL_PHONE", "PHONE", "FAX", "MOBILE", "TELP", "TEL"
         }
         target_cols = []
         for col in df.columns:
@@ -1174,7 +1211,7 @@ class HarmonizationAgent:
             is_named_phone = False
             if base in PHONE_NAMES:
                 is_named_phone = True
-            elif re.search(r'(?i)(^|[_\s])(phone|fax|mobile|telephone|cell_phone|telf\d*|telfx|telmob|telnr)([_\s]|$)', base):
+            elif re.search(r'(?i)(^|[_\s])(phone|fax|mobile|telephone|cell_phone|telf\d*|telfx|telmob|telnr|telp|tel)([_\s]|$)', base):
                 if not re.search(r'(?i)(cell_tower|excellent|cancelled|parcel|headphone|microphone)', base):
                     is_named_phone = True
 
@@ -1243,7 +1280,7 @@ class HarmonizationAgent:
             "ORT01", "ORT02", "STRAS", "PSTLZ",
             "SORTL", "MCOD1", "MCOD2", "MCOD3",
             "STREET", "CITY", "FIRST_NAME", "LAST_NAME",
-            "NAME_FIRST", "NAME_LAST"
+            "NAME_FIRST", "NAME_LAST", "NAMA", "ADD1", "CADR"
         }
         target_cols = []
         for col in df.columns:
@@ -1667,11 +1704,23 @@ class HarmonizationAgent:
                     self.fix_log.append("[HeaderCleanup] Removed first row because it contained source column headers.")
 
             mapped_df = self._apply_mapping(work_df, mappings)
-            mapped_df["SOURCE"] = primary_source
+            if "_source_name" in work_df.columns:
+                mapped_df["SOURCE"] = work_df["_source_name"]
+                mapped_df["_source_name"] = work_df["_source_name"]
+            elif "SOURCE" in work_df.columns and not work_df["SOURCE"].dropna().empty and (work_df["SOURCE"] != "").any():
+                mapped_df["SOURCE"] = work_df["SOURCE"]
+            else:
+                mapped_df["SOURCE"] = primary_source
             harmonized = self._apply_rules(mapped_df, rule_config=rule_config)
         else:
             df_copy = work_df.copy()
-            df_copy["SOURCE"] = primary_source
+            if "_source_name" in work_df.columns:
+                df_copy["SOURCE"] = work_df["_source_name"]
+                df_copy["_source_name"] = work_df["_source_name"]
+            elif "SOURCE" in work_df.columns and not work_df["SOURCE"].dropna().empty and (work_df["SOURCE"] != "").any():
+                df_copy["SOURCE"] = work_df["SOURCE"]
+            else:
+                df_copy["SOURCE"] = primary_source
             harmonized = self._apply_rules(df_copy, rule_config=rule_config)
 
         # Apply dynamic AI rules
@@ -1684,9 +1733,12 @@ class HarmonizationAgent:
             harmonized = harmonized.rename(columns=rename_dict)
             self.fix_log.append(f"[ColumnNaming] Formatted final output columns with short field names (after dot)")
 
-        # Ensure SOURCE column is placed at the very end of the output table
+        # Ensure SOURCE and _source_name columns are placed at the very end of the output table
+        if "_source_name" in work_df.columns and "_source_name" not in harmonized.columns:
+            harmonized["_source_name"] = work_df["_source_name"]
         if "SOURCE" in harmonized.columns:
-            cols = [c for c in harmonized.columns if c != "SOURCE"] + ["SOURCE"]
+            trailing = [c for c in ["_source_name", "SOURCE"] if c in harmonized.columns]
+            cols = [c for c in harmonized.columns if c not in trailing] + trailing
             harmonized = harmonized[cols]
 
         self.stats["total_output"] = len(harmonized)

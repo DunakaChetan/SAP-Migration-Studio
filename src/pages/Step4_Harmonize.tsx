@@ -283,7 +283,7 @@ function HarmonizationReportCard({
 
   const sourceCounts: Record<string, number> = {};
   rows.forEach((r) => {
-    const src = String(r.SOURCE || 'UNKNOWN');
+    const src = String(r._source_name || r.SOURCE || 'UNKNOWN');
     sourceCounts[src] = (sourceCounts[src] || 0) + 1;
   });
 
