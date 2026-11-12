@@ -267,10 +267,10 @@ export function DataTable({ rows, cols, keyCols, editable, onColumnEdit }: DataT
   };
 
   return (
-    <div className="rounded-xl border border-[var(--border)] overflow-auto max-h-[420px]">
-      <table className="w-full border-collapse text-[12px] whitespace-nowrap">
+    <div className="rounded-xl border border-[var(--border)] overflow-auto max-h-[420px] bg-white dark:bg-[#111318] shadow-xs">
+      <table className="w-full border-collapse text-[12px] whitespace-nowrap bg-white dark:bg-[#111318]">
         <thead>
-          <tr>
+          <tr className="bg-gray-50 dark:bg-[#171a22]">
             {c.map((col) => {
               const keyCol = isKey(col);
               const label = shortColLabel(col);
@@ -278,7 +278,7 @@ export function DataTable({ rows, cols, keyCols, editable, onColumnEdit }: DataT
                 <th
                   key={col}
                   title={col !== label ? col : undefined}
-                  className="px-3.5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border)] sticky top-0 z-10"
+                  className="px-3.5 py-2.5 text-left font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-gray-50 dark:bg-[#171a22] border-b border-[var(--border)] sticky top-0 z-10"
                 >
                   <div className="flex items-center justify-between gap-1.5 w-full">
                     <div className="flex items-center gap-1.5">

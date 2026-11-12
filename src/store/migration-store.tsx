@@ -25,6 +25,39 @@ export interface ValidationEntry {
   st: 'ERROR' | 'WARN' | 'PASS';
 }
 
+export interface SourceInstance {
+  id: string; // e.g. "src_oracle_ebs", "src_infor", "src_file_..."
+  type: string; // 'SAP_ECC' | 'ORACLE_EBS' | 'INFOR' | 'EXCEL_CSV' | 'DYNAMICS' | 'SALESFORCE' | 'LEGACY'
+  name: string; // Display name e.g. "Oracle EBS R12", "Infor CloudSuite", "Customers_East.csv"
+  sub?: string;
+  connection?: {
+    baseUrl?: string;
+    client?: string;
+    username?: string;
+    password?: string;
+  };
+  fileMeta?: {
+    name: string;
+    size: number;
+    lastModified?: number;
+    headers?: string[];
+  };
+  headers: string[]; // detected columns / fields
+  rawData: Record<string, any>[]; // raw data records (sample or full)
+  sampleRecords: Record<string, any>[]; // sample 10 extracted records
+  connectionTested: boolean; // whether connection / file read has been tested
+  sampleExtracted: boolean; // whether sample 10 records have been extracted
+  mapping: MappingEntry[]; // field mappings for this source
+  extractedRows?: Record<string, any>[]; // extracted records in target format
+  extractedTables?: any[]; // target SAP structure tables for this source
+  edaStats?: any[]; // data quality profile stats for this source
+  reportMetrics?: any; // summary score, grade, metrics for this source
+  complianceData?: any[]; // compliance audit checks for this source
+  aiReport?: any; // AI Quality Intelligence report for this source
+  isMappingComplete?: boolean;
+  status?: 'configured' | 'tested' | 'extracted' | 'mapped';
+}
+
 export type MockCycle = 'mock-0' | 'mock-1' | 'mock-2';
 
 export interface MigrationState {
@@ -37,6 +70,8 @@ export interface MigrationState {
   connPass: string;
   src: string;
   obj: string;
+  selectedSources: SourceInstance[];
+  activeSourceId: string | null;
   cc: string;
   so: string;
   po: string;
@@ -112,6 +147,8 @@ const defaultState: MigrationState = {
   connPass: '',
   src: 'SAP_ECC',
   obj: 'CUSTOMER',
+  selectedSources: [],
+  activeSourceId: null,
   cc: '1000',
   so: '1000',
   po: '1000',
@@ -175,7 +212,10 @@ const getInitialState = (): MigrationState => {
 type Action =
   | { type: 'SET_FIELD'; field: keyof MigrationState; value: unknown }
   | { type: 'SET_THEME'; theme: 'light' | 'dark' }
-  | { type: 'BATCH_UPDATE'; updates: Partial<MigrationState> };
+  | { type: 'BATCH_UPDATE'; updates: Partial<MigrationState> }
+  | { type: 'ADD_SOURCE'; source: SourceInstance }
+  | { type: 'REMOVE_SOURCE'; sourceId: string }
+  | { type: 'UPDATE_SOURCE'; sourceId: string; updates: Partial<SourceInstance> };
 
 function reducer(state: MigrationState, action: Action): MigrationState {
   switch (action.type) {
@@ -186,6 +226,31 @@ function reducer(state: MigrationState, action: Action): MigrationState {
       return { ...state, theme: action.theme };
     case 'BATCH_UPDATE':
       return { ...state, ...action.updates };
+    case 'ADD_SOURCE': {
+      const exists = (state.selectedSources || []).some(s => s.id === action.source.id);
+      const updated = exists
+        ? (state.selectedSources || []).map(s => s.id === action.source.id ? { ...s, ...action.source } : s)
+        : [...(state.selectedSources || []), action.source];
+      return {
+        ...state,
+        selectedSources: updated,
+        activeSourceId: state.activeSourceId || action.source.id
+      };
+    }
+    case 'REMOVE_SOURCE': {
+      const updated = (state.selectedSources || []).filter(s => s.id !== action.sourceId);
+      return {
+        ...state,
+        selectedSources: updated,
+        activeSourceId: state.activeSourceId === action.sourceId ? (updated[0]?.id || null) : state.activeSourceId
+      };
+    }
+    case 'UPDATE_SOURCE': {
+      const updated = (state.selectedSources || []).map(s =>
+        s.id === action.sourceId ? { ...s, ...action.updates } : s
+      );
+      return { ...state, selectedSources: updated };
+    }
     default:
       return state;
   }

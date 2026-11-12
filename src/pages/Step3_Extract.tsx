@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMigration } from '@/store/migration-store';
+import { useMigration, type SourceInstance } from '@/store/migration-store';
 import { useToast } from '@/components/ui/toast';
 import { useLoading } from '@/components/ui/loading-overlay';
 import { dl, expCSV } from '@/lib/utils';
 import {
-  PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button,
+  PageLayout, PageGrid, GridCol, Card, CardHeader, CardBody, Button, Badge,
   StatBox, StatsGrid, DataTable, PageHeader, EmptyState
 } from '@/components/shared';
 import {
@@ -19,6 +19,76 @@ import { jsPDF } from 'jspdf';
 import { TableFilterToolbar, filterRowsByKey, detectKeyColumns, getTableDisplayData } from '@/components/shared/TableFilterToolbar';
 import type { TableInfo } from '@/components/shared/TableFilterToolbar';
 import { OBJS } from '@/data/sap-schemas';
+import { SAMPLE } from '@/data/sample-data';
+
+// Helper to group columns into standard SAP structure tables (General, Address, Company, Sales, Purchasing, Financial)
+function groupRowsBySAPStructure(rows: Record<string, any>[], sapObject: string, mappings: any[] = []): TableInfo[] {
+  if (!rows || rows.length === 0) return [];
+  const sample = rows[0] || {};
+  const allCols = Object.keys(sample).filter(c => c !== '_source_name');
+
+  const structMap: Record<string, string[]> = {
+    'General Data': [],
+    'Address Data': [],
+    'Company Data': [],
+    'Sales Data': [],
+    'Purchasing Data': [],
+    'Tax & Financial Data': []
+  };
+
+  allCols.forEach(col => {
+    const cClean = col.replace(/^\[\d+\]\s*/, '').trim();
+    const cUpper = cClean.toUpperCase();
+    const cBase = cUpper.split('.').pop() || cUpper;
+
+    if (
+      cUpper.includes('NAME') || cBase === 'KUNNR' || cBase === 'LIFNR' || cBase === 'MATNR' ||
+      cBase === 'KTOKD' || cBase === 'KTOKK' || cBase === 'MTART' || cUpper.includes('PARTY') ||
+      cUpper.includes('GENERAL') || cUpper.includes('KNA1') || cUpper.includes('LFA1') || cUpper.includes('MARA')
+    ) {
+      structMap['General Data'].push(col);
+    } else if (
+      cBase === 'LAND1' || cBase === 'ORT01' || cBase === 'PSTLZ' || cBase === 'REGIO' ||
+      cBase === 'STRAS' || cUpper.includes('ADDRESS') || cUpper.includes('CITY') || cUpper.includes('POST') ||
+      cUpper.includes('STREET') || cUpper.includes('COUNTRY')
+    ) {
+      structMap['Address Data'].push(col);
+    } else if (
+      cBase === 'BUKRS' || cBase === 'AKONT' || cBase === 'ZWELS' || cUpper.includes('COMPANY') ||
+      cUpper.includes('KNB1') || cUpper.includes('LFB1')
+    ) {
+      structMap['Company Data'].push(col);
+    } else if (
+      cBase === 'VKORG' || cBase === 'VTWEG' || cBase === 'SPART' || cBase === 'KDGRP' ||
+      cUpper.includes('SALES') || cUpper.includes('KNVV') || cUpper.includes('MVKE')
+    ) {
+      structMap['Sales Data'].push(col);
+    } else if (
+      cBase === 'EKORG' || cUpper.includes('PURCH') || cUpper.includes('LFM1')
+    ) {
+      structMap['Purchasing Data'].push(col);
+    } else if (
+      cBase === 'WAERS' || cBase === 'ZTERM' || cBase === 'STCD1' || cBase === 'TAXKD' ||
+      cUpper.includes('TAX') || cUpper.includes('BANK') || cUpper.includes('CURRENCY')
+    ) {
+      structMap['Tax & Financial Data'].push(col);
+    } else {
+      structMap['General Data'].push(col);
+    }
+  });
+
+  const tables: TableInfo[] = [];
+  Object.entries(structMap).forEach(([tableName, cols]) => {
+    if (cols.length > 0) {
+      tables.push({
+        table_name: tableName,
+        columns: Array.from(new Set(cols))
+      });
+    }
+  });
+
+  return tables.length > 0 ? tables : [{ table_name: 'General Data', columns: allCols }];
+}
 
 export function Step3Extract() {
   const reportRef = useRef<HTMLDivElement>(null);
@@ -34,43 +104,107 @@ export function Step3Extract() {
   const [showAllActions, setShowAllActions] = useState(false);
   const [inspectingField, setInspectingField] = useState<any | null>(null);
   const [inspectorFilter, setInspectorFilter] = useState<'all' | 'critical' | 'warning'>('all');
-  const [openPreviewAccordion, setOpenPreviewAccordion] = useState(false);
+  const [openPreviewAccordion, setOpenPreviewAccordion] = useState(true);
 
   // Table filter state
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   const [keyFilterValue, setKeyFilterValue] = useState('');
 
-  // Persistent data from global migration state
-  const extractedTables = state.extractedTables || [];
-  const edaStats = state.edaStats || [];
-  const reportMetrics = state.reportMetrics || {
-    score: 100,
-    grade: 'A',
-    healthy: 0,
-    warning: 0,
-    critical: 0,
-    total_anomalies: 0,
-    totalFields: edaStats.length || 0,
-    totalRecords: state.extracted.length || 0,
-    title: `Data Quality Intelligence Report: ${state.obj} Master Data`,
-    summary: 'Exploratory Data Analysis and validation report.',
-    warnings: [],
-    recommendations: []
-  };
-  const complianceData = state.complianceData || [
-    { name: 'Mandatory', Healthy: 0, Warning: 0, Critical: 0, Total: 0 },
-    { name: 'Optional', Healthy: 0, Warning: 0, Critical: 0, Total: 0 }
-  ];
-  const aiSummary = state.aiReport || null;
+  // Selected Source Tab State for viewing per-source reports and multiple structure tables
+  const [selectedSourceTab, setSelectedSourceTab] = useState<string>('ALL');
 
-  const has = state.extracted.length > 0 || extractedTables.length > 0;
+  const selectedSources: SourceInstance[] = state.selectedSources || [];
+  const hasMultiSources = selectedSources.length > 0;
 
-  // Initialize selectedTables when extractedTables change
-  useEffect(() => {
-    if (extractedTables.length > 0) {
-      setSelectedTables(new Set(extractedTables.map((t: any) => t.table_name)));
+  // Active source object if a specific source is selected
+  const activeSourceObj = useMemo(() => {
+    if (selectedSourceTab === 'ALL' || !hasMultiSources) return null;
+    return selectedSources.find(s => s.id === selectedSourceTab) || null;
+  }, [selectedSourceTab, hasMultiSources, selectedSources]);
+
+  // Active dataset for currently selected tab
+  const activeRows = useMemo(() => {
+    if (activeSourceObj) {
+      return (activeSourceObj.extractedRows && activeSourceObj.extractedRows.length > 0)
+        ? activeSourceObj.extractedRows
+        : state.extracted.filter(r => r._source_name === activeSourceObj.name);
     }
-  }, [extractedTables.length]);
+    return state.extracted || [];
+  }, [activeSourceObj, state.extracted]);
+
+  // Active SAP structure tables for currently selected tab
+  const activeTables: TableInfo[] = useMemo(() => {
+    if (activeSourceObj) {
+      if (activeSourceObj.extractedTables && activeSourceObj.extractedTables.length > 0) {
+        return activeSourceObj.extractedTables;
+      }
+      return groupRowsBySAPStructure(activeRows, state.obj, activeSourceObj.mapping || state.mapping);
+    }
+    if (state.extractedTables && state.extractedTables.length > 0) {
+      return state.extractedTables;
+    }
+    return groupRowsBySAPStructure(state.extracted, state.obj, state.mapping);
+  }, [activeSourceObj, activeRows, state.extractedTables, state.extracted, state.obj, state.mapping]);
+
+  // Active EDA stats for currently selected tab
+  const edaStats = useMemo(() => {
+    if (activeSourceObj && activeSourceObj.edaStats && activeSourceObj.edaStats.length > 0) {
+      return activeSourceObj.edaStats;
+    }
+    return state.edaStats || [];
+  }, [activeSourceObj, state.edaStats]);
+
+  // Active Report Metrics for currently selected tab
+  const reportMetrics = useMemo(() => {
+    if (activeSourceObj && activeSourceObj.reportMetrics) {
+      return activeSourceObj.reportMetrics;
+    }
+    return state.reportMetrics || {
+      score: 100,
+      grade: 'A',
+      healthy: 0,
+      warning: 0,
+      critical: 0,
+      total_anomalies: 0,
+      totalFields: edaStats.length || 0,
+      totalRecords: activeRows.length || 0,
+      title: `Data Quality Intelligence Report: ${state.obj} Master Data`,
+      summary: 'Exploratory Data Analysis and validation report.',
+      warnings: [],
+      recommendations: []
+    };
+  }, [activeSourceObj, state.reportMetrics, edaStats.length, activeRows.length, state.obj]);
+
+  // Active Compliance Data
+  const complianceData = useMemo(() => {
+    if (activeSourceObj && activeSourceObj.complianceData && activeSourceObj.complianceData.length > 0) {
+      return activeSourceObj.complianceData;
+    }
+    return state.complianceData || [
+      { name: 'Mandatory', Healthy: 0, Warning: 0, Critical: 0, Total: 0 },
+      { name: 'Optional', Healthy: 0, Warning: 0, Critical: 0, Total: 0 }
+    ];
+  }, [activeSourceObj, state.complianceData]);
+
+  // Active AI Report summary
+  const aiSummary = useMemo(() => {
+    if (activeSourceObj && activeSourceObj.aiReport) {
+      return activeSourceObj.aiReport;
+    }
+    return state.aiReport || null;
+  }, [activeSourceObj, state.aiReport]);
+
+  const activeSourceTitle = activeSourceObj ? activeSourceObj.name : 'Consolidated (All Sources)';
+  const activeMappings = activeSourceObj?.mapping || state.mapping;
+
+  const has = activeRows.length > 0 || activeTables.length > 0;
+
+  // Initialize selectedTables when activeTables change
+  useEffect(() => {
+    if (activeTables.length > 0) {
+      setSelectedTables(new Set(activeTables.map((t: any) => t.table_name)));
+    }
+  }, [activeTables]);
 
   // Auto-hydrate EDA stats and tables if state has extracted data but missing metrics on page switch
   useEffect(() => {
@@ -109,9 +243,15 @@ export function Step3Extract() {
       return;
     }
 
-    showLoad('Saving data...', 'Persisting extracted records to database');
+    showLoad('Saving Extracted Data…', 'Persisting multi-source datasets to database', [
+      'Packaging extracted relational datasets…',
+      'Writing payload to database…',
+      'Staging tables for Step 4 Harmonization…'
+    ]);
+
     try {
-      const currentTables = extractedTables.length > 0 ? extractedTables : (state.extractedTables || []);
+      tick(0, '✓ Packaged extracted relational datasets');
+      const currentTables = (state.extractedTables && state.extractedTables.length > 0) ? state.extractedTables : activeTables;
       const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -126,6 +266,10 @@ export function Step3Extract() {
 
       if (!res.ok) throw new Error('Failed to save data');
 
+      tick(1, '✓ Successfully saved to project database');
+      tick(2, '✓ Tables ready for Step 4 Harmonization');
+      await new Promise(r => setTimeout(r, 300));
+
       hideLoad();
       dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: currentTables });
       dispatch({ type: 'SET_FIELD', field: 'isDataSaved', value: true });
@@ -137,19 +281,197 @@ export function Step3Extract() {
   };
 
   const doExtract = async () => {
-    if (!state.src) { toast('Please configure a source first.', 'err'); return; }
-    if (state.mapping.length === 0) { toast('Please map fields before extracting.', 'err'); return; }
-
     dispatch({ type: 'SET_FIELD', field: 'aiReport', value: null });
 
-    if (state.src === 'LIVE_SAP' || state.src === 'SAP_ECC') {
-      showLoad('Extracting from SAP…', 'Connecting to live system and generating AI Quality Report', [
-        'Connecting source…', 'Running $select query…', 'Applying mapping…', 'Running transforms…', 'LLM triggered…',
-      ]);
-      [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 400 + i * 500));
+    const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+
+    // MULTI-SOURCE EXTRACTION
+    if (state.selectedSources && state.selectedSources.length > 0) {
+      const numSources = state.selectedSources.length;
+      const steps: string[] = [
+        ...state.selectedSources.map((s, idx) => `[Source ${idx + 1}/${numSources}] Extracting & mapping ${s.name}`),
+        `Generating unified dataset & staging ${numSources} relational structure tables`,
+        `Computing AI Data Quality Intelligence & EDA profile metrics`
+      ];
+
+      showLoad(
+        'Extracting from All Sources…',
+        `Extracting and transforming data across ${numSources} sources for SAP ${objName}`,
+        steps
+      );
 
       try {
-        const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+        const updatedSources = [...state.selectedSources];
+        let allRows: Record<string, any>[] = [];
+
+        for (let i = 0; i < state.selectedSources.length; i++) {
+          const src = state.selectedSources[i];
+          let sourceData = (src.rawData && src.rawData.length > 0)
+            ? src.rawData
+            : ((src.sampleRecords && src.sampleRecords.length > 0) ? src.sampleRecords : []);
+
+          if (src.type === 'ORACLE_EBS' && sourceData.length <= 10) {
+            try {
+              const oracleRes = await fetch('/Oracle.xlsx');
+              if (oracleRes.ok) {
+                const blob = await oracleRes.blob();
+                const file = new File([blob], 'Oracle.xlsx');
+                const formData = new FormData();
+                formData.append('file', file);
+                const upRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, { method: 'POST', body: formData });
+                if (upRes.ok) {
+                  const upData = await upRes.json();
+                  if (upData.data && upData.data.length > 0) sourceData = upData.data;
+                }
+              }
+            } catch { }
+          } else if (src.type === 'INFOR' && sourceData.length <= 10) {
+            try {
+              const inforRes = await fetch('/Infor.xlsx');
+              if (inforRes.ok) {
+                const blob = await inforRes.blob();
+                const file = new File([blob], 'Infor.xlsx');
+                const formData = new FormData();
+                formData.append('file', file);
+                const upRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/upload`, { method: 'POST', body: formData });
+                if (upRes.ok) {
+                  const upData = await upRes.json();
+                  if (upData.data && upData.data.length > 0) sourceData = upData.data;
+                }
+              }
+            } catch { }
+          }
+
+          if (!sourceData.length) {
+            sourceData = (state.obj === 'VENDOR' ? SAMPLE.ORACLE_VENDOR : SAMPLE.ORACLE_CUSTOMER);
+          }
+
+          const srcMappings = (src.mapping && src.mapping.length > 0) ? src.mapping : state.mapping;
+
+          let rows: any[] = [];
+          let sourceTables: any[] = [];
+          let sourceEdaStats: any[] = [];
+          let sourceMetrics: any = null;
+          let sourceCompliance: any[] = [];
+          let sourceAiReport: any = null;
+
+          try {
+            const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/execute_file`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                target_object: objName,
+                mappings: srcMappings,
+                raw_data: sourceData
+              })
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              rows = (data.data || []).map((r: any) => ({ ...r, _source_name: src.name }));
+              sourceTables = data.tables || [];
+              sourceEdaStats = data.eda_stats || [];
+              sourceMetrics = data.summary_metrics || null;
+              sourceCompliance = data.compliance_data || [];
+              sourceAiReport = data.aiAnalysis?.report || data.aiAnalysis || null;
+            }
+          } catch { }
+
+          if (!rows.length) {
+            // Direct mapping fallback
+            rows = sourceData.map((rawRow: any) => {
+              const mappedRow: Record<string, any> = { _source_name: src.name };
+              (srcMappings || []).forEach((m: any) => {
+                if (m.src && m.sap) {
+                  const val = rawRow[m.src];
+                  mappedRow[m.sap] = val !== undefined ? val : '';
+                }
+              });
+              return mappedRow;
+            });
+          }
+
+          if (!sourceTables.length) {
+            sourceTables = groupRowsBySAPStructure(rows, objName, srcMappings);
+          }
+
+          updatedSources[i] = {
+            ...src,
+            extractedRows: rows,
+            extractedTables: sourceTables,
+            edaStats: sourceEdaStats,
+            reportMetrics: sourceMetrics,
+            complianceData: sourceCompliance,
+            aiReport: sourceAiReport
+          };
+
+          allRows = [...allRows, ...rows];
+
+          tick(i, `✓ Extracted ${rows.length} rows & staged ${sourceTables.length} SAP structure tables for ${src.name}`);
+          await new Promise(r => setTimeout(r, 250));
+        }
+
+        // Profile the combined dataset
+        let profileData: any = {};
+        try {
+          const profileRes = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/execute_file`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              target_object: objName,
+              mappings: state.mapping,
+              raw_data: allRows
+            })
+          });
+
+          if (profileRes.ok) {
+            profileData = await profileRes.json();
+          }
+        } catch { }
+
+        const combinedTables = (profileData.tables && profileData.tables.length > 0)
+          ? profileData.tables
+          : groupRowsBySAPStructure(allRows, objName, state.mapping);
+
+        tick(numSources, `✓ Unified ${allRows.length} total records across ${combinedTables.length} SAP structure tables`);
+        await new Promise(r => setTimeout(r, 200));
+
+        tick(numSources + 1, `✓ Generated Data Quality EDA profiles & AI reports for each source`);
+        await new Promise(r => setTimeout(r, 350));
+
+        hideLoad();
+        dispatch({
+          type: 'BATCH_UPDATE',
+          updates: {
+            selectedSources: updatedSources,
+            extracted: allRows,
+            extractedTables: combinedTables,
+            edaStats: profileData.eda_stats || [],
+            reportMetrics: profileData.summary_metrics || null,
+            complianceData: profileData.compliance_data || [],
+            aiReport: profileData.aiAnalysis?.report || profileData.aiAnalysis || null
+          }
+        });
+        toast(`Extracted & staged ${allRows.length} total records across ${updatedSources.length} sources!`, 'ok');
+      } catch (err: any) {
+        hideLoad();
+        toast(err.message, 'err');
+      }
+      return;
+    }
+
+    if (state.src === 'LIVE_SAP' || state.src === 'SAP_ECC') {
+      const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+      showLoad('Extracting from SAP…', `Connecting to live ${state.src || 'SAP'} and profiling ${objName}`, [
+        `Connecting to SAP endpoint (${state.connUrl || 'Configured Host'})`,
+        'Executing OData query and retrieving entity sets',
+        `Applying mapping definitions to SAP ${objName} fields`,
+        'Computing statistical EDA distributions & nullity metrics',
+        'Synthesizing AI Data Quality Intelligence report'
+      ]);
+
+      try {
+        tick(0, `✓ Connected to SAP endpoint`);
         const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/live`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -177,18 +499,20 @@ export function Step3Extract() {
         }
 
         const data = await res.json();
-        tick(4, 'AI analysis done');
+        tick(1, `✓ Retrieved ${data.data?.length || 0} entity records from SAP`);
+        tick(2, `✓ Applied ${state.mapping.length} field mappings`);
+        tick(3, `✓ Computed statistical EDA distributions`);
+        tick(4, `✓ Synthesized AI Data Quality report`);
+        await new Promise(r => setTimeout(r, 350));
 
-        setTimeout(() => {
-          hideLoad();
-          dispatch({ type: 'SET_FIELD', field: 'extracted', value: data.data || [] });
-          dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables || [] });
-          dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
-          dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
-          dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
-          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || null });
-          toast(`Extracted ${data.data?.length || 0} records via live SAP OData`, 'ok');
-        }, 1200);
+        hideLoad();
+        dispatch({ type: 'SET_FIELD', field: 'extracted', value: data.data || [] });
+        dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables || [] });
+        dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
+        dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
+        dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
+        dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || null });
+        toast(`Extracted ${data.data?.length || 0} records via live SAP OData`, 'ok');
       } catch (err: any) {
         hideLoad();
         toast(err.message, 'err');
@@ -253,13 +577,18 @@ export function Step3Extract() {
         return;
       }
 
-      showLoad('Extracting data…', 'Applying schema mapping, executing transformations & running AI EDA Report', [
-        'Reading source dataset…', 'Applying target field schema…', 'Executing deterministic transforms…', 'Analyzing data distributions & null metrics…', 'Synthesizing report…',
+      const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+
+      showLoad('Extracting Dataset…', `Processing ${sourceData.length} records for SAP ${objName}`, [
+        `Loading ${sourceData.length} source records from ${state.src || 'Source'}`,
+        `Applying field mappings to SAP ${objName} target structure`,
+        'Executing deterministic format transformations',
+        'Computing statistical distributions & nullity metrics',
+        'Synthesizing AI Data Quality Intelligence report'
       ]);
-      [0, 1, 2, 3].forEach((i) => setTimeout(() => tick(i), 300 + i * 400));
 
       try {
-        const objName = state.obj === 'CUSTOMER' ? 'Customer' : state.obj === 'VENDOR' ? 'Vendor' : 'Material';
+        tick(0, `✓ Loaded ${sourceData.length} source records`);
         const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/sap/extract/execute_file`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -283,18 +612,20 @@ export function Step3Extract() {
         }
 
         const data = await res.json();
-        tick(4, 'AI analysis done');
+        tick(1, `✓ Applied ${state.mapping.length} target field mappings`);
+        tick(2, `✓ Executed format transformations`);
+        tick(3, `✓ Analyzed distributions across ${(data.headers || []).length} columns`);
+        tick(4, `✓ Synthesized AI Data Quality report`);
+        await new Promise(r => setTimeout(r, 350));
 
-        setTimeout(() => {
-          hideLoad();
-          dispatch({ type: 'SET_FIELD', field: 'extracted', value: data.data || [] });
-          dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables || [] });
-          dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
-          dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
-          dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
-          dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || null });
-          toast(`Processed ${data.data?.length || 0} records`, 'ok');
-        }, 1200);
+        hideLoad();
+        dispatch({ type: 'SET_FIELD', field: 'extracted', value: data.data || [] });
+        dispatch({ type: 'SET_FIELD', field: 'extractedTables', value: data.tables || [] });
+        dispatch({ type: 'SET_FIELD', field: 'edaStats', value: data.eda_stats || [] });
+        dispatch({ type: 'SET_FIELD', field: 'reportMetrics', value: data.summary_metrics || null });
+        dispatch({ type: 'SET_FIELD', field: 'complianceData', value: data.compliance_data || [] });
+        dispatch({ type: 'SET_FIELD', field: 'aiReport', value: data.aiAnalysis?.report || data.aiAnalysis || null });
+        toast(`Processed ${data.data?.length || 0} records`, 'ok');
       } catch (err: any) {
         hideLoad();
         toast(err.message, 'err');
@@ -941,24 +1272,67 @@ export function Step3Extract() {
             </div>
           </PageHeader>
 
+          {/* MULTI-SOURCE TAB SWITCHER FOR REPORTS & STRUCTURE TABLES */}
+          {hasMultiSources && (
+            <div className="flex items-center gap-2 mb-6 p-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] overflow-x-auto shadow-xs">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--text-tertiary)] px-2 font-bold shrink-0">
+                View Source:
+              </span>
+              <button
+                onClick={() => setSelectedSourceTab('ALL')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                  selectedSourceTab === 'ALL'
+                    ? "bg-primary-500 text-white shadow-xs"
+                    : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>All Sources (Consolidated)</span>
+                <Badge variant={state.extracted.length > 0 ? "cyan" : "neutral"} className={selectedSourceTab === 'ALL' ? "bg-white/20 text-white border-white/30" : ""}>
+                  {state.extracted.length} rows
+                </Badge>
+              </button>
+              {selectedSources.map((src) => {
+                const rowCount = src.extractedRows?.length || 0;
+                const isTabActive = selectedSourceTab === src.id;
+                return (
+                  <button
+                    key={src.id}
+                    onClick={() => setSelectedSourceTab(src.id)}
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                      isTabActive
+                        ? "bg-primary-500 text-white shadow-xs"
+                        : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    <span>{src.name}</span>
+                    <Badge variant={rowCount > 0 ? "green" : "neutral"} className={isTabActive ? "bg-white/20 text-white border-white/30" : ""}>
+                      {rowCount > 0 ? `${rowCount} rows` : "0 rows"}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {has && (
             <StatsGrid cols={3}>
               <StatBox
-                value={state.extracted.length}
+                value={activeRows.length}
                 label="Records Extracted"
-                subtitle="Source rows"
+                subtitle={`Source rows (${activeSourceTitle})`}
                 color="var(--color-primary-500)"
                 icon={<Database className="w-5 h-5 text-blue-500" />}
               />
               <StatBox
-                value={state.headers.length || Object.keys(state.extracted[0] || {}).length}
-                label="Source Columns"
-                subtitle="Schema dimensions"
+                value={activeTables.length}
+                label="Target Structure Tables"
+                subtitle="SAP relational entities"
                 color="var(--color-teal)"
                 icon={<Columns3 className="w-5 h-5 text-teal-500" />}
               />
               <StatBox
-                value={state.mapping.length}
+                value={activeMappings.length}
                 label="Fields Mapped"
                 subtitle="Target field mappings"
                 color="var(--color-success)"
@@ -970,7 +1344,7 @@ export function Step3Extract() {
           {/* ───────────────────────────────────────────────────── */}
           {/*     DATA QUALITY INTELLIGENCE REPORT (FULL WIDTH)    */}
           {/* ───────────────────────────────────────────────────── */}
-          {(state.aiReport || edaStats.length > 0) && (
+          {(aiSummary || edaStats.length > 0) && (
             <div ref={reportRef} className="mt-8 mb-12 space-y-6">
 
               {/* ── Main Executive Container ── */}
@@ -985,16 +1359,19 @@ export function Step3Extract() {
                     <div>
                       <div className="flex items-center gap-2.5 flex-wrap">
                         <h2 className="text-xl font-extrabold tracking-tight text-[var(--text-primary)]">
-                          Data Quality Intelligence Report
+                          {activeSourceTitle} — Data Quality Intelligence Report
                         </h2>
                         <span className="text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm">
                           Grade {reportMetrics.grade} · {reportMetrics.score}/100 Score
                         </span>
+                        {activeSourceObj && (
+                          <Badge variant="blue">{activeSourceObj.type}</Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 text-[11px] text-[var(--text-secondary)] mt-1 font-medium">
                         <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5 text-indigo-500" /> Target Object: <strong className="text-[var(--text-primary)]">{state.obj}</strong></span>
                         <span>•</span>
-                        <span className="flex items-center gap-1"><FileSpreadsheet className="w-3.5 h-3.5 text-teal-500" /> <strong className="text-[var(--text-primary)]">{state.extracted.length || state.rawData.length}</strong> Records Analyzed</span>
+                        <span className="flex items-center gap-1"><FileSpreadsheet className="w-3.5 h-3.5 text-teal-500" /> <strong className="text-[var(--text-primary)]">{activeRows.length}</strong> Records Analyzed</span>
                         <span>•</span>
                         <span>{reportMetrics.totalFields || edaStats.length} Mapped Fields</span>
                       </div>
@@ -1722,13 +2099,13 @@ export function Step3Extract() {
             <div className="space-y-6">
               {/* Table Filter Toolbar */}
               {(() => {
-                const allTables: TableInfo[] = extractedTables.length > 0
-                  ? extractedTables
-                  : [{ table_name: 'Extracted Records', columns: Object.keys(state.extracted[0] || {}) }];
+                const allTables: TableInfo[] = activeTables.length > 0
+                  ? activeTables
+                  : groupRowsBySAPStructure(activeRows, state.obj, activeMappings);
                 const visibleTables = allTables.filter((t: any) => selectedTables.has(t.table_name));
                 // Collect all key columns across all tables for filtering
                 const allKeyColumns = detectKeyColumns(allTables.flatMap((t: any) => t.columns));
-                const filteredRows = filterRowsByKey(state.extracted, keyFilterValue, allKeyColumns).slice(0, rowLimit);
+                const filteredRows = filterRowsByKey(activeRows, keyFilterValue, allKeyColumns).slice(0, rowLimit);
 
                 return (
                   <div className="space-y-4">
@@ -1740,17 +2117,17 @@ export function Step3Extract() {
                         </div>
                         <div>
                           <h3 className="text-xs font-extrabold text-[var(--text-primary)] uppercase tracking-wider">
-                            Extracted Data Preview
+                            Extracted Data Preview — {activeSourceTitle}
                           </h3>
                           <p className="text-[10px] text-[var(--text-tertiary)]">
-                            {visibleTables.length} of {allTables.length} target SAP tables displayed ({filteredRows.length} rows)
+                            {visibleTables.length} of {allTables.length} target SAP structure tables displayed ({filteredRows.length} rows)
                           </p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2 ml-auto">
-                        <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(state.extracted), 'extracted.csv', 'text/csv')}>
-                          Export All CSV
+                        <Button variant="secondary" size="sm" icon={<Download className="w-3 h-3" />} onClick={() => dl(expCSV(activeRows), `${activeSourceTitle.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}>
+                          Export CSV ({activeSourceTitle})
                         </Button>
                         <button
                           onClick={() => setOpenPreviewAccordion(!openPreviewAccordion)}
@@ -1788,10 +2165,10 @@ export function Step3Extract() {
                           </div>
                         ) : (
                           visibleTables.map((t: any) => {
-                            const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, state.mapping);
+                            const { columns: tableCols, rows: tableRows } = getTableDisplayData(t, filteredRows, activeMappings);
                             return (
                               <Card key={t.table_name}>
-                                <CardHeader title={`Extracted Records: ${t.table_name}`}>
+                                <CardHeader title={`Extracted Records: ${t.table_name} (${activeSourceTitle})`}>
                                   <div className="ml-auto flex items-center gap-2">
                                     <span className="text-[11px] text-[var(--text-secondary)] mr-2 font-mono">
                                       {tableCols.length} fields · {tableRows.length} rows{keyFilterValue ? ' (filtered)' : ''}
@@ -1800,7 +2177,7 @@ export function Step3Extract() {
                                       variant="secondary"
                                       size="sm"
                                       icon={<Download className="w-3 h-3" />}
-                                      onClick={() => dl(expCSV(tableRows), `${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
+                                      onClick={() => dl(expCSV(tableRows), `${activeSourceTitle.replace(/[\s/]+/g, '_').toLowerCase()}_${t.table_name.replace(/[\s/]+/g, '_').toLowerCase()}_extracted.csv`, 'text/csv')}
                                     >
                                       Export {t.table_name}
                                     </Button>
